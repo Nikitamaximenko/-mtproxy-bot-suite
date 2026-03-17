@@ -200,11 +200,13 @@ def checkout_create(payload: CheckoutCreateRequest, db: Session = Depends(get_db
         db.commit()
 
     lava_contract_id: str | None = None
-    if email and LAVA_TOP_API_KEY and LAVA_TOP_OFFER_ID:
+    lava_top_configured = bool(LAVA_TOP_API_KEY and LAVA_TOP_OFFER_ID)
+    if email and lava_top_configured:
         try:
             payment_url, lava_contract_id = _create_lava_top_invoice(email)
-        except Exception:
-            payment_url = LAVA_PAY_URL_TEMPLATE.format(payment_token=str(token))
+        except Exception as e:
+            # If lava.top is configured, failing silently makes prod debugging impossible.
+            raise HTTPException(status_code=502, detail=f"lava.top invoice create failed: {type(e).__name__}: {e}")
     else:
         payment_url = LAVA_PAY_URL_TEMPLATE.format(payment_token=str(token))
 
