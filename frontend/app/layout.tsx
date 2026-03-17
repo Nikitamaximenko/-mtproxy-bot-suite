@@ -6,8 +6,8 @@ import './globals.css'
 const _inter = Inter({ subsets: ["latin", "cyrillic"], variable: "--font-inter" });
 
 export const metadata: Metadata = {
-  title: 'MTProxy — Telegram работает в России',
-  description: 'Быстрый MTProxy для Telegram. Подключение за 10 секунд. Подписка 199₽/месяц. Платите картой или СБП.',
+  title: 'Frosty — Заморозьте ограничения Telegram',
+  description: 'Telegram без ограничений в один клик. Безопасно, анонимно, не мешает VPN. Мгновенное подключение прямо в приложении.',
   generator: 'v0.app',
   icons: {
     icon: [
