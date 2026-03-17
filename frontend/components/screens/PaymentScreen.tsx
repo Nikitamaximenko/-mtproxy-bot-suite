@@ -37,10 +37,13 @@ export function PaymentScreen({ onSuccess }: PaymentScreenProps) {
     setError(null)
     try {
       const tgId = new URLSearchParams(window.location.search).get("tg_id")
+      if (!tgId || Number(tgId) < 1) {
+        throw new Error("Откройте эту страницу из Telegram (нужен параметр tg_id).")
+      }
       const res = await fetch("/api/checkout", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ telegram_id: Number(tgId) || 0 }),
+        body: JSON.stringify({ telegram_id: Number(tgId), email }),
       })
       const data = await res.json()
       if (!res.ok || !data?.payment_url) {
