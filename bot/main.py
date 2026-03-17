@@ -159,16 +159,6 @@ async def cb_copy_proxy_link(query: CallbackQuery, session: aiohttp.ClientSessio
     await query.answer("Ссылка отправлена сообщением.", show_alert=False)
 
 
-async def on_startup(dp: Dispatcher) -> None:
-    dp["http_session"] = aiohttp.ClientSession()
-
-
-async def on_shutdown(dp: Dispatcher) -> None:
-    session: aiohttp.ClientSession | None = dp.get("http_session")
-    if session:
-        await session.close()
-
-
 async def main() -> None:
     if not BOT_TOKEN:
         raise SystemExit("BOT_TOKEN is missing. Create bot/.env from bot/.env.example")
@@ -177,6 +167,15 @@ async def main() -> None:
 
     bot = Bot(token=BOT_TOKEN)
     dp = Dispatcher()
+
+    async def on_startup(**kwargs: Any) -> None:
+        dp["http_session"] = aiohttp.ClientSession()
+        logging.getLogger(__name__).info("Bot started")
+
+    async def on_shutdown(**kwargs: Any) -> None:
+        session: aiohttp.ClientSession | None = dp.get("http_session")
+        if session:
+            await session.close()
 
     dp.startup.register(on_startup)
     dp.shutdown.register(on_shutdown)
