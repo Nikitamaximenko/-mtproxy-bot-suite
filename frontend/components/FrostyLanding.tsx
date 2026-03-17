@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useEffect, useMemo, useState } from "react"
 import { Snowflake, Shield, Zap, Lock, ChevronDown, Users, Check, X } from "lucide-react"
 
 const TELEGRAM_BOT_URL = "https://t.me/FrostyProxyBot"
@@ -90,6 +90,39 @@ function IceBlock({ className, delay = 0 }: { className?: string; delay?: number
       <div className="absolute inset-0 rounded-xl overflow-hidden">
         <div className="absolute top-0 left-0 w-full h-1/2 bg-gradient-to-b from-white/30 to-transparent" />
       </div>
+    </div>
+  )
+}
+
+function Snowflakes() {
+  const [mounted, setMounted] = useState(false)
+
+  useEffect(() => {
+    setMounted(true)
+  }, [])
+
+  const flakes = useMemo(() => {
+    if (!mounted) return []
+    return Array.from({ length: 15 }, () => ({
+      left: `${Math.random() * 100}%`,
+      animationDelay: `${Math.random() * 10}s`,
+      animationDuration: `${8 + Math.random() * 6}s`,
+      width: `${12 + Math.random() * 16}px`,
+      height: `${12 + Math.random() * 16}px`,
+    }))
+  }, [mounted])
+
+  if (!mounted) return null
+
+  return (
+    <div className="absolute inset-0 pointer-events-none overflow-hidden">
+      {flakes.map((style, i) => (
+        <Snowflake
+          key={i}
+          className="absolute text-primary/20 animate-snowfall"
+          style={style}
+        />
+      ))}
     </div>
   )
 }
@@ -257,6 +290,7 @@ export function FrostyLanding() {
         <IceBlock className="w-40 h-40 bottom-1/3 -left-12" delay={1} />
         <IceBlock className="w-28 h-28 -bottom-8 right-1/4" delay={1.5} />
       </div>
+      <Snowflakes />
 
       {/* Header */}
       <header className="relative z-10 px-4 py-4 safe-area-inset">
