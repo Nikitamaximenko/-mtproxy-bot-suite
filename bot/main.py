@@ -9,6 +9,9 @@ from typing import Any
 import aiohttp
 from aiogram import Bot, Dispatcher
 from aiogram.filters import Command, CommandStart
+from aiogram.fsm.context import FSMContext
+from aiogram.fsm.state import State, StatesGroup
+from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
 from dotenv import load_dotenv
 
@@ -18,10 +21,20 @@ load_dotenv()
 BOT_TOKEN = os.getenv("BOT_TOKEN", "").strip()
 BACKEND_BASE_URL = (os.getenv("BACKEND_BASE_URL") or "http://localhost:8000").rstrip("/")
 FRONTEND_URL = (os.getenv("FRONTEND_URL") or "http://localhost:3000").strip()
+SUPPORT_USERNAME = os.getenv("SUPPORT_USERNAME", "").lstrip("@").strip()
+PRICE_RUB = int(os.getenv("PRICE_RUB", "500") or "500")
 
 
-BUY_TEXT = "💳 Купить подписку 199₽"
-PAY_TEXT = "💳 Оплатить 199₽"
+BUY_TEXT = f"💳 Купить подписку {PRICE_RUB}₽"
+PAY_TEXT = f"💳 Оплатить {PRICE_RUB}₽"
+
+
+class CheckoutFlow(StatesGroup):
+    waiting_email = State()
+
+
+# MVP: keep email in memory (per-process). If you restart bot frequently, user may be asked again.
+_email_cache: dict[int, str] = {}
 
 
 def buy_kb() -> InlineKeyboardMarkup:
@@ -48,6 +61,32 @@ def proxy_kb(proxy_link: str) -> InlineKeyboardMarkup:
         ]
     )
 
+def support_kb() -> InlineKeyboardMarkup | None:
+    if not SUPPORT_USERNAME:
+        return None
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="🆘 Поддержка", url=f"https://t.me/{SUPPORT_USERNAME}")]
+        ]
+    )
+
+
+def _is_valid_email(email: str) -> bool:
+    e = email.strip()
+    # Good enough for MVP (avoid rejecting legitimate emails).
+    return "@" in e and "." in e and " " not in e and len(e) <= 255
+
+
+def _mask_email(email: str) -> str:
+    e = email.strip()
+    if "@" not in e:
+        return e
+    left, right = e.split("@", 1)
+    if len(left) <= 2:
+        left_mask = left[:1] + "*"
+    else:
+        left_mask = left[:1] + "*" * (len(left) - 2) + left[-1:]
+    return f"{left_mask}@{right}"
 
 def format_dt(dt_str: str | None) -> str:
     if not dt_str:
@@ -86,11 +125,13 @@ async def backend_post(session: aiohttp.ClientSession, path: str, payload: dict[
         return data
 
 
-async def create_checkout(session: aiohttp.ClientSession, tg_id: int, username: str | None) -> tuple[str, str]:
+async def create_checkout(
+    session: aiohttp.ClientSession, tg_id: int, username: str | None, email: str
+) -> tuple[str, str]:
     data = await backend_post(
         session,
         "/checkout/create",
-        {"telegram_id": tg_id, "username": username or None},
+        {"telegram_id": tg_id, "username": username or None, "email": email},
     )
     payment_url = str(data.get("payment_url") or "").strip()
     payment_token = str(data.get("payment_token") or "").strip()
@@ -99,7 +140,7 @@ async def create_checkout(session: aiohttp.ClientSession, tg_id: int, username: 
     return payment_url, payment_token
 
 
-async def cmd_start(message: Message, session: aiohttp.ClientSession) -> None:
+async def cmd_start(message: Message, session: aiohttp.ClientSession, state: FSMContext) -> None:
     parts = (message.text or "").split(maxsplit=1)
     token = parts[1].strip() if len(parts) > 1 else ""
 
@@ -136,24 +177,73 @@ async def cmd_start(message: Message, session: aiohttp.ClientSession) -> None:
     tg_id = message.from_user.id if message.from_user else None
     username = message.from_user.username if message.from_user else None
     if not tg_id:
-        await message.answer("Не удалось определить ваш Telegram ID.")
+        await message.answer("Не удалось определить ваш Telegram ID.", reply_markup=support_kb())
         return
 
+    cached = _email_cache.get(tg_id)
+    if not cached:
+        await state.set_state(CheckoutFlow.waiting_email)
+        await message.answer(
+            "Чтобы выставить оплату, пришли email одним сообщением.\n\n"
+            "Он нужен lava.top для оплаты. Пример: name@example.com",
+            reply_markup=support_kb(),
+        )
+        return
+
+    # If email exists in cache, we create checkout immediately.
     try:
-        payment_url, payment_token = await create_checkout(session, tg_id, username)
+        payment_url, payment_token = await create_checkout(session, tg_id, username, cached)
     except Exception:
         await message.answer(
-            "Привет!\n\n"
-            "Здесь можно купить подписку и подключить MTProxy.\n\n"
-            "Сейчас не удалось создать оплату. Попробуйте позже или откройте сайт.",
-            reply_markup=buy_kb(),
+            "Не удалось создать оплату прямо сейчас (платёжный шлюз временно недоступен).\n\n"
+            "Попробуй ещё раз через минуту.",
+            reply_markup=support_kb(),
         )
         return
 
     await message.answer(
         "Привет!\n\n"
-        "Подписка стоит 199₽/мес.\n"
-        "Нажми «Оплатить», а после оплаты вернись и нажми «Я оплатил».",
+        "Frosty — это быстрый MTProxy для Telegram.\n\n"
+        "• Работает как встроенный прокси в Telegram\n"
+        "• Без VPN и ручных включений\n"
+        f"• Подписка {PRICE_RUB}₽/мес\n\n"
+        "Нажми «Оплатить», после оплаты вернись в бота и нажми «Я оплатил».",
+        reply_markup=pay_kb(payment_url, payment_token),
+    )
+
+
+async def msg_email(message: Message, session: aiohttp.ClientSession, state: FSMContext) -> None:
+    tg_id = message.from_user.id if message.from_user else None
+    username = message.from_user.username if message.from_user else None
+    if not tg_id:
+        await message.answer("Не удалось определить ваш Telegram ID.", reply_markup=support_kb())
+        return
+
+    email = (message.text or "").strip()
+    if not _is_valid_email(email):
+        await message.answer(
+            "Похоже, это не email. Пришли, пожалуйста, email в формате name@example.com",
+            reply_markup=support_kb(),
+        )
+        return
+
+    _email_cache[tg_id] = email.lower()
+    await state.clear()
+
+    try:
+        payment_url, payment_token = await create_checkout(session, tg_id, username, email.lower())
+    except Exception:
+        await message.answer(
+            "Не удалось создать оплату прямо сейчас (платёжный шлюз временно недоступен).\n\n"
+            "Попробуй ещё раз через минуту.",
+            reply_markup=support_kb(),
+        )
+        return
+
+    await message.answer(
+        "Отлично, email сохранён: " + _mask_email(email) + "\n\n"
+        f"Подписка {PRICE_RUB}₽/мес.\n"
+        "Нажми «Оплатить», после оплаты вернись в бота и нажми «Я оплатил».",
         reply_markup=pay_kb(payment_url, payment_token),
     )
 
@@ -262,7 +352,7 @@ async def main() -> None:
     logging.basicConfig(level=logging.INFO)
 
     bot = Bot(token=BOT_TOKEN)
-    dp = Dispatcher()
+    dp = Dispatcher(storage=MemoryStorage())
 
     async def on_startup(**kwargs: Any) -> None:
         dp["http_session"] = aiohttp.ClientSession()
@@ -277,9 +367,14 @@ async def main() -> None:
     dp.shutdown.register(on_shutdown)
 
     @dp.message(CommandStart())
-    async def _start(message: Message) -> None:
+    async def _start(message: Message, state: FSMContext) -> None:
         session: aiohttp.ClientSession = dp["http_session"]
-        await cmd_start(message, session)
+        await cmd_start(message, session, state)
+
+    @dp.message(CheckoutFlow.waiting_email)
+    async def _email(message: Message, state: FSMContext) -> None:
+        session: aiohttp.ClientSession = dp["http_session"]
+        await msg_email(message, session, state)
 
     @dp.message(Command("status"))
     async def _status(message: Message) -> None:
