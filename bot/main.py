@@ -21,11 +21,22 @@ FRONTEND_URL = (os.getenv("FRONTEND_URL") or "http://localhost:3000").strip()
 
 
 BUY_TEXT = "💳 Купить подписку 199₽"
+PAY_TEXT = "💳 Оплатить 199₽"
 
 
 def buy_kb() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[[InlineKeyboardButton(text=BUY_TEXT, url=FRONTEND_URL)]]
+    )
+
+
+def pay_kb(payment_url: str, token: str) -> InlineKeyboardMarkup:
+    # callback_data must be <= 64 bytes; UUID fits.
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text=PAY_TEXT, url=payment_url)],
+            [InlineKeyboardButton(text="✅ Я оплатил", callback_data=f"chk:{token}")],
+        ]
     )
 
 
@@ -57,6 +68,35 @@ async def backend_get(session: aiohttp.ClientSession, path: str) -> dict[str, An
         if not isinstance(data, dict):
             raise RuntimeError("Unexpected backend response")
         return data
+
+
+async def backend_post(session: aiohttp.ClientSession, path: str, payload: dict[str, Any]) -> dict[str, Any]:
+    url = f"{BACKEND_BASE_URL}{path}"
+    async with session.post(
+        url,
+        json=payload,
+        timeout=aiohttp.ClientTimeout(total=15),
+        headers={"Content-Type": "application/json"},
+    ) as resp:
+        data = await resp.json(content_type=None)
+        if resp.status >= 400:
+            raise RuntimeError(f"Backend error {resp.status}: {data}")
+        if not isinstance(data, dict):
+            raise RuntimeError("Unexpected backend response")
+        return data
+
+
+async def create_checkout(session: aiohttp.ClientSession, tg_id: int, username: str | None) -> tuple[str, str]:
+    data = await backend_post(
+        session,
+        "/checkout/create",
+        {"telegram_id": tg_id, "username": username or None},
+    )
+    payment_url = str(data.get("payment_url") or "").strip()
+    payment_token = str(data.get("payment_token") or "").strip()
+    if not payment_url or not payment_token:
+        raise RuntimeError("Backend did not return payment_url/payment_token")
+    return payment_url, payment_token
 
 
 async def cmd_start(message: Message, session: aiohttp.ClientSession) -> None:
@@ -93,11 +133,28 @@ async def cmd_start(message: Message, session: aiohttp.ClientSession) -> None:
         )
         return
 
+    tg_id = message.from_user.id if message.from_user else None
+    username = message.from_user.username if message.from_user else None
+    if not tg_id:
+        await message.answer("Не удалось определить ваш Telegram ID.")
+        return
+
+    try:
+        payment_url, payment_token = await create_checkout(session, tg_id, username)
+    except Exception:
+        await message.answer(
+            "Привет!\n\n"
+            "Здесь можно купить подписку и подключить MTProxy.\n\n"
+            "Сейчас не удалось создать оплату. Попробуйте позже или откройте сайт.",
+            reply_markup=buy_kb(),
+        )
+        return
+
     await message.answer(
         "Привет!\n\n"
-        "Здесь можно купить подписку и подключить MTProxy.\n"
-        "Нажми кнопку ниже для оплаты, затем вернись в бот.",
-        reply_markup=buy_kb(),
+        "Подписка стоит 199₽/мес.\n"
+        "Нажми «Оплатить», а после оплаты вернись и нажми «Я оплатил».",
+        reply_markup=pay_kb(payment_url, payment_token),
     )
 
 
@@ -159,6 +216,45 @@ async def cb_copy_proxy_link(query: CallbackQuery, session: aiohttp.ClientSessio
     await query.answer("Ссылка отправлена сообщением.", show_alert=False)
 
 
+async def cb_check_paid(query: CallbackQuery, session: aiohttp.ClientSession) -> None:
+    msg = query.message
+    if not msg or not isinstance(msg, Message):
+        await query.answer("Не удалось.", show_alert=True)
+        return
+
+    data_str = (query.data or "").strip()
+    if not data_str.startswith("chk:"):
+        await query.answer("Не удалось.", show_alert=True)
+        return
+
+    token = data_str.removeprefix("chk:").strip()
+    if not token:
+        await query.answer("Не удалось.", show_alert=True)
+        return
+
+    try:
+        data = await backend_get(session, f"/subscription/token/{token}")
+    except Exception:
+        await query.answer("Backend недоступен.", show_alert=True)
+        return
+
+    if not data.get("found"):
+        await query.answer("Оплата ещё не подтверждена. Попробуй через 1–2 минуты.", show_alert=True)
+        return
+
+    expires_at = format_dt(data.get("expires_at"))
+    proxy_link = data.get("proxy_link") or ""
+    if not proxy_link:
+        await query.answer("Подписка активна, но прокси ещё готовится. Попробуй чуть позже.", show_alert=True)
+        return
+
+    await msg.answer(
+        f"✅ Подписка активна до {expires_at}\n\nНажми кнопку ниже чтобы подключить прокси:",
+        reply_markup=proxy_kb(proxy_link),
+    )
+    await query.answer("Готово.", show_alert=False)
+
+
 async def main() -> None:
     if not BOT_TOKEN:
         raise SystemExit("BOT_TOKEN is missing. Create bot/.env from bot/.env.example")
@@ -198,6 +294,11 @@ async def main() -> None:
     async def _copy(query: CallbackQuery) -> None:
         session: aiohttp.ClientSession = dp["http_session"]
         await cb_copy_proxy_link(query, session)
+
+    @dp.callback_query(lambda c: (c.data or "").startswith("chk:"))
+    async def _chk(query: CallbackQuery) -> None:
+        session: aiohttp.ClientSession = dp["http_session"]
+        await cb_check_paid(query, session)
 
     await dp.start_polling(bot)
 
