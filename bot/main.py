@@ -1,0 +1,208 @@
+from __future__ import annotations
+
+import asyncio
+import logging
+import os
+from datetime import datetime
+from typing import Any
+
+import aiohttp
+from aiogram import Bot, Dispatcher
+from aiogram.filters import Command, CommandStart
+from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
+from dotenv import load_dotenv
+
+
+load_dotenv()
+
+BOT_TOKEN = os.getenv("BOT_TOKEN", "").strip()
+BACKEND_BASE_URL = (os.getenv("BACKEND_BASE_URL") or "http://localhost:8000").rstrip("/")
+FRONTEND_URL = (os.getenv("FRONTEND_URL") or "http://localhost:3000").strip()
+
+
+BUY_TEXT = "💳 Купить подписку 199₽"
+
+
+def buy_kb() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[[InlineKeyboardButton(text=BUY_TEXT, url=FRONTEND_URL)]]
+    )
+
+
+def proxy_kb(proxy_link: str) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="🔌 Подключить прокси", url=proxy_link)],
+            [InlineKeyboardButton(text="📋 Скопировать ссылку", callback_data="copy_proxy_link")],
+        ]
+    )
+
+
+def format_dt(dt_str: str | None) -> str:
+    if not dt_str:
+        return "неизвестно"
+    try:
+        dt = datetime.fromisoformat(dt_str.replace("Z", "+00:00"))
+        return dt.strftime("%d.%m.%Y %H:%M")
+    except Exception:
+        return dt_str
+
+
+async def backend_get(session: aiohttp.ClientSession, path: str) -> dict[str, Any]:
+    url = f"{BACKEND_BASE_URL}{path}"
+    async with session.get(url, timeout=aiohttp.ClientTimeout(total=10)) as resp:
+        data = await resp.json(content_type=None)
+        if resp.status >= 400:
+            raise RuntimeError(f"Backend error {resp.status}: {data}")
+        if not isinstance(data, dict):
+            raise RuntimeError("Unexpected backend response")
+        return data
+
+
+async def cmd_start(message: Message, session: aiohttp.ClientSession) -> None:
+    parts = (message.text or "").split(maxsplit=1)
+    token = parts[1].strip() if len(parts) > 1 else ""
+
+    if token:
+        try:
+            data = await backend_get(session, f"/subscription/token/{token}")
+        except Exception:
+            await message.answer("Не удалось проверить оплату. Попробуйте позже.")
+            return
+
+        if not data.get("found"):
+            await message.answer(
+                "Оплата не найдена или ещё не подтверждена.\n\n"
+                "Если вы только что оплатили — подождите 1–2 минуты и нажмите /start ещё раз.",
+                reply_markup=buy_kb(),
+            )
+            return
+
+        expires_at = format_dt(data.get("expires_at"))
+        proxy_link = data.get("proxy_link") or ""
+        if not proxy_link:
+            await message.answer(
+                f"✅ Подписка активна до {expires_at}\n\n"
+                "Прокси ещё не готов. Попробуйте через минуту или напишите в поддержку."
+            )
+            return
+
+        await message.answer(
+            f"✅ Подписка активна до {expires_at}\n\nНажми кнопку ниже чтобы подключить прокси:",
+            reply_markup=proxy_kb(proxy_link),
+        )
+        return
+
+    await message.answer(
+        "Привет!\n\n"
+        "Здесь можно купить подписку и подключить MTProxy.\n"
+        "Нажми кнопку ниже для оплаты, затем вернись в бот.",
+        reply_markup=buy_kb(),
+    )
+
+
+async def cmd_status(message: Message, session: aiohttp.ClientSession) -> None:
+    tg_id = message.from_user.id if message.from_user else None
+    if not tg_id:
+        await message.answer("Не удалось определить ваш Telegram ID.")
+        return
+
+    try:
+        data = await backend_get(session, f"/subscription/{tg_id}")
+    except Exception:
+        await message.answer("Не удалось получить статус подписки. Попробуйте позже.")
+        return
+
+    if not data.get("active"):
+        await message.answer("Подписка не активна.", reply_markup=buy_kb())
+        return
+
+    expires_at = format_dt(data.get("expires_at"))
+    proxy_link = data.get("proxy_link")
+    if proxy_link:
+        await message.answer(
+            f"✅ Подписка активна до {expires_at}",
+            reply_markup=proxy_kb(proxy_link),
+        )
+    else:
+        await message.answer(f"✅ Подписка активна до {expires_at}\n\nПрокси-ссылка пока недоступна.")
+
+
+async def cmd_help(message: Message) -> None:
+    await message.answer(
+        "Как подключить прокси вручную:\n"
+        "1) Открой ссылку формата tg://proxy?... (кнопка «Подключить прокси»)\n"
+        "2) Telegram предложит добавить прокси — согласись\n"
+        "3) Если кнопки нет — используй «Скопировать ссылку» и открой её в Telegram"
+    )
+
+
+async def cb_copy_proxy_link(query: CallbackQuery, session: aiohttp.ClientSession) -> None:
+    msg = query.message
+    if not msg or not isinstance(msg, Message):
+        await query.answer("Не удалось.", show_alert=True)
+        return
+
+    tg_id = query.from_user.id
+    try:
+        data = await backend_get(session, f"/subscription/{tg_id}")
+    except Exception:
+        await query.answer("Backend недоступен.", show_alert=True)
+        return
+
+    proxy_link = data.get("proxy_link")
+    if not data.get("active") or not proxy_link:
+        await query.answer("Подписка не активна или ссылка недоступна.", show_alert=True)
+        return
+
+    await msg.answer(f"Ссылка для копирования:\n{proxy_link}")
+    await query.answer("Ссылка отправлена сообщением.", show_alert=False)
+
+
+async def on_startup(dp: Dispatcher) -> None:
+    dp["http_session"] = aiohttp.ClientSession()
+
+
+async def on_shutdown(dp: Dispatcher) -> None:
+    session: aiohttp.ClientSession | None = dp.get("http_session")
+    if session:
+        await session.close()
+
+
+async def main() -> None:
+    if not BOT_TOKEN:
+        raise SystemExit("BOT_TOKEN is missing. Create bot/.env from bot/.env.example")
+
+    logging.basicConfig(level=logging.INFO)
+
+    bot = Bot(token=BOT_TOKEN)
+    dp = Dispatcher()
+
+    dp.startup.register(on_startup)
+    dp.shutdown.register(on_shutdown)
+
+    @dp.message(CommandStart())
+    async def _start(message: Message) -> None:
+        session: aiohttp.ClientSession = dp["http_session"]
+        await cmd_start(message, session)
+
+    @dp.message(Command("status"))
+    async def _status(message: Message) -> None:
+        session: aiohttp.ClientSession = dp["http_session"]
+        await cmd_status(message, session)
+
+    @dp.message(Command("help"))
+    async def _help(message: Message) -> None:
+        await cmd_help(message)
+
+    @dp.callback_query(lambda c: c.data == "copy_proxy_link")
+    async def _copy(query: CallbackQuery) -> None:
+        session: aiohttp.ClientSession = dp["http_session"]
+        await cb_copy_proxy_link(query, session)
+
+    await dp.start_polling(bot)
+
+
+if __name__ == "__main__":
+    asyncio.run(main())
+
