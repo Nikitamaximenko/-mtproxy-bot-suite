@@ -332,3 +332,44 @@
   z-index: -1;
   animation: frost-pulse 4s ease-in-out infinite;
 }
+
+/* Mobile optimizations */
+@media (max-width: 767px) {
+  .animate-frost-pulse,
+  .animate-snowfall {
+    animation: none;
+  }
+  
+  .frost-glow {
+    box-shadow: 0 0 15px oklch(0.55 0.18 220 / 0.2);
+  }
+  
+  .frost-glow-strong {
+    box-shadow: 0 0 20px oklch(0.55 0.18 220 / 0.3);
+  }
+}
+
+/* Touch-friendly interactions */
+.touch-manipulation {
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* Safe area for notched devices */
+.safe-area-inset {
+  padding-top: env(safe-area-inset-top);
+  padding-left: env(safe-area-inset-left);
+  padding-right: env(safe-area-inset-right);
+}
+
+/* Smooth scrolling for iOS */
+html {
+  -webkit-overflow-scrolling: touch;
+  scroll-behavior: smooth;
+}
+
+/* Prevent text selection on buttons */
+button, a {
+  -webkit-user-select: none;
+  user-select: none;
+}

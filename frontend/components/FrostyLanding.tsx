@@ -1,7 +1,7 @@
 "use client"
 
-import { useState } from "react"
-import { Snowflake, Shield, Zap, Lock, ExternalLink, ChevronDown, Users, Gauge, Check } from "lucide-react"
+import { useState, useEffect } from "react"
+import { Snowflake, Shield, Zap, Lock, ChevronDown, Users, Check, X } from "lucide-react"
 
 const TELEGRAM_BOT_URL = "https://t.me/FrostyProxyBot"
 
@@ -32,22 +32,21 @@ function FrostIcon({ className }: { className?: string }) {
   )
 }
 
-function CTAButton({ size = "default" }: { size?: "default" | "large" }) {
+function CTAButton({ size = "default", className = "" }: { size?: "default" | "large"; className?: string }) {
   const sizeClasses = size === "large" 
-    ? "px-10 py-5 text-lg md:text-xl" 
-    : "px-8 py-4 text-base md:text-lg"
+    ? "min-h-[56px] px-8 py-4 text-base" 
+    : "min-h-[52px] px-6 py-3.5 text-base"
   
   return (
     <a
       href={TELEGRAM_BOT_URL}
       target="_blank"
       rel="noopener noreferrer"
-      className={`group relative inline-flex items-center justify-center gap-3 ${sizeClasses} bg-primary text-primary-foreground font-semibold rounded-2xl transition-all duration-300 hover:scale-105 frost-glow-strong hover:frost-glow-strong overflow-hidden`}
+      className={`group relative inline-flex items-center justify-center gap-2.5 ${sizeClasses} bg-primary text-primary-foreground font-semibold rounded-2xl transition-all duration-300 active:scale-95 frost-glow-strong overflow-hidden touch-manipulation ${className}`}
     >
       <span className="absolute inset-0 animate-shimmer opacity-50" />
-      <Snowflake className="w-5 h-5 md:w-6 md:h-6 relative z-10" />
+      <Snowflake className="w-5 h-5 relative z-10" />
       <span className="relative z-10">ЗАМОРОЗИТЬ ОГРАНИЧЕНИЯ</span>
-      <ExternalLink className="w-4 h-4 md:w-5 md:h-5 opacity-70 relative z-10" />
     </a>
   )
 }
@@ -62,72 +61,62 @@ function FeatureCard({
   description: string
 }) {
   return (
-    <div className="group flex flex-col items-center text-center p-6 md:p-8 rounded-2xl bg-card border border-border/50 transition-all duration-500 hover:border-primary/40 hover:shadow-xl hover:shadow-primary/10 hover:-translate-y-1">
-      <div className="w-16 h-16 md:w-20 md:h-20 rounded-2xl ice-block-solid flex items-center justify-center mb-5 group-hover:scale-110 transition-transform duration-300">
-        <Icon className="w-8 h-8 md:w-10 md:h-10 text-primary-foreground" />
+    <div className="flex items-start gap-4 p-5 rounded-2xl bg-card border border-border/50 transition-all duration-300 active:scale-[0.98] touch-manipulation">
+      <div className="w-14 h-14 flex-shrink-0 rounded-xl ice-block-solid flex items-center justify-center">
+        <Icon className="w-7 h-7 text-primary-foreground" />
       </div>
-      <h3 className="text-xl md:text-2xl font-bold text-foreground mb-3">{title}</h3>
-      <p className="text-base md:text-lg text-muted-foreground leading-relaxed">{description}</p>
+      <div className="flex-1 min-w-0">
+        <h3 className="text-lg font-bold text-foreground mb-1">{title}</h3>
+        <p className="text-base text-muted-foreground leading-relaxed">{description}</p>
+      </div>
     </div>
   )
 }
 
-function IceBlock({ className, delay = 0, rotation = 0 }: { className?: string; delay?: number; rotation?: number }) {
+function IceBlock({ className, delay = 0 }: { className?: string; delay?: number }) {
+  const [isMobile, setIsMobile] = useState(false)
+  
+  useEffect(() => {
+    setIsMobile(window.innerWidth < 768)
+  }, [])
+  
+  if (isMobile) return null
+  
   return (
     <div
       className={`absolute ice-block rounded-xl animate-frost-pulse ${className}`}
-      style={{ 
-        animationDelay: `${delay}s`,
-        transform: `rotate(${rotation}deg)`
-      }}
+      style={{ animationDelay: `${delay}s` }}
     >
       <div className="absolute inset-0 rounded-xl overflow-hidden">
         <div className="absolute top-0 left-0 w-full h-1/2 bg-gradient-to-b from-white/30 to-transparent" />
-        <div className="absolute bottom-2 right-2 w-3 h-3 rounded-full bg-white/40" />
-        <div className="absolute top-4 left-3 w-2 h-2 rounded-full bg-white/30" />
       </div>
     </div>
   )
 }
 
-function Snowflakes() {
-  return (
-    <div className="absolute inset-0 pointer-events-none overflow-hidden">
-      {[...Array(15)].map((_, i) => (
-        <Snowflake
-          key={i}
-          className="absolute text-primary/20 animate-snowfall"
-          style={{
-            left: `${Math.random() * 100}%`,
-            animationDelay: `${Math.random() * 10}s`,
-            animationDuration: `${8 + Math.random() * 6}s`,
-            width: `${12 + Math.random() * 16}px`,
-            height: `${12 + Math.random() * 16}px`,
-          }}
-        />
-      ))}
-    </div>
-  )
-}
-
-function FAQItem({ question, answer }: { question: string; answer: string }) {
-  const [isOpen, setIsOpen] = useState(false)
-  
+function FAQItem({ question, answer, isOpen, onToggle }: { 
+  question: string
+  answer: string
+  isOpen: boolean
+  onToggle: () => void
+}) {
   return (
     <div className="border-b border-border last:border-b-0">
       <button
-        onClick={() => setIsOpen(!isOpen)}
-        className="w-full flex items-center justify-between py-5 text-left group"
+        onClick={onToggle}
+        className="w-full flex items-center justify-between py-5 text-left min-h-[60px] touch-manipulation"
       >
-        <span className="text-lg font-medium text-foreground group-hover:text-primary transition-colors pr-4">
+        <span className="text-base font-medium text-foreground pr-4 leading-snug">
           {question}
         </span>
-        <ChevronDown 
-          className={`w-5 h-5 text-muted-foreground transition-transform duration-300 flex-shrink-0 ${isOpen ? 'rotate-180' : ''}`}
-        />
+        <div className="w-10 h-10 flex-shrink-0 flex items-center justify-center rounded-full bg-secondary">
+          <ChevronDown 
+            className={`w-5 h-5 text-muted-foreground transition-transform duration-300 ${isOpen ? 'rotate-180' : ''}`}
+          />
+        </div>
       </button>
-      <div className={`overflow-hidden transition-all duration-300 ${isOpen ? 'max-h-48 pb-5' : 'max-h-0'}`}>
-        <p className="text-muted-foreground leading-relaxed">{answer}</p>
+      <div className={`overflow-hidden transition-all duration-300 ${isOpen ? 'max-h-64 pb-5' : 'max-h-0'}`}>
+        <p className="text-base text-muted-foreground leading-relaxed">{answer}</p>
       </div>
     </div>
   )
@@ -145,35 +134,35 @@ function PricingCard({
   popular?: boolean 
 }) {
   return (
-    <div className={`relative flex flex-col p-8 rounded-3xl transition-all duration-300 hover:-translate-y-2 ${
+    <div className={`relative flex flex-col p-6 rounded-3xl transition-all duration-300 active:scale-[0.98] touch-manipulation ${
       popular 
-        ? 'bg-primary text-primary-foreground frost-glow-strong scale-105 z-10' 
-        : 'bg-card border border-border hover:border-primary/30 hover:shadow-xl'
+        ? 'bg-primary text-primary-foreground frost-glow-strong' 
+        : 'bg-card border border-border'
     }`}>
       {popular && (
-        <div className="absolute -top-4 left-1/2 -translate-x-1/2 px-4 py-1.5 bg-accent text-accent-foreground text-sm font-medium rounded-full">
+        <div className="absolute -top-3 left-1/2 -translate-x-1/2 px-4 py-1.5 bg-accent text-accent-foreground text-sm font-medium rounded-full whitespace-nowrap">
           Популярный
         </div>
       )}
       
-      <h3 className={`text-2xl font-bold mb-2 ${popular ? 'text-primary-foreground' : 'text-foreground'}`}>
+      <h3 className={`text-xl font-bold mb-2 ${popular ? 'text-primary-foreground' : 'text-foreground'}`}>
         {title}
       </h3>
       
-      <div className="mb-6">
-        <span className={`text-5xl font-bold ${popular ? 'text-primary-foreground' : 'frozen-text'}`}>
+      <div className="mb-5">
+        <span className={`text-4xl font-bold ${popular ? 'text-primary-foreground' : 'frozen-text'}`}>
           {price}
         </span>
-        <span className={`text-lg ${popular ? 'text-primary-foreground/70' : 'text-muted-foreground'}`}>
+        <span className={`text-base ${popular ? 'text-primary-foreground/70' : 'text-muted-foreground'}`}>
           {' '}руб/мес
         </span>
       </div>
       
-      <ul className="flex-1 space-y-4 mb-8">
+      <ul className="flex-1 space-y-3 mb-6">
         {features.map((feature, index) => (
           <li key={index} className="flex items-start gap-3">
             <Check className={`w-5 h-5 mt-0.5 flex-shrink-0 ${popular ? 'text-primary-foreground' : 'text-primary'}`} />
-            <span className={popular ? 'text-primary-foreground/90' : 'text-muted-foreground'}>
+            <span className={`text-base ${popular ? 'text-primary-foreground/90' : 'text-muted-foreground'}`}>
               {feature}
             </span>
           </li>
@@ -184,20 +173,58 @@ function PricingCard({
         href={TELEGRAM_BOT_URL}
         target="_blank"
         rel="noopener noreferrer"
-        className={`inline-flex items-center justify-center gap-2 py-4 px-6 rounded-xl font-semibold transition-all duration-300 hover:scale-105 ${
+        className={`inline-flex items-center justify-center gap-2 min-h-[52px] py-3.5 px-6 rounded-xl font-semibold transition-all duration-300 active:scale-95 touch-manipulation ${
           popular 
-            ? 'bg-white text-primary hover:bg-white/90' 
+            ? 'bg-white text-primary' 
             : 'bg-primary text-primary-foreground frost-glow'
         }`}
       >
         <Snowflake className="w-5 h-5" />
-        <span>ЗАМОРОЗИТЬ ОГРАНИЧЕНИЯ</span>
+        <span>Выбрать</span>
       </a>
     </div>
   )
 }
 
+function StickyCTA() {
+  const [isVisible, setIsVisible] = useState(false)
+  const [isHidden, setIsHidden] = useState(false)
+  
+  useEffect(() => {
+    const handleScroll = () => {
+      const scrollY = window.scrollY
+      setIsVisible(scrollY > 400)
+    }
+    
+    window.addEventListener('scroll', handleScroll, { passive: true })
+    return () => window.removeEventListener('scroll', handleScroll)
+  }, [])
+  
+  if (isHidden) return null
+  
+  return (
+    <div 
+      className={`fixed bottom-0 left-0 right-0 z-50 p-4 bg-background/95 backdrop-blur-md border-t border-border transition-transform duration-300 md:hidden ${
+        isVisible ? 'translate-y-0' : 'translate-y-full'
+      }`}
+    >
+      <div className="flex items-center gap-3">
+        <CTAButton className="flex-1" />
+        <button 
+          onClick={() => setIsHidden(true)}
+          className="w-12 h-12 flex items-center justify-center rounded-xl bg-secondary text-muted-foreground touch-manipulation"
+          aria-label="Закрыть"
+        >
+          <X className="w-5 h-5" />
+        </button>
+      </div>
+    </div>
+  )
+}
+
 export function FrostyLanding() {
+  const [openFaq, setOpenFaq] = useState<number | null>(null)
+  
   const faqItems = [
     {
       question: "Как работает Frosty?",
@@ -223,25 +250,20 @@ export function FrostyLanding() {
 
   return (
     <div className="min-h-screen bg-background relative overflow-hidden">
-      {/* Animated snowflakes */}
-      <Snowflakes />
-      
-      {/* Background ice blocks */}
+      {/* Background ice blocks - only on desktop */}
       <div className="absolute inset-0 pointer-events-none overflow-hidden">
-        <IceBlock className="w-40 h-40 -top-10 -left-10" delay={0} rotation={15} />
-        <IceBlock className="w-32 h-32 top-1/4 -right-8" delay={0.5} rotation={-10} />
-        <IceBlock className="w-48 h-48 bottom-1/3 -left-16" delay={1} rotation={8} />
-        <IceBlock className="w-36 h-36 -bottom-12 right-1/4" delay={1.5} rotation={-5} />
-        <IceBlock className="w-24 h-24 top-1/2 left-1/5 hidden md:block" delay={2} rotation={25} />
-        <IceBlock className="w-20 h-20 top-1/3 right-1/3 hidden lg:block" delay={2.5} rotation={-15} />
+        <IceBlock className="w-32 h-32 -top-8 -left-8" delay={0} />
+        <IceBlock className="w-24 h-24 top-1/4 -right-6" delay={0.5} />
+        <IceBlock className="w-40 h-40 bottom-1/3 -left-12" delay={1} />
+        <IceBlock className="w-28 h-28 -bottom-8 right-1/4" delay={1.5} />
       </div>
 
       {/* Header */}
-      <header className="relative z-10 px-4 py-6 md:py-8">
+      <header className="relative z-10 px-4 py-4 safe-area-inset">
         <div className="max-w-6xl mx-auto flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <FrostIcon className="w-10 h-10 md:w-12 md:h-12 text-primary animate-float" />
-            <span className="text-2xl md:text-3xl font-bold text-foreground tracking-tight">
+          <div className="flex items-center gap-2.5">
+            <FrostIcon className="w-9 h-9 text-primary" />
+            <span className="text-xl font-bold text-foreground tracking-tight">
               Frosty
             </span>
           </div>
@@ -249,51 +271,50 @@ export function FrostyLanding() {
             href={TELEGRAM_BOT_URL}
             target="_blank"
             rel="noopener noreferrer"
-            className="hidden sm:flex items-center gap-2 px-5 py-2.5 text-sm font-medium text-primary-foreground bg-primary rounded-xl hover:scale-105 transition-all frost-glow"
+            className="hidden sm:flex items-center gap-2 min-h-[44px] px-5 py-2.5 text-sm font-medium text-primary-foreground bg-primary rounded-xl active:scale-95 transition-all frost-glow touch-manipulation"
           >
             <span>Подключить</span>
-            <ExternalLink className="w-4 h-4" />
           </a>
         </div>
       </header>
 
       {/* Hero Section */}
-      <main className="relative z-10">
-        <section className="px-4 pt-12 pb-16 md:pt-20 md:pb-28 lg:pt-28 lg:pb-36">
+      <main className="relative z-10 pb-24 md:pb-0">
+        <section className="px-4 pt-8 pb-12 md:pt-16 md:pb-24">
           <div className="max-w-4xl mx-auto text-center">
             {/* Badge */}
-            <div className="inline-flex items-center gap-2 px-5 py-2.5 rounded-full bg-primary/10 border border-primary/20 text-primary text-sm font-medium mb-8 animate-float" style={{ animationDelay: '0.5s' }}>
+            <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-primary/10 border border-primary/20 text-primary text-sm font-medium mb-6">
               <Snowflake className="w-4 h-4" />
               <span>Telegram без ограничений</span>
             </div>
 
             {/* Main headline */}
-            <h1 className="text-5xl md:text-7xl lg:text-8xl font-bold text-foreground leading-tight mb-6 text-balance">
+            <h1 className="text-4xl md:text-6xl lg:text-7xl font-bold text-foreground leading-tight mb-5 text-balance">
               Заморозьте
               <span className="block frozen-text">все ограничения</span>
             </h1>
 
             {/* Subheadline */}
-            <p className="text-xl md:text-2xl lg:text-3xl text-muted-foreground max-w-2xl mx-auto mb-12 leading-relaxed text-pretty">
+            <p className="text-lg md:text-xl text-muted-foreground max-w-xl mx-auto mb-8 leading-relaxed text-pretty">
               Один клик — и Telegram работает без блокировок.
-              <span className="block mt-2 text-lg md:text-xl">Безопасно. Анонимно. Без VPN.</span>
+              <span className="block mt-1">Безопасно. Анонимно. Без VPN.</span>
             </p>
 
             {/* CTA Button */}
             <CTAButton size="large" />
 
             {/* Trust indicators */}
-            <div className="flex flex-wrap items-center justify-center gap-8 md:gap-12 mt-14 text-sm text-muted-foreground">
+            <div className="flex flex-col sm:flex-row items-center justify-center gap-4 sm:gap-8 mt-10 text-sm text-muted-foreground">
               <div className="flex items-center gap-2">
                 <div className="w-2.5 h-2.5 rounded-full bg-success animate-pulse" />
                 <span>Работает прямо сейчас</span>
               </div>
               <div className="flex items-center gap-2">
-                <Shield className="w-5 h-5 text-primary" />
+                <Shield className="w-4 h-4 text-primary" />
                 <span>Без регистрации</span>
               </div>
               <div className="flex items-center gap-2">
-                <Zap className="w-5 h-5 text-primary" />
+                <Zap className="w-4 h-4 text-primary" />
                 <span>Мгновенное подключение</span>
               </div>
             </div>
@@ -301,84 +322,71 @@ export function FrostyLanding() {
         </section>
 
         {/* Features Section */}
-        <section className="px-4 py-20 md:py-28 bg-secondary/50">
-          <div className="max-w-5xl mx-auto">
-            <h2 className="text-3xl md:text-4xl lg:text-5xl font-bold text-center text-foreground mb-16">
+        <section className="px-4 py-12 md:py-20 bg-secondary/50">
+          <div className="max-w-3xl mx-auto">
+            <h2 className="text-2xl md:text-4xl font-bold text-center text-foreground mb-8 md:mb-12">
               Почему <span className="frozen-text">Frosty</span>?
             </h2>
 
-            <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-6 md:gap-8">
+            <div className="flex flex-col gap-4">
               <FeatureCard
                 icon={Zap}
                 title="Один клик"
-                description="Нажмите кнопку в боте — прокси автоматически добавится в ваш Telegram. Никаких настроек."
+                description="Нажмите кнопку в боте — прокси автоматически добавится в ваш Telegram."
               />
               <FeatureCard
                 icon={Shield}
                 title="Полная безопасность"
-                description="Ваши данные остаются вашими. Мы не храним логи и не отслеживаем активность."
+                description="Мы не храним логи и не отслеживаем вашу активность. Данные остаются вашими."
               />
               <FeatureCard
                 icon={Lock}
                 title="Не мешает VPN"
-                description="Работает независимо от других приложений. Включайте VPN когда нужно — Frosty не конфликтует."
+                description="Работает независимо от других приложений. Никаких конфликтов."
               />
             </div>
           </div>
         </section>
 
-        {/* How it works */}
-        <section className="px-4 py-20 md:py-28">
-          <div className="max-w-4xl mx-auto text-center">
-            <h2 className="text-3xl md:text-4xl lg:text-5xl font-bold text-foreground mb-16">
+        {/* How it works - simplified for mobile */}
+        <section className="px-4 py-12 md:py-20">
+          <div className="max-w-3xl mx-auto text-center">
+            <h2 className="text-2xl md:text-4xl font-bold text-foreground mb-8 md:mb-12">
               Как это работает
             </h2>
 
-            <div className="flex flex-col md:flex-row items-center justify-center gap-8 md:gap-6 lg:gap-12">
-              <div className="flex flex-col items-center group">
-                <div className="w-20 h-20 md:w-24 md:h-24 rounded-2xl ice-block-solid flex items-center justify-center text-3xl md:text-4xl font-bold text-primary-foreground mb-4 group-hover:scale-110 transition-transform">
-                  1
+            <div className="flex flex-col gap-6 md:flex-row md:items-center md:justify-center md:gap-8">
+              {[
+                { num: "1", text: "Откройте бота" },
+                { num: "2", text: "Нажмите кнопку" },
+                { num: "3", text: "Готово!" },
+              ].map((step, index) => (
+                <div key={index} className="flex items-center gap-4 md:flex-col">
+                  <div className="w-16 h-16 rounded-2xl ice-block-solid flex items-center justify-center text-2xl font-bold text-primary-foreground flex-shrink-0">
+                    {step.num}
+                  </div>
+                  <p className="text-lg font-medium text-foreground md:mt-3">{step.text}</p>
                 </div>
-                <p className="text-lg md:text-xl text-foreground font-medium">Откройте бота</p>
-              </div>
-
-              <div className="hidden md:block w-16 lg:w-24 h-1 bg-gradient-to-r from-primary/50 to-primary rounded-full" />
-
-              <div className="flex flex-col items-center group">
-                <div className="w-20 h-20 md:w-24 md:h-24 rounded-2xl ice-block-solid flex items-center justify-center text-3xl md:text-4xl font-bold text-primary-foreground mb-4 group-hover:scale-110 transition-transform">
-                  2
-                </div>
-                <p className="text-lg md:text-xl text-foreground font-medium">Нажмите кнопку</p>
-              </div>
-
-              <div className="hidden md:block w-16 lg:w-24 h-1 bg-gradient-to-r from-primary to-primary/50 rounded-full" />
-
-              <div className="flex flex-col items-center group">
-                <div className="w-20 h-20 md:w-24 md:h-24 rounded-2xl ice-block-solid flex items-center justify-center text-3xl md:text-4xl font-bold text-primary-foreground mb-4 group-hover:scale-110 transition-transform">
-                  3
-                </div>
-                <p className="text-lg md:text-xl text-foreground font-medium">Готово!</p>
-              </div>
+              ))}
             </div>
 
-            <p className="text-muted-foreground mt-12 text-lg md:text-xl max-w-xl mx-auto">
-              Прокси добавляется прямо в настройки Telegram.
-              <span className="block mt-1">Без вечных включений. Просто работает.</span>
+            <p className="text-muted-foreground mt-8 text-base max-w-md mx-auto">
+              Прокси добавляется прямо в настройки Telegram. Без вечных включений — просто работает.
             </p>
           </div>
         </section>
 
         {/* Pricing Section */}
-        <section className="px-4 py-20 md:py-28 bg-secondary/50">
-          <div className="max-w-4xl mx-auto">
-            <h2 className="text-3xl md:text-4xl lg:text-5xl font-bold text-center text-foreground mb-6">
+        <section className="px-4 py-12 md:py-20 bg-secondary/50">
+          <div className="max-w-3xl mx-auto">
+            <h2 className="text-2xl md:text-4xl font-bold text-center text-foreground mb-3">
               Выберите тариф
             </h2>
-            <p className="text-center text-muted-foreground text-lg mb-16 max-w-xl mx-auto">
-              Простые и понятные цены. Никаких скрытых платежей.
+            <p className="text-center text-muted-foreground text-base mb-8 md:mb-12">
+              Простые цены. Без скрытых платежей.
             </p>
 
-            <div className="grid md:grid-cols-2 gap-6 md:gap-8 items-center">
+            <div className="grid gap-6 md:grid-cols-2 md:items-stretch">
               <PricingCard
                 title="Обычный"
                 price={500}
@@ -402,44 +410,45 @@ export function FrostyLanding() {
               />
             </div>
 
-            <div className="mt-12 text-center">
-              <div className="inline-flex items-center gap-3 px-6 py-3 rounded-full bg-card border border-border text-sm text-muted-foreground">
-                <Users className="w-5 h-5 text-primary" />
-                <span>Premium идеален для семьи или нескольких устройств</span>
+            <div className="mt-8 text-center">
+              <div className="inline-flex items-center gap-2 px-4 py-2.5 rounded-full bg-card border border-border text-sm text-muted-foreground">
+                <Users className="w-4 h-4 text-primary" />
+                <span>Premium идеален для семьи</span>
               </div>
             </div>
           </div>
         </section>
 
         {/* FAQ Section */}
-        <section className="px-4 py-20 md:py-28">
+        <section className="px-4 py-12 md:py-20">
           <div className="max-w-3xl mx-auto">
-            <h2 className="text-3xl md:text-4xl lg:text-5xl font-bold text-center text-foreground mb-16">
+            <h2 className="text-2xl md:text-4xl font-bold text-center text-foreground mb-8 md:mb-12">
               Частые вопросы
             </h2>
 
-            <div className="bg-card rounded-3xl border border-border p-6 md:p-8">
+            <div className="bg-card rounded-2xl border border-border px-5 md:px-6">
               {faqItems.map((item, index) => (
-                <FAQItem key={index} question={item.question} answer={item.answer} />
+                <FAQItem 
+                  key={index} 
+                  question={item.question} 
+                  answer={item.answer}
+                  isOpen={openFaq === index}
+                  onToggle={() => setOpenFaq(openFaq === index ? null : index)}
+                />
               ))}
             </div>
           </div>
         </section>
 
         {/* Final CTA */}
-        <section className="px-4 py-20 md:py-28 bg-secondary/50 relative overflow-hidden">
-          <div className="absolute inset-0 pointer-events-none">
-            <IceBlock className="w-32 h-32 top-10 left-10 opacity-50" delay={0} rotation={20} />
-            <IceBlock className="w-24 h-24 bottom-10 right-10 opacity-50" delay={0.5} rotation={-15} />
-          </div>
-          
-          <div className="max-w-2xl mx-auto text-center relative z-10">
-            <FrostIcon className="w-24 h-24 md:w-32 md:h-32 text-primary mx-auto mb-8 animate-float" />
-            <h2 className="text-4xl md:text-5xl lg:text-6xl font-bold text-foreground mb-6 text-balance">
+        <section className="px-4 py-12 md:py-20 bg-secondary/50">
+          <div className="max-w-xl mx-auto text-center">
+            <FrostIcon className="w-20 h-20 md:w-24 md:h-24 text-primary mx-auto mb-6 animate-float" />
+            <h2 className="text-3xl md:text-4xl font-bold text-foreground mb-4 text-balance">
               Готовы <span className="frozen-text">заморозить</span> ограничения?
             </h2>
-            <p className="text-muted-foreground text-xl md:text-2xl mb-10">
-              Подключитесь за 10 секунд и забудьте о блокировках
+            <p className="text-muted-foreground text-lg mb-8">
+              Подключитесь за 10 секунд
             </p>
             <CTAButton size="large" />
           </div>
@@ -447,15 +456,18 @@ export function FrostyLanding() {
       </main>
 
       {/* Footer */}
-      <footer className="relative z-10 px-4 py-10 border-t border-border">
-        <div className="max-w-6xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-4 text-sm text-muted-foreground">
+      <footer className="relative z-10 px-4 py-8 border-t border-border">
+        <div className="max-w-6xl mx-auto flex flex-col items-center gap-3 text-sm text-muted-foreground">
           <div className="flex items-center gap-2">
-            <FrostIcon className="w-6 h-6 text-primary" />
+            <FrostIcon className="w-5 h-5 text-primary" />
             <span className="font-medium">Frosty</span>
           </div>
           <p>Telegram работает. Всегда.</p>
         </div>
       </footer>
+
+      {/* Sticky CTA for mobile */}
+      <StickyCTA />
     </div>
   )
 }
