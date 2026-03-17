@@ -12,7 +12,14 @@ from aiogram.filters import Command, CommandStart
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.storage.memory import MemoryStorage
-from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
+from aiogram.types import (
+    CallbackQuery,
+    InlineKeyboardButton,
+    InlineKeyboardMarkup,
+    MenuButtonWebApp,
+    Message,
+    WebAppInfo,
+)
 from dotenv import load_dotenv
 
 
@@ -23,6 +30,7 @@ BACKEND_BASE_URL = (os.getenv("BACKEND_BASE_URL") or "http://localhost:8000").rs
 FRONTEND_URL = (os.getenv("FRONTEND_URL") or "http://localhost:3000").strip()
 SUPPORT_USERNAME = os.getenv("SUPPORT_USERNAME", "").lstrip("@").strip()
 PRICE_RUB = int(os.getenv("PRICE_RUB", "500") or "500")
+MINIAPP_PATH = (os.getenv("MINIAPP_PATH") or "/").strip() or "/"
 
 
 BUY_TEXT = f"💳 Купить подписку {PRICE_RUB}₽"
@@ -43,6 +51,28 @@ def buy_kb() -> InlineKeyboardMarkup:
     )
 
 
+def _miniapp_url(tg_id: int) -> str:
+    base = FRONTEND_URL.rstrip("/")
+    path = MINIAPP_PATH if MINIAPP_PATH.startswith("/") else f"/{MINIAPP_PATH}"
+    return f"{base}{path}?tg_id={tg_id}"
+
+
+def main_menu_kb(tg_id: int) -> InlineKeyboardMarkup:
+    buttons: list[list[InlineKeyboardButton]] = [
+        [InlineKeyboardButton(text="🚀 Открыть мини‑апп", web_app=WebAppInfo(url=_miniapp_url(tg_id)))],
+        [InlineKeyboardButton(text="💳 Оформить подписку", callback_data="menu:subscribe")],
+        [
+            InlineKeyboardButton(text="✅ Статус", callback_data="menu:status"),
+            InlineKeyboardButton(text="ℹ️ Как это работает", callback_data="menu:help"),
+        ],
+    ]
+    if SUPPORT_USERNAME:
+        buttons.append(
+            [InlineKeyboardButton(text="🆘 Поддержка", url=f"https://t.me/{SUPPORT_USERNAME}")]
+        )
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
+
+
 def pay_kb(payment_url: str, token: str) -> InlineKeyboardMarkup:
     # callback_data must be <= 64 bytes; UUID fits.
     return InlineKeyboardMarkup(
@@ -54,12 +84,15 @@ def pay_kb(payment_url: str, token: str) -> InlineKeyboardMarkup:
 
 
 def proxy_kb(proxy_link: str) -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(
-        inline_keyboard=[
-            [InlineKeyboardButton(text="🔌 Подключить прокси", url=proxy_link)],
-            [InlineKeyboardButton(text="📋 Скопировать ссылку", callback_data="copy_proxy_link")],
-        ]
-    )
+    buttons: list[list[InlineKeyboardButton]] = [
+        [InlineKeyboardButton(text="🔌 Подключить прокси", url=proxy_link)],
+        [InlineKeyboardButton(text="📋 Скопировать ссылку", callback_data="copy_proxy_link")],
+    ]
+    if SUPPORT_USERNAME:
+        buttons.append(
+            [InlineKeyboardButton(text="🆘 Поддержка", url=f"https://t.me/{SUPPORT_USERNAME}")]
+        )
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 def support_kb() -> InlineKeyboardMarkup | None:
     if not SUPPORT_USERNAME:
@@ -180,35 +213,14 @@ async def cmd_start(message: Message, session: aiohttp.ClientSession, state: FSM
         await message.answer("Не удалось определить ваш Telegram ID.", reply_markup=support_kb())
         return
 
-    cached = _email_cache.get(tg_id)
-    if not cached:
-        await state.set_state(CheckoutFlow.waiting_email)
-        await message.answer(
-            "Чтобы выставить оплату, пришли email одним сообщением.\n\n"
-            "Он нужен lava.top для оплаты. Пример: name@example.com",
-            reply_markup=support_kb(),
-        )
-        return
-
-    # If email exists in cache, we create checkout immediately.
-    try:
-        payment_url, payment_token = await create_checkout(session, tg_id, username, cached)
-    except Exception:
-        await message.answer(
-            "Не удалось создать оплату прямо сейчас (платёжный шлюз временно недоступен).\n\n"
-            "Попробуй ещё раз через минуту.",
-            reply_markup=support_kb(),
-        )
-        return
+    # Clear any pending email state when user re-opens the menu.
+    await state.clear()
 
     await message.answer(
-        "Привет!\n\n"
-        "Frosty — это быстрый MTProxy для Telegram.\n\n"
-        "• Работает как встроенный прокси в Telegram\n"
-        "• Без VPN и ручных включений\n"
-        f"• Подписка {PRICE_RUB}₽/мес\n\n"
-        "Нажми «Оплатить», после оплаты вернись в бота и нажми «Я оплатил».",
-        reply_markup=pay_kb(payment_url, payment_token),
+        "Привет! Это Frosty.\n\n"
+        "Frosty подключает быстрый MTProxy прямо в Telegram — без VPN и ручных включений.\n\n"
+        "Выбери действие в меню ниже.",
+        reply_markup=main_menu_kb(tg_id),
     )
 
 
@@ -357,6 +369,13 @@ async def main() -> None:
     async def on_startup(**kwargs: Any) -> None:
         dp["http_session"] = aiohttp.ClientSession()
         logging.getLogger(__name__).info("Bot started")
+        if FRONTEND_URL.startswith("https://"):
+            try:
+                await bot.set_chat_menu_button(
+                    menu_button=MenuButtonWebApp(text="Открыть", web_app=WebAppInfo(url=FRONTEND_URL))
+                )
+            except Exception:
+                pass
 
     async def on_shutdown(**kwargs: Any) -> None:
         session: aiohttp.ClientSession | None = dp.get("http_session")
@@ -384,6 +403,59 @@ async def main() -> None:
     @dp.message(Command("help"))
     async def _help(message: Message) -> None:
         await cmd_help(message)
+
+    @dp.callback_query(lambda c: (c.data or "").startswith("menu:"))
+    async def _menu(query: CallbackQuery, state: FSMContext) -> None:
+        session: aiohttp.ClientSession = dp["http_session"]
+        action = (query.data or "").split(":", 1)[1] if query.data else ""
+        msg = query.message
+        if not msg or not isinstance(msg, Message):
+            await query.answer()
+            return
+
+        if action == "help":
+            await cmd_help(msg)
+            await query.answer()
+            return
+
+        if action == "status":
+            await cmd_status(msg, session)
+            await query.answer()
+            return
+
+        if action == "subscribe":
+            tg_id = query.from_user.id
+            cached = _email_cache.get(tg_id)
+            if not cached:
+                await state.set_state(CheckoutFlow.waiting_email)
+                await msg.answer(
+                    "Перед оплатой пришли email одним сообщением.\n\n"
+                    "Он нужен lava.top для оплаты. Пример: name@example.com",
+                    reply_markup=support_kb(),
+                )
+                await query.answer()
+                return
+
+            try:
+                payment_url, payment_token = await create_checkout(session, tg_id, query.from_user.username, cached)
+            except Exception:
+                await msg.answer(
+                    "Не удалось создать оплату прямо сейчас (платёжный шлюз временно недоступен).\n\n"
+                    "Попробуй ещё раз через минуту.",
+                    reply_markup=support_kb(),
+                )
+                await query.answer()
+                return
+
+            await msg.answer(
+                f"Подписка {PRICE_RUB}₽/мес.\n"
+                "Нажми «Оплатить», после оплаты вернись в бота и нажми «Я оплатил».",
+                reply_markup=pay_kb(payment_url, payment_token),
+            )
+            await query.answer()
+            return
+
+        await query.answer()
 
     @dp.callback_query(lambda c: c.data == "copy_proxy_link")
     async def _copy(query: CallbackQuery) -> None:
