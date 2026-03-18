@@ -1,9 +1,126 @@
 "use client"
 
-import { useEffect, useMemo, useState } from "react"
+import { useEffect, useMemo, useState, useCallback } from "react"
 import { Snowflake, Shield, Zap, Lock, ChevronDown, Users, Check, X } from "lucide-react"
 
 const TELEGRAM_BOT_URL = "https://t.me/FrostyProxyBot"
+
+// Intro Animation Component
+function IntroAnimation({ onComplete }: { onComplete: () => void }) {
+  const [phase, setPhase] = useState(0)
+  
+  useEffect(() => {
+    const timers = [
+      setTimeout(() => setPhase(1), 300),    // Ice particles appear
+      setTimeout(() => setPhase(2), 800),    // Ice expands
+      setTimeout(() => setPhase(3), 1400),   // Text "ЗАМОРОЗЬ" appears
+      setTimeout(() => setPhase(4), 2000),   // Text "ВСЕ ОГРАНИЧЕНИЯ" appears
+      setTimeout(() => setPhase(5), 2800),   // Final state
+      setTimeout(() => onComplete(), 3500),  // Transition to main page
+    ]
+    return () => timers.forEach(clearTimeout)
+  }, [onComplete])
+
+  return (
+    <div className="fixed inset-0 z-50 bg-background flex items-center justify-center overflow-hidden">
+      {/* Animated ice crystals background */}
+      <div className="absolute inset-0">
+        {Array.from({ length: 20 }).map((_, i) => (
+          <div
+            key={i}
+            className={`absolute transition-all duration-1000 ${phase >= 1 ? 'opacity-100 scale-100' : 'opacity-0 scale-0'}`}
+            style={{
+              left: `${10 + (i % 5) * 20}%`,
+              top: `${10 + Math.floor(i / 5) * 25}%`,
+              transitionDelay: `${i * 50}ms`,
+            }}
+          >
+            <Snowflake 
+              className={`text-primary/20 ${phase >= 2 ? 'animate-spin-slow' : ''}`}
+              style={{ 
+                width: `${20 + (i % 3) * 15}px`,
+                height: `${20 + (i % 3) * 15}px`,
+              }}
+            />
+          </div>
+        ))}
+      </div>
+
+      {/* Central frost burst effect */}
+      <div className={`absolute w-[600px] h-[600px] transition-all duration-1000 ${phase >= 2 ? 'opacity-100 scale-100' : 'opacity-0 scale-0'}`}>
+        <div className="absolute inset-0 rounded-full bg-gradient-radial from-primary/30 via-primary/10 to-transparent animate-pulse" />
+        <div className="absolute inset-8 rounded-full bg-gradient-radial from-ice/40 via-frost/20 to-transparent" />
+        <div className="absolute inset-16 rounded-full bg-gradient-radial from-frost-light/50 via-transparent to-transparent" />
+      </div>
+
+      {/* Ice shards radiating outward */}
+      {phase >= 2 && (
+        <div className="absolute">
+          {Array.from({ length: 8 }).map((_, i) => (
+            <div
+              key={i}
+              className="absolute origin-center animate-ice-shard"
+              style={{
+                transform: `rotate(${i * 45}deg)`,
+                animationDelay: `${i * 100}ms`,
+              }}
+            >
+              <div className="w-1 h-32 bg-gradient-to-t from-primary/60 via-ice/40 to-transparent rounded-full" 
+                style={{ transform: 'translateY(-50%)' }}
+              />
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Main text container */}
+      <div className="relative z-10 text-center px-4">
+        {/* ЗАМОРОЗЬ */}
+        <div className={`overflow-hidden transition-all duration-700 ${phase >= 3 ? 'opacity-100' : 'opacity-0'}`}>
+          <h1 
+            className={`text-5xl md:text-7xl lg:text-8xl font-black text-foreground tracking-tight transition-transform duration-700 ${phase >= 3 ? 'translate-y-0' : 'translate-y-full'}`}
+            style={{ textShadow: '0 0 40px oklch(0.55 0.18 220 / 0.3)' }}
+          >
+            ЗАМОРОЗЬ
+          </h1>
+        </div>
+
+        {/* ВСЕ ОГРАНИЧЕНИЯ */}
+        <div className={`overflow-hidden transition-all duration-700 ${phase >= 4 ? 'opacity-100' : 'opacity-0'}`}>
+          <h1 
+            className={`text-5xl md:text-7xl lg:text-8xl font-black frozen-text tracking-tight transition-transform duration-700 ${phase >= 4 ? 'translate-y-0' : 'translate-y-full'}`}
+          >
+            ВСЕ ОГРАНИЧЕНИЯ
+          </h1>
+        </div>
+
+        {/* Frost particles around text */}
+        {phase >= 4 && (
+          <div className="absolute inset-0 pointer-events-none">
+            {Array.from({ length: 12 }).map((_, i) => (
+              <div
+                key={i}
+                className="absolute animate-frost-particle"
+                style={{
+                  left: `${Math.random() * 100}%`,
+                  top: `${Math.random() * 100}%`,
+                  animationDelay: `${i * 100}ms`,
+                }}
+              >
+                <div className="w-2 h-2 rounded-full bg-primary/60" />
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* Bottom frost line */}
+      <div 
+        className={`absolute bottom-0 left-0 right-0 h-1 bg-gradient-to-r from-transparent via-primary to-transparent transition-all duration-1000 ${phase >= 5 ? 'opacity-100 scale-x-100' : 'opacity-0 scale-x-0'}`}
+      />
+    </div>
+  )
+}
 
 function FrostIcon({ className }: { className?: string }) {
   return (
@@ -257,6 +374,24 @@ function StickyCTA() {
 
 export function FrostyLanding() {
   const [openFaq, setOpenFaq] = useState<number | null>(null)
+  const [showIntro, setShowIntro] = useState(true)
+  const [isReady, setIsReady] = useState(false)
+
+  const handleIntroComplete = useCallback(() => {
+    setShowIntro(false)
+    setIsReady(true)
+  }, [])
+
+  // Skip intro on subsequent visits (session storage)
+  useEffect(() => {
+    const hasSeenIntro = sessionStorage.getItem('frosty-intro-seen')
+    if (hasSeenIntro) {
+      setShowIntro(false)
+      setIsReady(true)
+    } else {
+      sessionStorage.setItem('frosty-intro-seen', 'true')
+    }
+  }, [])
   
   const faqItems = [
     {
@@ -281,8 +416,13 @@ export function FrostyLanding() {
     }
   ]
 
+  // Show intro animation
+  if (showIntro) {
+    return <IntroAnimation onComplete={handleIntroComplete} />
+  }
+
   return (
-    <div className="min-h-screen bg-background relative overflow-hidden">
+    <div className={`min-h-screen bg-background relative overflow-hidden transition-opacity duration-500 ${isReady ? 'opacity-100' : 'opacity-0'}`}>
       {/* Background ice blocks - only on desktop */}
       <div className="absolute inset-0 pointer-events-none overflow-hidden">
         <IceBlock className="w-32 h-32 -top-8 -left-8" delay={0} />

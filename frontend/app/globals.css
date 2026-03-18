@@ -226,6 +226,45 @@
   }
 }
 
+@keyframes ice-shard {
+  0% {
+    opacity: 0;
+    transform: rotate(var(--rotation, 0deg)) scaleY(0);
+  }
+  50% {
+    opacity: 1;
+    transform: rotate(var(--rotation, 0deg)) scaleY(1);
+  }
+  100% {
+    opacity: 0;
+    transform: rotate(var(--rotation, 0deg)) scaleY(1.5);
+  }
+}
+
+@keyframes frost-particle {
+  0% {
+    opacity: 0;
+    transform: scale(0) translateY(0);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1) translateY(-10px);
+  }
+  100% {
+    opacity: 0;
+    transform: scale(0.5) translateY(-20px);
+  }
+}
+
+@keyframes spin-slow {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 @keyframes freeze-text {
   0%, 100% {
     filter: blur(0px);
@@ -301,6 +340,22 @@
 
 .animate-snowfall {
   animation: snowfall 10s linear infinite;
+}
+
+.animate-ice-shard {
+  animation: ice-shard 1.5s ease-out forwards;
+}
+
+.animate-frost-particle {
+  animation: frost-particle 2s ease-out infinite;
+}
+
+.animate-spin-slow {
+  animation: spin-slow 20s linear infinite;
+}
+
+.bg-gradient-radial {
+  background: radial-gradient(circle, var(--tw-gradient-stops));
 }
 
 .frozen-text {
