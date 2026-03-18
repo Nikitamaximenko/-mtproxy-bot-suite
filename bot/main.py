@@ -238,10 +238,16 @@ async def cmd_status(message: Message, session: aiohttp.ClientSession, tg_id: in
 
     if not data.get("active"):
         await message.answer(
-            f"Подписка не активна.\n\nСтоимость: {PRICE_RUB} ₽/мес.",
+            "Подписка не активна.\n\n"
+            f"Оформи Frosty за {PRICE_RUB} ₽/мес — и подключи MTProxy прямо в Telegram за 10 секунд.\n\n"
+            "Почему это лучше VPN:\n"
+            "• Frosty работает только для Telegram (не грузит весь интернет)\n"
+            "• Не нужно ставить и включать VPN — всё делается внутри Telegram\n"
+            "• Обычно стабильнее и без лишних просадок от глобального маршрута\n"
+            "• Без логов — мы не храним содержимое твоих сообщений",
             reply_markup=InlineKeyboardMarkup(inline_keyboard=[
                 [InlineKeyboardButton(text="💳 Оформить подписку", web_app=WebAppInfo(url=_miniapp_url(tg_id)))],
-            ]),
+            ]), 
         )
         return
 
