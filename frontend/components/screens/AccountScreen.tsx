@@ -18,14 +18,16 @@ import { cn } from "@/lib/utils"
 interface AccountScreenProps {
   isPaid: boolean
   isConnected: boolean
+  proxyLink: string | null
+  expiresAt: string | null
+  priceRub: number
 }
 
-export function AccountScreen({ isPaid, isConnected }: AccountScreenProps) {
+export function AccountScreen({ isPaid, isConnected, proxyLink, expiresAt, priceRub }: AccountScreenProps) {
   const [copied, setCopied] = useState(false)
-  
-  const proxyLink = "tg://proxy?server=proxy.example.com&port=443&secret=..."
 
   const handleCopy = () => {
+    if (!proxyLink) return
     navigator.clipboard.writeText(proxyLink)
     setCopied(true)
     setTimeout(() => setCopied(false), 2000)
@@ -66,11 +68,13 @@ export function AccountScreen({ isPaid, isConnected }: AccountScreenProps) {
             </div>
             <div className="flex items-center justify-between mb-4">
               <span className="text-sm text-muted-foreground">Следующий платёж</span>
-              <span className="text-sm font-medium text-foreground">15 апр 2026</span>
+              <span className="text-sm font-medium text-foreground">
+                {expiresAt ? new Date(expiresAt).toLocaleString("ru-RU") : "—"}
+              </span>
             </div>
             <div className="flex items-center justify-between">
               <span className="text-sm text-muted-foreground">Тариф</span>
-              <span className="text-sm font-medium text-foreground">199 ₽/мес</span>
+              <span className="text-sm font-medium text-foreground">{priceRub} ₽/мес</span>
             </div>
           </div>
         ) : (
@@ -110,10 +114,10 @@ export function AccountScreen({ isPaid, isConnected }: AccountScreenProps) {
               </button>
             </div>
             <div className="bg-background rounded-xl p-3 font-mono text-xs text-muted-foreground break-all">
-              {proxyLink}
+              {proxyLink || "—"}
             </div>
             <a
-              href={proxyLink}
+              href={proxyLink || "#"}
               className="flex items-center justify-center gap-2 mt-3 text-sm text-primary font-medium"
             >
               <ExternalLink className="w-4 h-4" />

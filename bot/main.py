@@ -30,7 +30,7 @@ BACKEND_BASE_URL = (os.getenv("BACKEND_BASE_URL") or "http://localhost:8000").rs
 FRONTEND_URL = (os.getenv("FRONTEND_URL") or "http://localhost:3000").strip()
 SUPPORT_USERNAME = os.getenv("SUPPORT_USERNAME", "").lstrip("@").strip()
 PRICE_RUB = int(os.getenv("PRICE_RUB", "500") or "500")
-MINIAPP_PATH = (os.getenv("MINIAPP_PATH") or "/").strip() or "/"
+MINIAPP_PATH = (os.getenv("MINIAPP_PATH") or "/mini").strip() or "/mini"
 
 
 BUY_TEXT = f"💳 Купить подписку {PRICE_RUB}₽"
@@ -371,8 +371,10 @@ async def main() -> None:
         logging.getLogger(__name__).info("Bot started")
         if FRONTEND_URL.startswith("https://"):
             try:
+                base = FRONTEND_URL.rstrip("/")
+                path = MINIAPP_PATH if MINIAPP_PATH.startswith("/") else f"/{MINIAPP_PATH}"
                 await bot.set_chat_menu_button(
-                    menu_button=MenuButtonWebApp(text="Открыть", web_app=WebAppInfo(url=FRONTEND_URL))
+                    menu_button=MenuButtonWebApp(text="Открыть", web_app=WebAppInfo(url=f"{base}{path}"))
                 )
             except Exception:
                 pass

@@ -144,7 +144,7 @@ export function MainScreen({ isConnected, isPaid, onConnect }: MainScreenProps) 
           <p className="text-sm text-center text-muted-foreground">
             Один раз подключил — и забыл.
             <br />
-            <span className="text-primary font-medium">199 ₽/месяц</span>
+            <span className="text-primary font-medium">500 ₽/месяц</span>
           </p>
         </div>
       )}
