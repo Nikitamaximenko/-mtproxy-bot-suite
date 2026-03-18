@@ -501,8 +501,8 @@ export function FrostyLanding() {
       answer: "Нет! Frosty работает независимо от VPN и других приложений. Вы можете использовать их одновременно без каких-либо конфликтов."
     },
     {
-      question: "Почему разовый платеж, а не подписка?",
-      answer: "Мы верим в честные условия. Один раз оплатили — пользуетесь навсегда. Никаких автоматических списаний и скрытых платежей."
+      question: "Как отменить подписку?",
+      answer: "Отменить подписку можно в любой момент прямо в боте. Никаких звонков и сложных процедур — просто нажмите кнопку отмены."
     },
     {
       question: "Как происходит оплата?",
@@ -654,10 +654,10 @@ export function FrostyLanding() {
         <section className="px-4 py-12 md:py-20 bg-secondary/50">
           <div className="max-w-lg mx-auto">
             <h2 className="text-2xl md:text-4xl font-bold text-center text-foreground mb-3">
-              Одна цена. Навсегда.
+              Одна простая цена
             </h2>
             <p className="text-center text-muted-foreground text-base mb-8 md:mb-12">
-              Без подписок. Без скрытых платежей.
+              Без скрытых платежей. Отмена в любой момент.
             </p>
 
             {/* Single Price Card */}
@@ -666,14 +666,14 @@ export function FrostyLanding() {
               <div className="relative bg-card border-2 border-primary/30 rounded-3xl p-8 text-center">
                 <div className="inline-flex items-baseline mb-4">
                   <span className="text-6xl font-bold text-foreground">299</span>
-                  <span className="text-2xl text-muted-foreground ml-2">₽</span>
+                  <span className="text-2xl text-muted-foreground ml-2">₽/мес</span>
                 </div>
-                <p className="text-primary font-medium mb-6">Разовый платеж</p>
+                <p className="text-primary font-medium mb-6">Подписка</p>
                 
                 <ul className="space-y-3 text-left max-w-xs mx-auto mb-8">
                   {[
                     "Telegram без ограничений",
-                    "Работает навсегда",
+                    "Стабильное соединение 24/7",
                     "Подключение за 10 секунд",
                     "Не мешает VPN",
                     "Безопасно и анонимно"

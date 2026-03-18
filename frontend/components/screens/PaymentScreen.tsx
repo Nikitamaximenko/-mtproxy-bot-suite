@@ -12,7 +12,7 @@ type PaymentMethod = "card" | "sbp"
 
 const features = [
   { icon: Zap, text: "Telegram без ограничений" },
-  { icon: Clock, text: "Работает навсегда" },
+  { icon: Clock, text: "Стабильное соединение 24/7" },
   { icon: Shield, text: "Безопасно и анонимно" },
 ]
 
@@ -69,7 +69,7 @@ export function PaymentScreen({ onSuccess }: PaymentScreenProps) {
             </div>
           </div>
           <h1 className="text-2xl font-bold text-white mb-2">Заморозить ограничения</h1>
-          <p className="text-slate-400 text-sm">Один платеж — работает навсегда</p>
+          <p className="text-slate-400 text-sm">Подписка 299 ₽/мес — отмена в любой момент</p>
         </div>
 
         {/* Price Card */}
@@ -80,9 +80,9 @@ export function PaymentScreen({ onSuccess }: PaymentScreenProps) {
             <div className="text-center mb-6">
               <div className="inline-flex items-baseline">
                 <span className="text-5xl font-bold text-white">299</span>
-                <span className="text-xl text-slate-400 ml-2">₽</span>
+                <span className="text-xl text-slate-400 ml-2">₽/мес</span>
               </div>
-              <p className="text-primary text-sm font-medium mt-1">Разовый платеж</p>
+              <p className="text-primary text-sm font-medium mt-1">Ежемесячная подписка</p>
             </div>
             
             {/* Features */}

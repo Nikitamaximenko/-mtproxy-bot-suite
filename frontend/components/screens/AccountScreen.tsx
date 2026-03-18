@@ -165,23 +165,23 @@ export function AccountScreen({ isPaid, isConnected }: AccountScreenProps) {
         </div>
 
         {/* Subscription Card */}
-        <div className="rounded-[28px] bg-gradient-to-br from-[#1a1a2e]/80 to-[#0a0f1a]/80 border border-[#00ff88]/20 p-5 mb-5 backdrop-blur-xl relative overflow-hidden">
-          {/* Green accent */}
-          <div className="absolute top-0 right-0 w-32 h-32 bg-[#00ff88]/10 rounded-full blur-3xl" />
+        <div className="rounded-[28px] bg-gradient-to-br from-[#1a1a2e]/80 to-[#0a0f1a]/80 border border-[#0099ff]/20 p-5 mb-5 backdrop-blur-xl relative overflow-hidden">
+          {/* Blue accent */}
+          <div className="absolute top-0 right-0 w-32 h-32 bg-[#0099ff]/10 rounded-full blur-3xl" />
           
           <div className="relative">
             <div className="flex items-center justify-between mb-4">
               <div className="flex items-center gap-3">
-                <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-[#00ff88] to-[#00cc66] flex items-center justify-center">
-                  <Check className="w-6 h-6 text-white" strokeWidth={3} />
+                <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-[#0066cc] to-[#0099ff] flex items-center justify-center">
+                  <Snowflake className="w-6 h-6 text-white" />
                 </div>
                 <div>
-                  <p className="text-base font-bold text-white">Оплачено</p>
-                  <p className="text-xs text-white/50">Доступ навсегда</p>
+                  <p className="text-base font-bold text-white">Подписка</p>
+                  <p className="text-xs text-white/50">Активна</p>
                 </div>
               </div>
               <div className="text-right">
-                <p className="text-2xl font-bold text-white">299 <span className="text-sm font-normal text-white/50">₽</span></p>
+                <p className="text-2xl font-bold text-white">299 <span className="text-sm font-normal text-white/50">₽/мес</span></p>
               </div>
             </div>
 
@@ -190,9 +190,9 @@ export function AccountScreen({ isPaid, isConnected }: AccountScreenProps) {
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2 text-white/50">
                 <Clock className="w-4 h-4" />
-                <span className="text-sm">Активировано</span>
+                <span className="text-sm">Следующий платёж</span>
               </div>
-              <span className="text-sm font-semibold text-[#00ff88]">Бессрочно</span>
+              <span className="text-sm font-semibold text-white">17.04.2026</span>
             </div>
           </div>
         </div>
