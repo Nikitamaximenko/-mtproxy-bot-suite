@@ -61,17 +61,23 @@ export default function AdminPage() {
   const [subs, setSubs] = useState<SubInfo[]>([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState("")
+  const [remember, setRemember] = useState(true)
 
-  const headers = useCallback(() => ({ "x-admin-key": key }), [key])
+  const headers = useCallback(
+    (overrideKey?: string) => ({ "x-admin-key": overrideKey ?? key }),
+    [key],
+  )
 
-  const fetchAll = useCallback(async () => {
+  const fetchAll = useCallback(
+    async (overrideKey?: string) => {
+      const activeKey = overrideKey ?? key
     setLoading(true)
     setError("")
     try {
       const [sRes, pRes, subRes] = await Promise.all([
-        fetch("/api/admin/stats", { headers: headers(), cache: "no-store" }),
-        fetch("/api/admin/proxy-status", { headers: headers(), cache: "no-store" }),
-        fetch("/api/admin/subscriptions", { headers: headers(), cache: "no-store" }),
+        fetch("/api/admin/stats", { headers: headers(activeKey), cache: "no-store" }),
+        fetch("/api/admin/proxy-status", { headers: headers(activeKey), cache: "no-store" }),
+        fetch("/api/admin/subscriptions", { headers: headers(activeKey), cache: "no-store" }),
       ])
 
       if (sRes.status === 403) {
@@ -85,12 +91,37 @@ export default function AdminPage() {
       setProxy(pData)
       setSubs(subData.subscriptions || [])
       setAuthed(true)
+
+      // Save key locally so you don't need to re-enter it on each refresh.
+      // Note: key will be stored in browser localStorage.
+      if (remember) {
+        try {
+          localStorage.setItem("frosty_admin_key", activeKey)
+        } catch {}
+      } else {
+        try {
+          localStorage.removeItem("frosty_admin_key")
+        } catch {}
+      }
     } catch {
       setError("Не удалось загрузить данные")
     } finally {
       setLoading(false)
     }
-  }, [headers])
+    },
+    [headers, remember, key],
+  )
+
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem("frosty_admin_key")
+      if (saved) {
+        setKey(saved)
+        fetchAll(saved)
+      }
+    } catch {}
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   useEffect(() => {
     if (!authed) return
@@ -118,6 +149,15 @@ export default function AdminPage() {
             placeholder="ADMIN_API_KEY"
             className="w-full px-4 py-3 bg-gray-900 border border-gray-700 rounded-xl text-white placeholder:text-gray-500 outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
           />
+          <label className="flex items-center gap-2 text-sm text-gray-300 select-none">
+            <input
+              type="checkbox"
+              checked={remember}
+              onChange={(e) => setRemember(e.target.checked)}
+              className="w-4 h-4"
+            />
+            Запомнить ключ на этом устройстве
+          </label>
           <button
             type="submit"
             disabled={!key || loading}
