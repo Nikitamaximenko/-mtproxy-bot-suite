@@ -1,7 +1,7 @@
 "use client"
 
 import { useState } from "react"
-import { Check, CreditCard, Smartphone, Snowflake, ArrowRight, Shield, Zap, Clock } from "lucide-react"
+import { Check, CreditCard, Smartphone, Snowflake, ArrowRight, Shield, Zap, Clock, Lock, Sparkles } from "lucide-react"
 import { cn } from "@/lib/utils"
 
 interface PaymentScreenProps {
@@ -9,12 +9,6 @@ interface PaymentScreenProps {
 }
 
 type PaymentMethod = "card" | "sbp"
-
-const features = [
-  { icon: Zap, text: "Telegram без ограничений" },
-  { icon: Clock, text: "Стабильное соединение 24/7" },
-  { icon: Shield, text: "Безопасно и анонимно" },
-]
 
 export function PaymentScreen({ onSuccess }: PaymentScreenProps) {
   const [email, setEmail] = useState("")
@@ -50,96 +44,109 @@ export function PaymentScreen({ onSuccess }: PaymentScreenProps) {
   }
 
   return (
-    <div className="min-h-[calc(100vh-80px)] relative overflow-hidden">
-      {/* Background */}
-      <div className="absolute inset-0 bg-gradient-to-b from-[#0a1628] via-[#0d1f3c] to-[#0a1628]" />
-      
-      {/* Ambient light */}
-      <div className="absolute inset-0 overflow-hidden">
-        <div className="absolute top-0 left-1/2 -translate-x-1/2 w-96 h-96 bg-primary/15 rounded-full blur-[120px]" />
+    <div className="min-h-screen bg-[#0a0f1a] relative overflow-hidden">
+      {/* Animated gradient background */}
+      <div className="absolute inset-0">
+        <div className="absolute top-0 left-1/2 -translate-x-1/2 w-[600px] h-[400px] bg-[#0066cc]/20 rounded-full blur-[150px]" />
+        <div className="absolute bottom-0 right-0 w-[300px] h-[300px] bg-[#00ccff]/10 rounded-full blur-[100px]" />
       </div>
 
-      <div className="relative z-10 px-6 py-8 max-w-sm mx-auto">
+      {/* Noise texture */}
+      <div className="absolute inset-0 opacity-[0.015]" style={{ backgroundImage: 'url("data:image/svg+xml,%3Csvg viewBox="0 0 256 256" xmlns="http://www.w3.org/2000/svg"%3E%3Cfilter id="noise"%3E%3CfeTurbulence type="fractalNoise" baseFrequency="0.9" numOctaves="4" stitchTiles="stitch"/%3E%3C/filter%3E%3Crect width="100%" height="100%" filter="url(%23noise)"/%3E%3C/svg%3E")' }} />
+
+      <div className="relative z-10 px-5 py-8 max-w-md mx-auto">
         {/* Header */}
         <div className="text-center mb-8">
-          <div className="relative w-20 h-20 mx-auto mb-5">
-            <div className="absolute inset-0 bg-primary/20 rounded-3xl blur-xl" />
-            <div className="relative w-full h-full bg-gradient-to-br from-primary/30 to-cyan-600/20 rounded-3xl border border-primary/30 flex items-center justify-center">
-              <Snowflake className="w-10 h-10 text-primary" />
+          <div className="relative w-24 h-24 mx-auto mb-6">
+            {/* Glow */}
+            <div className="absolute inset-0 bg-[#0066cc]/30 rounded-full blur-2xl" />
+            {/* Icon container */}
+            <div className="relative w-full h-full bg-gradient-to-br from-[#0066cc] via-[#0099ff] to-[#00ccff] rounded-full flex items-center justify-center shadow-[0_0_60px_rgba(0,102,204,0.4)]">
+              <Snowflake className="w-12 h-12 text-white" strokeWidth={1.5} />
+            </div>
+            {/* Sparkle */}
+            <div className="absolute -top-1 -right-1 w-8 h-8 rounded-full bg-[#ffcc00] flex items-center justify-center shadow-lg">
+              <Sparkles className="w-4 h-4 text-[#0a0f1a]" />
             </div>
           </div>
-          <h1 className="text-2xl font-bold text-white mb-2">Заморозить ограничения</h1>
-          <p className="text-slate-400 text-sm">Подписка 299 ₽/мес — отмена в любой момент</p>
+          <h1 className="text-3xl font-bold text-white mb-2">Заморозь ограничения</h1>
+          <p className="text-white/50 text-sm">Telegram без блокировок за 299 ₽/мес</p>
         </div>
 
-        {/* Price Card */}
+        {/* Main Card */}
         <div className="relative mb-6">
-          <div className="absolute inset-0 bg-gradient-to-r from-primary/20 to-cyan-600/20 rounded-3xl blur-xl" />
-          <div className="relative bg-slate-800/80 backdrop-blur-sm border border-slate-700/50 rounded-3xl p-6">
+          <div className="absolute inset-0 bg-gradient-to-b from-[#0066cc]/20 to-transparent rounded-[32px] blur-xl" />
+          
+          <div className="relative rounded-[32px] bg-gradient-to-b from-white/[0.08] to-white/[0.02] border border-white/10 p-6 backdrop-blur-xl">
+            
             {/* Price */}
-            <div className="text-center mb-6">
+            <div className="text-center mb-8">
               <div className="inline-flex items-baseline">
-                <span className="text-5xl font-bold text-white">299</span>
-                <span className="text-xl text-slate-400 ml-2">₽/мес</span>
+                <span className="text-6xl font-bold text-white">299</span>
+                <span className="text-xl text-white/50 ml-2">₽/мес</span>
               </div>
-              <p className="text-primary text-sm font-medium mt-1">Ежемесячная подписка</p>
+              <p className="text-[#00ccff] text-sm font-medium mt-2">Отмена в любой момент</p>
             </div>
             
             {/* Features */}
-            <div className="space-y-3 mb-6">
-              {features.map((feature, i) => (
-                <div key={i} className="flex items-center gap-3">
-                  <div className="w-8 h-8 rounded-xl bg-primary/10 border border-primary/20 flex items-center justify-center flex-shrink-0">
-                    <feature.icon className="w-4 h-4 text-primary" />
+            <div className="space-y-4 mb-8">
+              {[
+                { icon: Zap, text: "Telegram без ограничений", color: "#ffcc00" },
+                { icon: Clock, text: "Стабильное соединение 24/7", color: "#00ccff" },
+                { icon: Shield, text: "Безопасно и анонимно", color: "#00ff88" },
+                { icon: Lock, text: "Не мешает VPN", color: "#ff66cc" },
+              ].map((feature, i) => (
+                <div key={i} className="flex items-center gap-4">
+                  <div 
+                    className="w-11 h-11 rounded-xl flex items-center justify-center flex-shrink-0"
+                    style={{ backgroundColor: `${feature.color}15` }}
+                  >
+                    <feature.icon className="w-5 h-5" style={{ color: feature.color }} />
                   </div>
-                  <span className="text-sm text-slate-300">{feature.text}</span>
+                  <span className="text-white/80">{feature.text}</span>
                 </div>
               ))}
             </div>
 
             {/* Divider */}
-            <div className="h-px bg-gradient-to-r from-transparent via-slate-600 to-transparent mb-6" />
+            <div className="h-px bg-gradient-to-r from-transparent via-white/20 to-transparent mb-6" />
 
             {/* Email Input */}
             <div className="mb-5">
-              <label className="text-xs text-slate-400 mb-2 block">Email для чека</label>
-              <input
-                type="email"
-                placeholder="your@email.com"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                className="w-full h-12 px-4 bg-slate-900/50 border border-slate-700/50 rounded-xl text-white placeholder:text-slate-500 focus:outline-none focus:border-primary/50 transition-colors"
-              />
+              <label className="text-xs text-white/40 mb-2 block uppercase tracking-wider">Email для чека</label>
+              <div className="relative">
+                <input
+                  type="email"
+                  placeholder="your@email.com"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  className="w-full h-14 px-5 bg-white/5 border border-white/10 rounded-2xl text-white placeholder:text-white/30 focus:outline-none focus:border-[#0066cc]/50 focus:bg-white/[0.07] transition-all"
+                />
+              </div>
             </div>
 
             {/* Payment Methods */}
-            <div className="mb-5">
-              <label className="text-xs text-slate-400 mb-2 block">Способ оплаты</label>
-              <div className="grid grid-cols-2 gap-2">
-                <button
-                  onClick={() => setSelectedMethod("card")}
-                  className={cn(
-                    "flex items-center justify-center gap-2 h-12 rounded-xl border transition-all",
-                    selectedMethod === "card"
-                      ? "bg-primary/10 border-primary/50 text-white"
-                      : "bg-slate-900/30 border-slate-700/50 text-slate-400 hover:border-slate-600"
-                  )}
-                >
-                  <CreditCard className="w-4 h-4" />
-                  <span className="text-sm font-medium">Карта</span>
-                </button>
-                <button
-                  onClick={() => setSelectedMethod("sbp")}
-                  className={cn(
-                    "flex items-center justify-center gap-2 h-12 rounded-xl border transition-all",
-                    selectedMethod === "sbp"
-                      ? "bg-primary/10 border-primary/50 text-white"
-                      : "bg-slate-900/30 border-slate-700/50 text-slate-400 hover:border-slate-600"
-                  )}
-                >
-                  <Smartphone className="w-4 h-4" />
-                  <span className="text-sm font-medium">СБП</span>
-                </button>
+            <div className="mb-6">
+              <label className="text-xs text-white/40 mb-3 block uppercase tracking-wider">Способ оплаты</label>
+              <div className="grid grid-cols-2 gap-3">
+                {[
+                  { id: "card" as const, icon: CreditCard, label: "Карта" },
+                  { id: "sbp" as const, icon: Smartphone, label: "СБП" },
+                ].map((method) => (
+                  <button
+                    key={method.id}
+                    onClick={() => setSelectedMethod(method.id)}
+                    className={cn(
+                      "flex items-center justify-center gap-3 h-14 rounded-2xl border transition-all",
+                      selectedMethod === method.id
+                        ? "bg-[#0066cc]/20 border-[#0066cc]/50 text-white"
+                        : "bg-white/[0.02] border-white/10 text-white/50 hover:bg-white/5"
+                    )}
+                  >
+                    <method.icon className="w-5 h-5" />
+                    <span className="font-medium">{method.label}</span>
+                  </button>
+                ))}
               </div>
             </div>
 
@@ -148,15 +155,15 @@ export function PaymentScreen({ onSuccess }: PaymentScreenProps) {
               onClick={handlePayment}
               disabled={!email || isProcessing}
               className={cn(
-                "w-full h-14 rounded-xl font-semibold text-base transition-all flex items-center justify-center gap-2",
+                "w-full h-16 rounded-2xl font-semibold text-lg transition-all flex items-center justify-center gap-3",
                 email && !isProcessing
-                  ? "bg-gradient-to-r from-primary to-cyan-500 text-white shadow-[0_0_30px_rgba(56,189,248,0.3)] hover:shadow-[0_0_40px_rgba(56,189,248,0.4)]"
-                  : "bg-slate-700 text-slate-400 cursor-not-allowed"
+                  ? "bg-gradient-to-r from-[#0066cc] via-[#0099ff] to-[#00ccff] text-white shadow-[0_8px_40px_rgba(0,102,204,0.4)] hover:shadow-[0_8px_50px_rgba(0,102,204,0.5)] active:scale-[0.98]"
+                  : "bg-white/10 text-white/30 cursor-not-allowed"
               )}
             >
               {isProcessing ? (
                 <>
-                  <span className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                  <span className="w-6 h-6 border-2 border-white/30 border-t-white rounded-full animate-spin" />
                   Обработка...
                 </>
               ) : (
@@ -168,19 +175,19 @@ export function PaymentScreen({ onSuccess }: PaymentScreenProps) {
             </button>
 
             {error && (
-              <p className="text-xs text-red-400 text-center mt-3">{error}</p>
+              <p className="text-sm text-[#ff4444] text-center mt-4 px-4">{error}</p>
             )}
           </div>
         </div>
 
         {/* Trust badges */}
-        <div className="flex items-center justify-center gap-6 text-xs text-slate-500">
-          <div className="flex items-center gap-1.5">
-            <Shield className="w-3.5 h-3.5" />
+        <div className="flex items-center justify-center gap-8 text-xs text-white/30">
+          <div className="flex items-center gap-2">
+            <Shield className="w-4 h-4" />
             <span>Безопасная оплата</span>
           </div>
-          <div className="flex items-center gap-1.5">
-            <Check className="w-3.5 h-3.5" />
+          <div className="flex items-center gap-2">
+            <Check className="w-4 h-4" />
             <span>Гарантия возврата</span>
           </div>
         </div>
