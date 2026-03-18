@@ -484,3 +484,17 @@ def admin_check_expirations() -> OkResponse:
     _process_expiration_notifications()
     return OkResponse(ok=True)
 
+
+@app.post("/admin/deactivate/{telegram_id}", response_model=OkResponse)
+def admin_deactivate(telegram_id: int, db: Session = Depends(get_db)) -> OkResponse:
+    subs = db.execute(
+        select(Subscription).where(
+            Subscription.telegram_id == telegram_id,
+            Subscription.payment_status == "paid",
+        )
+    ).scalars().all()
+    for sub in subs:
+        sub.payment_status = "expired"
+    db.commit()
+    return OkResponse(ok=True)
+
