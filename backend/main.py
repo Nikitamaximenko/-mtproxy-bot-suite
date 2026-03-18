@@ -22,7 +22,7 @@ DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./app.db").strip()
 
 # Payments (lava.top Public API)
 # Docs: https://developers.lava.top/en and Swagger https://gate.lava.top/docs
-PAYMENT_AMOUNT_RUB = int(os.getenv("PAYMENT_AMOUNT_RUB", "199").strip() or "199")
+PAYMENT_AMOUNT_RUB = int(os.getenv("PAYMENT_AMOUNT_RUB", "299").strip() or "299")
 
 LAVA_TOP_API_BASE_URL = (os.getenv("LAVA_TOP_API_BASE_URL") or "https://gate.lava.top").rstrip("/")
 LAVA_TOP_API_KEY = (os.getenv("LAVA_TOP_API_KEY") or "").strip()  # used to call lava.top Public API (X-Api-Key)

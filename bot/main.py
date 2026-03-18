@@ -29,7 +29,7 @@ BOT_TOKEN = os.getenv("BOT_TOKEN", "").strip()
 BACKEND_BASE_URL = (os.getenv("BACKEND_BASE_URL") or "http://localhost:8000").rstrip("/")
 FRONTEND_URL = (os.getenv("FRONTEND_URL") or "http://localhost:3000").strip()
 SUPPORT_USERNAME = os.getenv("SUPPORT_USERNAME", "").lstrip("@").strip()
-PRICE_RUB = int(os.getenv("PRICE_RUB", "500") or "500")
+PRICE_RUB = int(os.getenv("PRICE_RUB", "299") or "299")
 MINIAPP_PATH = (os.getenv("MINIAPP_PATH") or "/mini").strip() or "/mini"
 
 

@@ -423,7 +423,7 @@ export function FrostyLanding() {
             <div className="grid gap-6 md:grid-cols-2 md:items-stretch">
               <PricingCard
                 title="Обычный"
-                price={500}
+                price={299}
                 features={[
                   "Полный доступ к Telegram",
                   "Стабильное соединение",

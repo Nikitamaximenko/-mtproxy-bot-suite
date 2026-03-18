@@ -201,7 +201,7 @@ export default function MiniAppPage() {
           <div className="bg-card border border-border/50 rounded-2xl p-5 mb-4">
             <div className="flex items-center justify-between py-2">
               <span className="text-sm text-muted-foreground">Тариф</span>
-              <span className="text-sm font-medium text-foreground">500 ₽/мес</span>
+              <span className="text-sm font-medium text-foreground">299 ₽/мес</span>
             </div>
             {expiresAt && (
               <div className="flex items-center justify-between py-2 border-t border-border">
@@ -280,7 +280,7 @@ export default function MiniAppPage() {
         <div className="bg-card border border-primary/30 rounded-2xl p-5 mb-6">
           <div className="flex items-baseline justify-between mb-5">
             <div>
-              <span className="text-4xl font-bold frozen-text">500</span>
+              <span className="text-4xl font-bold frozen-text">299</span>
               <span className="text-base text-muted-foreground ml-1">₽/мес</span>
             </div>
             <span className="text-[10px] bg-primary/10 text-primary px-2.5 py-1 rounded-full font-medium">
@@ -322,7 +322,7 @@ export default function MiniAppPage() {
             <span className="absolute inset-0 animate-shimmer opacity-50" />
             <Snowflake className="w-5 h-5 relative z-10" />
             <span className="relative z-10">
-              {paying ? "Создаём оплату…" : "ОПЛАТИТЬ 500 ₽"}
+              {paying ? "Создаём оплату…" : "ОПЛАТИТЬ 299 ₽"}
             </span>
           </button>
 
