@@ -239,6 +239,9 @@ async def cmd_status(message: Message, session: aiohttp.ClientSession, tg_id: in
     if not data.get("active"):
         await message.answer(
             "Подписка не активна.\n\n"
+            "С Frosty Telegram будет работать иначе:\n"
+            "• ДО оплаты: некоторые чаты/функции могут работать нестабильно или быть недоступными\n"
+            "• ПОСЛЕ оплаты: ограничения замораживаются, и Telegram работает без VPN — через MTProxy в самом Telegram\n\n"
             f"Оформи Frosty за {PRICE_RUB} ₽/мес — и подключи MTProxy прямо в Telegram за 10 секунд.\n\n"
             "Почему это лучше VPN:\n"
             "• Frosty работает только для Telegram (не грузит весь интернет)\n"
