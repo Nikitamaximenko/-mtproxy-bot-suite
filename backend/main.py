@@ -1,20 +1,20 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import os
-import secrets
+from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
-from typing import Generator, Literal
+from typing import AsyncGenerator, Generator, Literal
 from uuid import UUID, uuid4
 
 from dotenv import load_dotenv
 from fastapi import Depends, FastAPI, HTTPException, Request
 from pydantic import BaseModel, Field
-from sqlalchemy import DateTime, Integer, String, create_engine, select
+from sqlalchemy import Boolean, DateTime, Integer, String, create_engine, false as sa_false, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column, sessionmaker
-from sqlalchemy import text
 
 
 load_dotenv()
@@ -79,6 +79,9 @@ class Subscription(Base):
     payment_status: Mapped[str] = mapped_column(String(16), default="pending", index=True, nullable=False)
     lava_contract_id: Mapped[str | None] = mapped_column(String(36), unique=True, index=True, nullable=True)
 
+    notified_expiring: Mapped[bool] = mapped_column(Boolean, default=False, server_default=sa_false(), nullable=False)
+    notified_expired: Mapped[bool] = mapped_column(Boolean, default=False, server_default=sa_false(), nullable=False)
+
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
 
 
@@ -97,12 +100,16 @@ def get_db() -> Generator[Session, None, None]:
 
 logging.basicConfig(level=logging.INFO)
 
-app = FastAPI(title="MTProxy Backend", version="0.2.0")
 
-
-@app.on_event("startup")
-def _startup() -> None:
+@asynccontextmanager
+async def lifespan(application: FastAPI) -> AsyncGenerator[None, None]:
     Base.metadata.create_all(bind=engine)
+    task = asyncio.create_task(_expiration_loop())
+    yield
+    task.cancel()
+
+
+app = FastAPI(title="MTProxy Backend", version="0.3.0", lifespan=lifespan)
 
 
 class HealthResponse(BaseModel):
@@ -230,27 +237,19 @@ def activate_subscription(sub: Subscription) -> None:
 logger = logging.getLogger("mtproxy")
 
 BOT_TOKEN = (os.getenv("BOT_TOKEN") or "").strip()
+FRONTEND_URL = (os.getenv("FRONTEND_URL") or "").strip().rstrip("/")
 
 
-def _notify_telegram(tg_id: int, proxy_link: str) -> None:
-    """Best-effort notification to user via Telegram Bot API."""
+def _send_tg(tg_id: int, text: str, keyboard: dict | None = None) -> None:
+    """Best-effort send message via Telegram Bot API."""
     if not BOT_TOKEN:
         return
     try:
         import urllib.request
-        msg = (
-            "✅ Оплата прошла!\n\n"
-            "Ваша подписка активна 30 дней.\n"
-            "Нажмите кнопку ниже, чтобы подключить прокси."
-        )
-        keyboard = json.dumps({
-            "inline_keyboard": [
-                [{"text": "🔌 Подключить прокси", "url": proxy_link}],
-                [{"text": "📋 Скопировать ссылку", "callback_data": "copy_proxy_link"}],
-                [{"text": "📖 Ручная настройка", "callback_data": "manual_setup"}],
-            ]
-        })
-        data = json.dumps({"chat_id": tg_id, "text": msg, "reply_markup": keyboard}).encode()
+        body: dict[str, object] = {"chat_id": tg_id, "text": text, "parse_mode": "HTML"}
+        if keyboard:
+            body["reply_markup"] = keyboard
+        data = json.dumps(body).encode()
         req = urllib.request.Request(
             f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage",
             data=data,
@@ -259,7 +258,98 @@ def _notify_telegram(tg_id: int, proxy_link: str) -> None:
         )
         urllib.request.urlopen(req, timeout=10)
     except Exception as exc:
-        logger.warning("Failed to notify tg_id=%s: %s", tg_id, exc)
+        logger.warning("Failed to send to tg_id=%s: %s", tg_id, exc)
+
+
+def _notify_payment_success(tg_id: int, proxy_link: str) -> None:
+    kb = {"inline_keyboard": [
+        [{"text": "🔌 Подключить прокси", "url": proxy_link}],
+        [{"text": "📋 Скопировать ссылку", "callback_data": "copy_proxy_link"}],
+        [{"text": "📖 Ручная настройка", "callback_data": "manual_setup"}],
+    ]}
+    _send_tg(tg_id, (
+        "✅ Оплата прошла!\n\n"
+        "Ваша подписка активна 30 дней.\n"
+        "Нажмите кнопку ниже, чтобы подключить прокси."
+    ), kb)
+
+
+def _notify_expiring(tg_id: int, expires_at: datetime) -> None:
+    date_str = expires_at.strftime("%d.%m.%Y")
+    buttons: list[list[dict[str, str]]] = [
+        [{"text": "💳 Продлить подписку", "callback_data": "menu:subscribe"}],
+    ]
+    _send_tg(tg_id, (
+        f"⏳ Подписка заканчивается <b>{date_str}</b>\n\n"
+        "Продлите, чтобы прокси продолжал работать."
+    ), {"inline_keyboard": buttons})
+
+
+def _notify_expired(tg_id: int) -> None:
+    buttons: list[list[dict[str, str]]] = [
+        [{"text": "💳 Оформить подписку", "callback_data": "menu:subscribe"}],
+    ]
+    _send_tg(tg_id, (
+        "❌ Подписка истекла\n\n"
+        "Прокси больше не работает.\n"
+        "Оформите подписку заново — подключение займёт 10 секунд."
+    ), {"inline_keyboard": buttons})
+
+
+def _process_expiration_notifications() -> None:
+    db = SessionLocal()
+    try:
+        now = utcnow()
+        three_days_ahead = now + timedelta(days=3)
+
+        expiring = db.execute(
+            select(Subscription).where(
+                Subscription.payment_status == "paid",
+                Subscription.expires_at.is_not(None),
+                Subscription.expires_at <= three_days_ahead,
+                Subscription.expires_at > now,
+                Subscription.notified_expiring == False,  # noqa: E712
+            )
+        ).scalars().all()
+
+        for sub in expiring:
+            logger.info("Sending expiring notification to tg_id=%s (expires %s)", sub.telegram_id, sub.expires_at)
+            _notify_expiring(sub.telegram_id, sub.expires_at)  # type: ignore[arg-type]
+            sub.notified_expiring = True
+
+        expired = db.execute(
+            select(Subscription).where(
+                Subscription.payment_status == "paid",
+                Subscription.expires_at.is_not(None),
+                Subscription.expires_at <= now,
+                Subscription.notified_expired == False,  # noqa: E712
+            )
+        ).scalars().all()
+
+        for sub in expired:
+            logger.info("Sending expired notification to tg_id=%s", sub.telegram_id)
+            _notify_expired(sub.telegram_id)
+            sub.notified_expired = True
+
+        db.commit()
+        if expiring or expired:
+            logger.info("Expiration check: %d expiring, %d expired notifications sent", len(expiring), len(expired))
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()
+
+
+async def _expiration_loop() -> None:
+    """Background loop: check expiring subscriptions every hour."""
+    await asyncio.sleep(10)  # let the app start
+    while True:
+        try:
+            _process_expiration_notifications()
+        except Exception:
+            logger.exception("Expiration check failed")
+        await asyncio.sleep(3600)
 
 
 @app.post("/webhooks/lava", response_model=OkResponse)
@@ -297,7 +387,7 @@ async def lava_webhook(req: Request, db: Session = Depends(get_db)) -> OkRespons
     logger.info("Subscription activated for tg_id=%s contract=%s", sub.telegram_id, contract_id)
 
     proxy_link = f"tg://proxy?server={sub.proxy_server}&port={sub.proxy_port}&secret={sub.proxy_secret}"
-    _notify_telegram(sub.telegram_id, proxy_link)
+    _notify_payment_success(sub.telegram_id, proxy_link)
 
     return OkResponse(ok=True)
 
@@ -368,5 +458,15 @@ def lava_test(payload: LavaTestRequest, db: Session = Depends(get_db)) -> OkResp
 
     activate_subscription(sub)
     db.commit()
+
+    proxy_link = f"tg://proxy?server={sub.proxy_server}&port={sub.proxy_port}&secret={sub.proxy_secret}"
+    _notify_payment_success(sub.telegram_id, proxy_link)
+
+    return OkResponse(ok=True)
+
+
+@app.post("/admin/check-expirations", response_model=OkResponse)
+def admin_check_expirations() -> OkResponse:
+    _process_expiration_notifications()
     return OkResponse(ok=True)
 
