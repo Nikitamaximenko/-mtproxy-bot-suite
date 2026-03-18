@@ -110,6 +110,15 @@ async def backend_get(session: aiohttp.ClientSession, path: str) -> dict[str, An
         return data
 
 
+async def backend_post(session: aiohttp.ClientSession, path: str, payload: dict[str, Any]) -> None:
+    url = f"{BACKEND_BASE_URL}{path}"
+    try:
+        async with session.post(url, json=payload, timeout=aiohttp.ClientTimeout(total=5)):
+            pass
+    except Exception:
+        pass
+
+
 def _parse_proxy_link(link: str) -> tuple[str, str, str]:
     from urllib.parse import parse_qs, urlparse
     parsed = urlparse(link)
@@ -156,14 +165,32 @@ async def _get_proxy_link(session: aiohttp.ClientSession, tg_id: int) -> str | N
 
 async def cmd_start(message: Message, session: aiohttp.ClientSession, state: FSMContext) -> None:
     parts = (message.text or "").split(maxsplit=1)
-    token = parts[1].strip() if len(parts) > 1 else ""
+    param = parts[1].strip() if len(parts) > 1 else ""
 
     tg_id = message.from_user.id if message.from_user else None
+    username = message.from_user.username if message.from_user else None
     if not tg_id:
         await message.answer("Не удалось определить ваш Telegram ID.", reply_markup=support_kb())
         return
 
     await state.clear()
+
+    ref_source: str | None = None
+    token: str = ""
+
+    if param:
+        # Deep link: either a payment token (UUID) or a referral source
+        if len(param) == 36 and "-" in param:
+            token = param
+        else:
+            ref_source = param[:64]
+
+    # Track referral source
+    await backend_post(session, "/track-ref", {
+        "telegram_id": tg_id,
+        "username": username,
+        "ref_source": ref_source,
+    })
 
     if token:
         try:

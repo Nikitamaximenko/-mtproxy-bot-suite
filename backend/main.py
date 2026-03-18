@@ -58,6 +58,7 @@ class User(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     telegram_id: Mapped[int] = mapped_column(Integer, unique=True, index=True, nullable=False)
     username: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    ref_source: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
 
 
@@ -106,13 +107,19 @@ def _migrate() -> None:
     """Add columns that create_all won't add to existing tables."""
     from sqlalchemy import inspect as sa_inspect, text
     inspector = sa_inspect(engine)
-    if "subscriptions" in inspector.get_table_names():
+    tables = inspector.get_table_names()
+    if "subscriptions" in tables:
         existing = {c["name"] for c in inspector.get_columns("subscriptions")}
         with engine.begin() as conn:
             if "notified_expiring" not in existing:
                 conn.execute(text("ALTER TABLE subscriptions ADD COLUMN notified_expiring BOOLEAN NOT NULL DEFAULT FALSE"))
             if "notified_expired" not in existing:
                 conn.execute(text("ALTER TABLE subscriptions ADD COLUMN notified_expired BOOLEAN NOT NULL DEFAULT FALSE"))
+    if "users" in tables:
+        existing = {c["name"] for c in inspector.get_columns("users")}
+        with engine.begin() as conn:
+            if "ref_source" not in existing:
+                conn.execute(text("ALTER TABLE users ADD COLUMN ref_source VARCHAR(64)"))
 
 
 @asynccontextmanager
@@ -134,6 +141,31 @@ class HealthResponse(BaseModel):
 @app.get("/health", response_model=HealthResponse)
 def health() -> HealthResponse:
     return HealthResponse(status="ok")
+
+
+class TrackRefRequest(BaseModel):
+    telegram_id: int = Field(..., ge=1)
+    username: str | None = None
+    ref_source: str | None = Field(default=None, max_length=64)
+
+
+@app.post("/track-ref", response_model=OkResponse)
+def track_ref(payload: TrackRefRequest, db: Session = Depends(get_db)) -> OkResponse:
+    user = db.execute(select(User).where(User.telegram_id == payload.telegram_id)).scalar_one_or_none()
+    if user is None:
+        user = User(
+            telegram_id=payload.telegram_id,
+            username=payload.username,
+            ref_source=payload.ref_source,
+        )
+        db.add(user)
+        db.commit()
+    elif payload.ref_source and not user.ref_source:
+        user.ref_source = payload.ref_source
+        if payload.username:
+            user.username = payload.username
+        db.commit()
+    return OkResponse(ok=True)
 
 
 class CheckoutCreateRequest(BaseModel):
@@ -517,12 +549,18 @@ def admin_deactivate(telegram_id: int, req: Request, db: Session = Depends(get_d
 # ── Admin Dashboard API ──
 
 
+class RefStat(BaseModel):
+    source: str
+    count: int
+
+
 class AdminStatsResponse(BaseModel):
     total_users: int
     active_subscriptions: int
     expired_subscriptions: int
     pending_payments: int
     revenue_estimate: int
+    referrals: list[RefStat]
 
 
 @app.get("/admin/stats", response_model=AdminStatsResponse)
@@ -562,12 +600,21 @@ def admin_stats(req: Request, db: Session = Depends(get_db)) -> AdminStatsRespon
         )
     ).scalar() or 0
 
+    ref_rows = db.execute(
+        select(User.ref_source, func.count().label("cnt"))
+        .where(User.ref_source.is_not(None))
+        .group_by(User.ref_source)
+        .order_by(func.count().desc())
+    ).all()
+    referrals = [RefStat(source=r[0], count=r[1]) for r in ref_rows]
+
     return AdminStatsResponse(
         total_users=total_users,
         active_subscriptions=active,
         expired_subscriptions=expired,
         pending_payments=pending,
         revenue_estimate=total_paid * PAYMENT_AMOUNT_RUB,
+        referrals=referrals,
     )
 
 

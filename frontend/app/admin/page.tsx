@@ -2,12 +2,18 @@
 
 import { useCallback, useEffect, useState } from "react"
 
+type RefStat = {
+  source: string
+  count: number
+}
+
 type Stats = {
   total_users: number
   active_subscriptions: number
   expired_subscriptions: number
   pending_payments: number
   revenue_estimate: number
+  referrals: RefStat[]
 }
 
 type ProxyStatus = {
@@ -230,6 +236,39 @@ export default function AdminPage() {
             </div>
           </div>
         </section>
+
+        {/* Referral Sources */}
+        {stats?.referrals && stats.referrals.length > 0 && (
+          <section>
+            <h2 className="text-lg font-semibold mb-4 text-gray-300">Источники трафика</h2>
+            <div className="bg-gray-900 border border-gray-800 rounded-2xl overflow-hidden">
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b border-gray-800 text-gray-400 text-left">
+                      <th className="px-4 py-3 font-medium">Источник</th>
+                      <th className="px-4 py-3 font-medium">Ссылка</th>
+                      <th className="px-4 py-3 font-medium text-right">Пользователей</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {stats.referrals.map((r) => (
+                      <tr key={r.source} className="border-b border-gray-800/50 hover:bg-gray-800/30 transition-colors">
+                        <td className="px-4 py-3 font-medium">{r.source}</td>
+                        <td className="px-4 py-3 font-mono text-xs text-gray-400">
+                          t.me/FrostyBot?start={r.source}
+                        </td>
+                        <td className="px-4 py-3 text-right">
+                          <span className="text-blue-400 font-bold">{r.count}</span>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </section>
+        )}
       </main>
     </div>
   )
