@@ -54,11 +54,8 @@ def proxy_kb(proxy_link: str) -> InlineKeyboardMarkup:
         [InlineKeyboardButton(text="🔌 Подключить прокси", url=proxy_link)],
         [InlineKeyboardButton(text="📋 Скопировать ссылку", callback_data="copy_proxy_link")],
         [InlineKeyboardButton(text="📖 Ручная настройка", callback_data="manual_setup")],
+        [InlineKeyboardButton(text="🏠 Главное меню", callback_data="menu:main")],
     ]
-    if SUPPORT_USERNAME:
-        buttons.append(
-            [InlineKeyboardButton(text="🆘 Поддержка", url=f"https://t.me/{SUPPORT_USERNAME}")]
-        )
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 
@@ -271,6 +268,15 @@ async def main() -> None:
         action = (query.data or "").split(":", 1)[1] if query.data else ""
         msg = query.message
         if not msg or not isinstance(msg, Message):
+            await query.answer()
+            return
+
+        if action == "main":
+            tg_id = query.from_user.id
+            await msg.answer(
+                "Выбери действие:",
+                reply_markup=main_menu_kb(tg_id),
+            )
             await query.answer()
             return
 
