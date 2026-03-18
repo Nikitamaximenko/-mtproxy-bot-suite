@@ -4,6 +4,7 @@ import asyncio
 import json
 import logging
 import os
+import socket
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
 from typing import AsyncGenerator, Generator, Literal
@@ -511,4 +512,126 @@ def admin_deactivate(telegram_id: int, req: Request, db: Session = Depends(get_d
         sub.payment_status = "expired"
     db.commit()
     return OkResponse(ok=True)
+
+
+# ── Admin Dashboard API ──
+
+
+class AdminStatsResponse(BaseModel):
+    total_users: int
+    active_subscriptions: int
+    expired_subscriptions: int
+    pending_payments: int
+    revenue_estimate: int
+
+
+@app.get("/admin/stats", response_model=AdminStatsResponse)
+def admin_stats(req: Request, db: Session = Depends(get_db)) -> AdminStatsResponse:
+    _require_admin(req)
+    now = utcnow()
+
+    from sqlalchemy import func
+
+    total_users = db.execute(select(func.count()).select_from(User)).scalar() or 0
+
+    active = db.execute(
+        select(func.count()).select_from(Subscription).where(
+            Subscription.payment_status == "paid",
+            Subscription.expires_at.is_not(None),
+            Subscription.expires_at > now,
+        )
+    ).scalar() or 0
+
+    expired = db.execute(
+        select(func.count()).select_from(Subscription).where(
+            Subscription.payment_status.in_(["paid", "expired"]),
+            Subscription.expires_at.is_not(None),
+            Subscription.expires_at <= now,
+        )
+    ).scalar() or 0
+
+    pending = db.execute(
+        select(func.count()).select_from(Subscription).where(
+            Subscription.payment_status == "pending",
+        )
+    ).scalar() or 0
+
+    total_paid = db.execute(
+        select(func.count()).select_from(Subscription).where(
+            Subscription.payment_status.in_(["paid", "expired"]),
+        )
+    ).scalar() or 0
+
+    return AdminStatsResponse(
+        total_users=total_users,
+        active_subscriptions=active,
+        expired_subscriptions=expired,
+        pending_payments=pending,
+        revenue_estimate=total_paid * PAYMENT_AMOUNT_RUB,
+    )
+
+
+class SubInfo(BaseModel):
+    id: int
+    telegram_id: int
+    payment_status: str
+    expires_at: datetime | None
+    created_at: datetime
+    has_proxy: bool
+
+
+class AdminSubsResponse(BaseModel):
+    subscriptions: list[SubInfo]
+    total: int
+
+
+@app.get("/admin/subscriptions", response_model=AdminSubsResponse)
+def admin_subscriptions(req: Request, db: Session = Depends(get_db)) -> AdminSubsResponse:
+    _require_admin(req)
+    subs = db.execute(
+        select(Subscription).order_by(Subscription.created_at.desc()).limit(100)
+    ).scalars().all()
+
+    items = [
+        SubInfo(
+            id=s.id,
+            telegram_id=s.telegram_id,
+            payment_status=s.payment_status,
+            expires_at=s.expires_at,
+            created_at=s.created_at,
+            has_proxy=bool(s.proxy_server and s.proxy_port and s.proxy_secret),
+        )
+        for s in subs
+    ]
+    return AdminSubsResponse(subscriptions=items, total=len(items))
+
+
+class ProxyStatusResponse(BaseModel):
+    server: str
+    port: int
+    online: bool
+    latency_ms: float | None
+
+
+@app.get("/admin/proxy-status", response_model=ProxyStatusResponse)
+def admin_proxy_status(req: Request) -> ProxyStatusResponse:
+    _require_admin(req)
+    server = MT_PROXY_SERVER or "176.123.161.97"
+    port = MT_PROXY_PORT
+
+    online = False
+    latency_ms: float | None = None
+    try:
+        import time
+        start = time.monotonic()
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock.settimeout(5)
+        sock.connect((server, port))
+        latency_ms = round((time.monotonic() - start) * 1000, 1)
+        sock.close()
+        online = True
+    except Exception:
+        pass
+
+    return ProxyStatusResponse(server=server, port=port, online=online, latency_ms=latency_ms)
 
