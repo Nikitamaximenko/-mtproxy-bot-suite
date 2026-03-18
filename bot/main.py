@@ -16,7 +16,6 @@ from aiogram.types import (
     CallbackQuery,
     InlineKeyboardButton,
     InlineKeyboardMarkup,
-    MenuButtonWebApp,
     Message,
     WebAppInfo,
 )
@@ -449,15 +448,6 @@ async def main() -> None:
     async def on_startup(**kwargs: Any) -> None:
         dp["http_session"] = aiohttp.ClientSession()
         logging.getLogger(__name__).info("Bot started")
-        if FRONTEND_URL.startswith("https://"):
-            try:
-                base = FRONTEND_URL.rstrip("/")
-                path = MINIAPP_PATH if MINIAPP_PATH.startswith("/") else f"/{MINIAPP_PATH}"
-                await bot.set_chat_menu_button(
-                    menu_button=MenuButtonWebApp(text="Открыть", web_app=WebAppInfo(url=f"{base}{path}"))
-                )
-            except Exception:
-                pass
 
     async def on_shutdown(**kwargs: Any) -> None:
         session: aiohttp.ClientSession | None = dp.get("http_session")
