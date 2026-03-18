@@ -19,16 +19,24 @@ export function openTelegramLink(url: string) {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const wa = (window as any)?.Telegram?.WebApp
 
-  const isTgLink = url.startsWith("tg://") || url.startsWith("https://t.me/")
+  // WebApp.openTelegramLink only accepts https://t.me/ links,
+  // so convert tg:// protocol to https://t.me/ equivalent.
+  let resolved = url
+  if (resolved.startsWith("tg://")) {
+    const stripped = resolved.slice("tg://".length)
+    resolved = `https://t.me/${stripped}`
+  }
+
+  const isTgLink = resolved.startsWith("https://t.me/")
 
   if (isTgLink && wa?.openTelegramLink) {
-    wa.openTelegramLink(url)
+    wa.openTelegramLink(resolved)
     return
   }
   if (!isTgLink && wa?.openLink) {
-    wa.openLink(url)
+    wa.openLink(resolved)
     return
   }
-  window.location.href = url
+  window.location.href = resolved
 }
 
