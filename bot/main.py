@@ -35,7 +35,10 @@ MINIAPP_PATH = (os.getenv("MINIAPP_PATH") or "/mini").strip() or "/mini"
 def _miniapp_url(tg_id: int) -> str:
     base = FRONTEND_URL.rstrip("/")
     path = MINIAPP_PATH if MINIAPP_PATH.startswith("/") else f"/{MINIAPP_PATH}"
-    return f"{base}{path}?tg_id={tg_id}"
+    # Telegram WebView иногда агрессивно кэширует статику.
+    # Параметр v заставляет загрузить свежую верстку/скрипты после деплоя.
+    v = int(datetime.utcnow().timestamp())
+    return f"{base}{path}?tg_id={tg_id}&v={v}"
 
 
 def main_menu_kb(tg_id: int) -> InlineKeyboardMarkup:
