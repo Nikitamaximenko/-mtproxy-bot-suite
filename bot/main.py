@@ -264,9 +264,12 @@ async def cmd_status(message: Message, session: aiohttp.ClientSession, tg_id: in
             "• Не нужно ставить и включать VPN — всё делается внутри Telegram\n"
             "• Обычно стабильнее и без лишних просадок от глобального маршрута\n"
             "• Без логов — мы не храним содержимое твоих сообщений",
-            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-                [InlineKeyboardButton(text="💳 Оформить подписку", web_app=WebAppInfo(url=_miniapp_url(tg_id)))],
-            ]), 
+            reply_markup=InlineKeyboardMarkup(
+                inline_keyboard=[
+                    [InlineKeyboardButton(text="💳 Оформить подписку", web_app=WebAppInfo(url=_miniapp_url(tg_id)))],
+                    [InlineKeyboardButton(text="🏠 Главное меню", callback_data="menu:main")],
+                ]
+            ),
         )
         return
 
