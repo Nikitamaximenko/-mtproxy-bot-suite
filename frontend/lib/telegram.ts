@@ -17,9 +17,16 @@ export function getTelegramUser(): TelegramWebAppUser | null {
 export function openTelegramLink(url: string) {
   if (typeof window === "undefined") return
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const tg = (window as any)?.Telegram
-  if (tg?.WebApp?.openLink) {
-    tg.WebApp.openLink(url)
+  const wa = (window as any)?.Telegram?.WebApp
+
+  const isTgLink = url.startsWith("tg://") || url.startsWith("https://t.me/")
+
+  if (isTgLink && wa?.openTelegramLink) {
+    wa.openTelegramLink(url)
+    return
+  }
+  if (!isTgLink && wa?.openLink) {
+    wa.openLink(url)
     return
   }
   window.location.href = url

@@ -103,16 +103,6 @@ app = FastAPI(title="MTProxy Backend", version="0.2.0")
 @app.on_event("startup")
 def _startup() -> None:
     Base.metadata.create_all(bind=engine)
-    # Lightweight migration for local SQLite (keeps existing app.db working)
-    if DATABASE_URL.startswith("sqlite:"):
-        with engine.begin() as conn:
-            cols = conn.execute(text("PRAGMA table_info(subscriptions)")).fetchall()
-            col_names = {row[1] for row in cols}  # row[1] = name
-            if "lava_contract_id" not in col_names:
-                conn.execute(text("ALTER TABLE subscriptions ADD COLUMN lava_contract_id VARCHAR(36)"))
-                conn.execute(
-                    text("CREATE UNIQUE INDEX IF NOT EXISTS ix_subscriptions_lava_contract_id ON subscriptions (lava_contract_id)")
-                )
 
 
 class HealthResponse(BaseModel):
