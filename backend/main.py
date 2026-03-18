@@ -33,6 +33,11 @@ LAVA_TOP_WEBHOOK_API_KEY = (os.getenv("LAVA_TOP_WEBHOOK_API_KEY") or "").strip()
 
 PUBLIC_BASE_URL = (os.getenv("PUBLIC_BASE_URL") or "http://localhost:8000").rstrip("/")
 
+# MTProxy server config (single server for MVP)
+MT_PROXY_SERVER = (os.getenv("MT_PROXY_SERVER") or "").strip()
+MT_PROXY_PORT = int(os.getenv("MT_PROXY_PORT", "443").strip() or "443")
+MT_PROXY_SECRET = (os.getenv("MT_PROXY_SECRET") or "").strip()
+
 # Optional legacy fallback (if lava.top API is not configured)
 LAVA_PAY_URL_TEMPLATE = (os.getenv("LAVA_PAY_URL_TEMPLATE") or "https://lava.top/pay/YOUR_ID?order_id={payment_token}").strip()
 
@@ -224,9 +229,9 @@ class OkResponse(BaseModel):
 def activate_subscription(sub: Subscription) -> None:
     sub.payment_status = "paid"
     sub.expires_at = utcnow() + timedelta(days=30)
-    sub.proxy_secret = secrets.token_hex(16)  # 32 hex chars
-    sub.proxy_server = "mtproxy.example.com"
-    sub.proxy_port = 443
+    sub.proxy_server = MT_PROXY_SERVER or "46.8.61.111"
+    sub.proxy_port = MT_PROXY_PORT
+    sub.proxy_secret = MT_PROXY_SECRET or "eeac423189c49ea4883f6030cdb52e947f79612e7275"
 
 
 @app.post("/webhooks/lava", response_model=OkResponse)
