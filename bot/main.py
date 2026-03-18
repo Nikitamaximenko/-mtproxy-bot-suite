@@ -237,6 +237,26 @@ async def main() -> None:
             await bot.set_chat_menu_button(menu_button=MenuButtonDefault())
         except Exception:
             pass
+        try:
+            await bot.set_my_description(
+                description=(
+                    "Telegram без ограничений — за 10 секунд.\n"
+                    "\n"
+                    "Frosty подключает быстрый MTProxy прямо в приложение. "
+                    "Без VPN, без настроек, без логов.\n"
+                    "\n"
+                    "• Один клик — и всё работает\n"
+                    "• 24/7 без перебоев\n"
+                    "• 299 ₽/мес\n"
+                    "\n"
+                    "Нажмите «Запустить», чтобы начать."
+                )
+            )
+            await bot.set_my_short_description(
+                short_description="Быстрый MTProxy для Telegram. Без VPN, без настроек. 299 ₽/мес."
+            )
+        except Exception:
+            pass
         logging.getLogger(__name__).info("Bot started")
 
     async def on_shutdown(**kwargs: Any) -> None:
