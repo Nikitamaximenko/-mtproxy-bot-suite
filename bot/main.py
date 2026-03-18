@@ -15,6 +15,7 @@ from aiogram.types import (
     CallbackQuery,
     InlineKeyboardButton,
     InlineKeyboardMarkup,
+    MenuButtonDefault,
     Message,
     WebAppInfo,
 )
@@ -235,6 +236,10 @@ async def main() -> None:
 
     async def on_startup(**kwargs: Any) -> None:
         dp["http_session"] = aiohttp.ClientSession()
+        try:
+            await bot.set_chat_menu_button(menu_button=MenuButtonDefault())
+        except Exception:
+            pass
         logging.getLogger(__name__).info("Bot started")
 
     async def on_shutdown(**kwargs: Any) -> None:
