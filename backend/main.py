@@ -229,9 +229,9 @@ class OkResponse(BaseModel):
 def activate_subscription(sub: Subscription) -> None:
     sub.payment_status = "paid"
     sub.expires_at = utcnow() + timedelta(days=30)
-    sub.proxy_server = MT_PROXY_SERVER or "109.172.95.12"
+    sub.proxy_server = MT_PROXY_SERVER or "176.123.161.97"
     sub.proxy_port = MT_PROXY_PORT
-    sub.proxy_secret = MT_PROXY_SECRET or "7gwb7ZHgSeuHLzvOZltoVC9nb29nbGUuY29t"
+    sub.proxy_secret = MT_PROXY_SECRET or "dd645eba01a59f188b5ba9db2564b44a00"
 
 
 @app.post("/webhooks/lava", response_model=OkResponse)
