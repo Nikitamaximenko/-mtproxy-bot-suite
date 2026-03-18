@@ -87,6 +87,7 @@ def proxy_kb(proxy_link: str) -> InlineKeyboardMarkup:
     buttons: list[list[InlineKeyboardButton]] = [
         [InlineKeyboardButton(text="🔌 Подключить прокси", url=proxy_link)],
         [InlineKeyboardButton(text="📋 Скопировать ссылку", callback_data="copy_proxy_link")],
+        [InlineKeyboardButton(text="📖 Ручная настройка", callback_data="manual_setup")],
     ]
     if SUPPORT_USERNAME:
         buttons.append(
@@ -202,7 +203,9 @@ async def cmd_start(message: Message, session: aiohttp.ClientSession, state: FSM
             return
 
         await message.answer(
-            f"✅ Подписка активна до {expires_at}\n\nНажми кнопку ниже чтобы подключить прокси:",
+            f"✅ Подписка активна до {expires_at}\n\n"
+            "Нажми «🔌 Подключить прокси» — Telegram сам предложит добавить его.\n"
+            "Если не сработает — нажми «📖 Ручная настройка».",
             reply_markup=proxy_kb(proxy_link),
         )
         return
@@ -287,13 +290,79 @@ async def cmd_status(message: Message, session: aiohttp.ClientSession) -> None:
         await message.answer(f"✅ Подписка активна до {expires_at}\n\nПрокси-ссылка пока недоступна.")
 
 
-async def cmd_help(message: Message) -> None:
-    await message.answer(
-        "Как подключить прокси вручную:\n"
-        "1) Открой ссылку формата tg://proxy?... (кнопка «Подключить прокси»)\n"
-        "2) Telegram предложит добавить прокси — согласись\n"
-        "3) Если кнопки нет — используй «Скопировать ссылку» и открой её в Telegram"
+def _parse_proxy_link(link: str) -> tuple[str, str, str]:
+    """Extract (server, port, secret) from tg://proxy?server=...&port=...&secret=..."""
+    from urllib.parse import parse_qs, urlparse
+    parsed = urlparse(link)
+    params = parse_qs(parsed.query)
+    return (
+        params.get("server", ["—"])[0],
+        params.get("port", ["—"])[0],
+        params.get("secret", ["—"])[0],
     )
+
+
+def _manual_setup_text(server: str, port: str, secret: str) -> str:
+    return (
+        "<b>Настройка подключения в Telegram</b>\n"
+        "\n"
+        "<b>На смартфоне (Android / iOS)</b>\n"
+        "1. Откройте Telegram\n"
+        "2. Перейдите в <b>Настройки → Данные и память → Прокси</b>\n"
+        "3. Включите «Использовать прокси»\n"
+        "4. Нажмите «Добавить прокси», выберите <b>MTProto</b>\n"
+        "5. Введите параметры:\n"
+        f"   • <b>Сервер:</b> <code>{server}</code>\n"
+        f"   • <b>Порт:</b> <code>{port}</code>\n"
+        f"   • <b>Секрет:</b> <code>{secret}</code>\n"
+        "6. Сохраните — Telegram начнёт использовать прокси\n"
+        "\n"
+        "<b>На компьютере (Telegram Desktop)</b>\n"
+        "1. Откройте Telegram Desktop\n"
+        "2. Перейдите в <b>Настройки → Дополнительно → Тип соединения</b>\n"
+        "3. Выберите «Использовать прокси (MTProto)»\n"
+        "4. Введите:\n"
+        f"   • <b>Сервер:</b> <code>{server}</code>\n"
+        f"   • <b>Порт:</b> <code>{port}</code>\n"
+        f"   • <b>Секрет:</b> <code>{secret}</code>\n"
+        "5. Нажмите Сохранить\n"
+        "\n"
+        "Готово! Telegram будет работать через защищённый прокси — без замедлений и ограничений."
+    )
+
+
+HELP_GENERAL = (
+    "<b>Как это работает</b>\n"
+    "\n"
+    "Frosty — это MTProxy для Telegram. "
+    "Он работает прямо внутри приложения, не нужен VPN и не нужно ничего включать/выключать.\n"
+    "\n"
+    "<b>Быстрое подключение:</b>\n"
+    "После оплаты нажми кнопку «🔌 Подключить прокси» — Telegram сам предложит добавить прокси.\n"
+    "\n"
+    "<b>Ручное подключение:</b>\n"
+    "Если кнопка не сработала — нажми «📖 Ручная настройка» и следуй инструкции.\n"
+    "\n"
+    "<b>Преимущества:</b>\n"
+    "• Работает 24/7 автоматически\n"
+    "• Не нужен VPN — не конфликтует с другими приложениями\n"
+    "• Без логов — мы не храним данные\n"
+    "• Мгновенное подключение за 10 секунд"
+)
+
+
+async def cmd_help(message: Message) -> None:
+    await message.answer(HELP_GENERAL, parse_mode="HTML")
+
+
+async def _get_proxy_link(session: aiohttp.ClientSession, tg_id: int) -> str | None:
+    try:
+        data = await backend_get(session, f"/subscription/{tg_id}")
+    except Exception:
+        return None
+    if not data.get("active"):
+        return None
+    return data.get("proxy_link") or None
 
 
 async def cb_copy_proxy_link(query: CallbackQuery, session: aiohttp.ClientSession) -> None:
@@ -302,20 +371,29 @@ async def cb_copy_proxy_link(query: CallbackQuery, session: aiohttp.ClientSessio
         await query.answer("Не удалось.", show_alert=True)
         return
 
-    tg_id = query.from_user.id
-    try:
-        data = await backend_get(session, f"/subscription/{tg_id}")
-    except Exception:
-        await query.answer("Backend недоступен.", show_alert=True)
-        return
-
-    proxy_link = data.get("proxy_link")
-    if not data.get("active") or not proxy_link:
+    proxy_link = await _get_proxy_link(session, query.from_user.id)
+    if not proxy_link:
         await query.answer("Подписка не активна или ссылка недоступна.", show_alert=True)
         return
 
-    await msg.answer(f"Ссылка для копирования:\n{proxy_link}")
+    await msg.answer(f"Ссылка для копирования:\n<code>{proxy_link}</code>", parse_mode="HTML")
     await query.answer("Ссылка отправлена сообщением.", show_alert=False)
+
+
+async def cb_manual_setup(query: CallbackQuery, session: aiohttp.ClientSession) -> None:
+    msg = query.message
+    if not msg or not isinstance(msg, Message):
+        await query.answer("Не удалось.", show_alert=True)
+        return
+
+    proxy_link = await _get_proxy_link(session, query.from_user.id)
+    if not proxy_link:
+        await query.answer("Подписка не активна или ссылка недоступна.", show_alert=True)
+        return
+
+    server, port, secret = _parse_proxy_link(proxy_link)
+    await msg.answer(_manual_setup_text(server, port, secret), parse_mode="HTML")
+    await query.answer()
 
 
 async def cb_check_paid(query: CallbackQuery, session: aiohttp.ClientSession) -> None:
@@ -351,7 +429,9 @@ async def cb_check_paid(query: CallbackQuery, session: aiohttp.ClientSession) ->
         return
 
     await msg.answer(
-        f"✅ Подписка активна до {expires_at}\n\nНажми кнопку ниже чтобы подключить прокси:",
+        f"✅ Подписка активна до {expires_at}\n\n"
+        "Нажми «🔌 Подключить прокси» — Telegram сам предложит добавить его.\n"
+        "Если не сработает — нажми «📖 Ручная настройка».",
         reply_markup=proxy_kb(proxy_link),
     )
     await query.answer("Готово.", show_alert=False)
@@ -416,7 +496,7 @@ async def main() -> None:
             return
 
         if action == "help":
-            await cmd_help(msg)
+            await msg.answer(HELP_GENERAL, parse_mode="HTML")
             await query.answer()
             return
 
@@ -463,6 +543,11 @@ async def main() -> None:
     async def _copy(query: CallbackQuery) -> None:
         session: aiohttp.ClientSession = dp["http_session"]
         await cb_copy_proxy_link(query, session)
+
+    @dp.callback_query(lambda c: c.data == "manual_setup")
+    async def _manual(query: CallbackQuery) -> None:
+        session: aiohttp.ClientSession = dp["http_session"]
+        await cb_manual_setup(query, session)
 
     @dp.callback_query(lambda c: (c.data or "").startswith("chk:"))
     async def _chk(query: CallbackQuery) -> None:
