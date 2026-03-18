@@ -38,18 +38,14 @@ def _miniapp_url(tg_id: int) -> str:
 
 
 def main_menu_kb(tg_id: int) -> InlineKeyboardMarkup:
-    buttons: list[list[InlineKeyboardButton]] = [
-        [InlineKeyboardButton(text="💳 Оформить подписку", web_app=WebAppInfo(url=_miniapp_url(tg_id)))],
-        [
-            InlineKeyboardButton(text="✅ Статус", callback_data="menu:status"),
-            InlineKeyboardButton(text="ℹ️ Как это работает", callback_data="menu:help"),
-        ],
-    ]
+    row3 = [InlineKeyboardButton(text="✅ Статус", callback_data="menu:status")]
     if SUPPORT_USERNAME:
-        buttons.append(
-            [InlineKeyboardButton(text="🆘 Поддержка", url=f"https://t.me/{SUPPORT_USERNAME}")]
-        )
-    return InlineKeyboardMarkup(inline_keyboard=buttons)
+        row3.append(InlineKeyboardButton(text="🆘 Поддержка", url=f"https://t.me/{SUPPORT_USERNAME}"))
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="💳 Оформить подписку", web_app=WebAppInfo(url=_miniapp_url(tg_id)))],
+        [InlineKeyboardButton(text="ℹ️ Как это работает", callback_data="menu:help")],
+        row3,
+    ])
 
 
 def proxy_kb(proxy_link: str) -> InlineKeyboardMarkup:
