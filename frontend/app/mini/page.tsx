@@ -1,7 +1,7 @@
 "use client"
 
-import { useCallback, useEffect, useMemo, useState } from "react"
-import { Snowflake, Shield, Zap, Lock, Copy, Check, ExternalLink } from "lucide-react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { Snowflake, Shield, Zap, Lock, Copy, Check, ExternalLink, X, RefreshCw } from "lucide-react"
 import { getTelegramUser, openTelegramLink } from "@/lib/telegram"
 
 type SubscriptionData = {
@@ -33,6 +33,110 @@ function getTgIdFallbackFromUrl(): number | null {
   return Number.isFinite(n) && n > 0 ? n : null
 }
 
+/* ── Payment Modal ── */
+function PaymentModal({
+  url,
+  tgId,
+  onClose,
+  onPaid,
+}: {
+  url: string
+  tgId: number
+  onClose: () => void
+  onPaid: (sub: SubscriptionData) => void
+}) {
+  const [checking, setChecking] = useState(false)
+  const [iframeError, setIframeError] = useState(false)
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
+
+  const checkPayment = useCallback(async () => {
+    setChecking(true)
+    try {
+      const res = await fetch(`/api/subscription?tg_id=${tgId}`, { cache: "no-store" })
+      if (!res.ok) return
+      const data = (await res.json()) as SubscriptionData
+      if (data.active) {
+        onPaid(data)
+      }
+    } finally {
+      setChecking(false)
+    }
+  }, [tgId, onPaid])
+
+  useEffect(() => {
+    pollRef.current = setInterval(checkPayment, 5000)
+    return () => {
+      if (pollRef.current) clearInterval(pollRef.current)
+    }
+  }, [checkPayment])
+
+  return (
+    <div className="fixed inset-0 z-50 bg-background flex flex-col">
+      {/* Header bar */}
+      <div className="flex items-center justify-between px-4 py-3 border-b border-border bg-card">
+        <div className="flex items-center gap-2">
+          <FrostIcon className="w-6 h-6 text-primary" />
+          <span className="text-sm font-semibold text-foreground">Оплата подписки</span>
+        </div>
+        <button
+          onClick={onClose}
+          className="w-9 h-9 flex items-center justify-center rounded-full bg-secondary text-muted-foreground active:scale-90 transition-all touch-manipulation"
+        >
+          <X className="w-5 h-5" />
+        </button>
+      </div>
+
+      {/* Iframe */}
+      <div className="flex-1 relative">
+        {!iframeError ? (
+          <iframe
+            title="Оплата Lava.top"
+            src={url}
+            className="w-full h-full border-0"
+            onError={() => setIframeError(true)}
+            sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-top-navigation"
+          />
+        ) : (
+          <div className="flex flex-col items-center justify-center h-full px-6 text-center gap-4">
+            <p className="text-muted-foreground text-sm">Не удалось загрузить страницу оплаты</p>
+            <button
+              onClick={() => openTelegramLink(url)}
+              className="flex items-center gap-2 px-5 py-3 bg-primary text-primary-foreground font-medium rounded-xl active:scale-95 transition-all touch-manipulation"
+            >
+              <ExternalLink className="w-4 h-4" />
+              Открыть в браузере
+            </button>
+          </div>
+        )}
+      </div>
+
+      {/* Bottom bar */}
+      <div className="px-4 py-3 border-t border-border bg-card space-y-2">
+        <button
+          onClick={checkPayment}
+          disabled={checking}
+          className="w-full flex items-center justify-center gap-2 min-h-[48px] px-5 py-3 bg-primary text-primary-foreground font-semibold rounded-xl active:scale-95 transition-all frost-glow touch-manipulation disabled:opacity-60"
+        >
+          {checking ? (
+            <RefreshCw className="w-4 h-4 animate-spin" />
+          ) : (
+            <Check className="w-4 h-4" />
+          )}
+          {checking ? "Проверяем…" : "Я оплатил"}
+        </button>
+        <button
+          onClick={() => openTelegramLink(url)}
+          className="w-full flex items-center justify-center gap-2 py-2.5 text-sm text-muted-foreground touch-manipulation"
+        >
+          <ExternalLink className="w-3.5 h-3.5" />
+          Открыть в браузере Telegram
+        </button>
+      </div>
+    </div>
+  )
+}
+
+/* ── Main Page ── */
 export default function MiniAppPage() {
   const tgUser = useMemo(() => getTelegramUser(), [])
   const [tgId, setTgId] = useState<number | null>(tgUser?.id ?? null)
@@ -44,6 +148,7 @@ export default function MiniAppPage() {
   const [paymentUrl, setPaymentUrl] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [copied, setCopied] = useState(false)
+  const [justPaid, setJustPaid] = useState(false)
 
   useEffect(() => {
     if (!tgId) setTgId(getTgIdFallbackFromUrl())
@@ -97,6 +202,13 @@ export default function MiniAppPage() {
     setTimeout(() => setCopied(false), 2000)
   }
 
+  const handlePaymentConfirmed = useCallback((data: SubscriptionData) => {
+    setSub(data)
+    setPaymentUrl(null)
+    setJustPaid(true)
+  }, [])
+
+  /* ── No tg_id ── */
   if (!tgId) {
     return (
       <div className="min-h-screen flex items-center justify-center px-6 text-center text-muted-foreground">
@@ -108,6 +220,7 @@ export default function MiniAppPage() {
     )
   }
 
+  /* ── Loading ── */
   if (loading) {
     return (
       <div className="min-h-screen flex items-center justify-center">
@@ -116,47 +229,34 @@ export default function MiniAppPage() {
     )
   }
 
-  if (paymentUrl) {
-    return (
-      <div className="min-h-screen bg-background px-4 py-6">
-        <div className="max-w-sm mx-auto">
-          <div className="flex items-center gap-2.5 mb-6">
-            <FrostIcon className="w-8 h-8 text-primary" />
-            <span className="text-lg font-bold text-foreground">Frosty</span>
-          </div>
-          <div className="bg-card border border-border rounded-2xl overflow-hidden">
-            <iframe title="Оплата" src={paymentUrl} className="w-full h-[75vh] bg-background" />
-          </div>
-          <button
-            onClick={() => openTelegramLink(paymentUrl)}
-            className="w-full mt-3 flex items-center justify-center gap-2 min-h-[48px] px-5 py-3 text-sm font-medium bg-secondary text-secondary-foreground rounded-xl active:scale-95 transition-all touch-manipulation"
-          >
-            <ExternalLink className="w-4 h-4" />
-            Открыть в браузере
-          </button>
-          <button
-            onClick={() => { setPaymentUrl(null); refresh() }}
-            className="w-full mt-2 py-3 text-sm text-muted-foreground touch-manipulation"
-          >
-            Назад
-          </button>
-        </div>
-      </div>
-    )
-  }
+  /* ── Payment modal overlay ── */
+  const paymentModal = paymentUrl && tgId ? (
+    <PaymentModal
+      url={paymentUrl}
+      tgId={tgId}
+      onClose={() => { setPaymentUrl(null); refresh() }}
+      onPaid={handlePaymentConfirmed}
+    />
+  ) : null
 
   /* ── Active subscription ── */
   if (isPaid) {
     return (
       <div className="min-h-screen bg-background px-4 py-6">
         <div className="max-w-sm mx-auto">
-          {/* Header */}
           <div className="flex items-center gap-2.5 mb-8">
             <FrostIcon className="w-8 h-8 text-primary" />
             <span className="text-lg font-bold text-foreground">Frosty</span>
           </div>
 
-          {/* Status */}
+          {/* Success animation on fresh payment */}
+          {justPaid && (
+            <div className="mb-6 p-4 bg-success/10 border border-success/30 rounded-2xl text-center">
+              <p className="text-sm font-medium text-foreground">Оплата прошла успешно!</p>
+              <p className="text-xs text-muted-foreground mt-1">Подключите прокси ниже</p>
+            </div>
+          )}
+
           <div className="text-center mb-8">
             <div className="w-20 h-20 rounded-2xl ice-block-solid flex items-center justify-center mx-auto mb-4 frost-glow">
               <Snowflake className="w-10 h-10 text-primary-foreground" />
@@ -168,7 +268,6 @@ export default function MiniAppPage() {
             </div>
           </div>
 
-          {/* Proxy link card */}
           {proxyLink && (
             <div className="bg-card border border-border/50 rounded-2xl p-5 mb-4">
               <div className="flex items-center justify-between mb-3">
@@ -197,7 +296,6 @@ export default function MiniAppPage() {
             </div>
           )}
 
-          {/* Subscription info */}
           <div className="bg-card border border-border/50 rounded-2xl p-5 mb-4">
             <div className="flex items-center justify-between py-2">
               <span className="text-sm text-muted-foreground">Тариф</span>
@@ -213,7 +311,6 @@ export default function MiniAppPage() {
             )}
           </div>
 
-          {/* Features reminder */}
           <div className="flex flex-col gap-2 mt-6">
             {[
               { icon: Shield, text: "Полная безопасность — без логов" },
@@ -233,116 +330,112 @@ export default function MiniAppPage() {
 
   /* ── No subscription — sell ── */
   return (
-    <div className="min-h-screen bg-background px-4 py-6">
-      <div className="max-w-sm mx-auto">
-        {/* Header */}
-        <div className="flex items-center gap-2.5 mb-6">
-          <FrostIcon className="w-8 h-8 text-primary" />
-          <span className="text-lg font-bold text-foreground">Frosty</span>
-        </div>
-
-        {/* Hero */}
-        <div className="text-center mb-8">
-          <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-primary/10 border border-primary/20 text-primary text-xs font-medium mb-4">
-            <Snowflake className="w-3.5 h-3.5" />
-            Telegram без ограничений
-          </div>
-          <h1 className="text-3xl font-bold text-foreground leading-tight mb-3">
-            Заморозьте
-            <span className="block frozen-text">все ограничения</span>
-          </h1>
-          <p className="text-muted-foreground text-sm leading-relaxed">
-            Один клик — и Telegram работает без блокировок.
-            <br />Безопасно. Анонимно. Без VPN.
-          </p>
-        </div>
-
-        {/* Features */}
-        <div className="flex flex-col gap-3 mb-8">
-          {[
-            { icon: Zap, title: "Один клик", desc: "Прокси добавляется автоматически" },
-            { icon: Shield, title: "Безопасно", desc: "Без логов и отслеживания" },
-            { icon: Lock, title: "Без VPN", desc: "Работает независимо от всего" },
-          ].map(({ icon: Icon, title, desc }, i) => (
-            <div key={i} className="flex items-start gap-4 p-4 rounded-2xl bg-card border border-border/50">
-              <div className="w-11 h-11 flex-shrink-0 rounded-xl ice-block-solid flex items-center justify-center">
-                <Icon className="w-5 h-5 text-primary-foreground" />
-              </div>
-              <div>
-                <h3 className="text-sm font-bold text-foreground">{title}</h3>
-                <p className="text-xs text-muted-foreground mt-0.5">{desc}</p>
-              </div>
-            </div>
-          ))}
-        </div>
-
-        {/* Price card + form */}
-        <div className="bg-card border border-primary/30 rounded-2xl p-5 mb-6">
-          <div className="flex items-baseline justify-between mb-5">
-            <div>
-              <span className="text-4xl font-bold frozen-text">299</span>
-              <span className="text-base text-muted-foreground ml-1">₽/мес</span>
-            </div>
-            <span className="text-[10px] bg-primary/10 text-primary px-2.5 py-1 rounded-full font-medium">
-              Выгодно
-            </span>
+    <>
+      {paymentModal}
+      <div className="min-h-screen bg-background px-4 py-6">
+        <div className="max-w-sm mx-auto">
+          <div className="flex items-center gap-2.5 mb-6">
+            <FrostIcon className="w-8 h-8 text-primary" />
+            <span className="text-lg font-bold text-foreground">Frosty</span>
           </div>
 
-          <ul className="space-y-2.5 mb-5">
+          <div className="text-center mb-8">
+            <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-primary/10 border border-primary/20 text-primary text-xs font-medium mb-4">
+              <Snowflake className="w-3.5 h-3.5" />
+              Telegram без ограничений
+            </div>
+            <h1 className="text-3xl font-bold text-foreground leading-tight mb-3">
+              Заморозьте
+              <span className="block frozen-text">все ограничения</span>
+            </h1>
+            <p className="text-muted-foreground text-sm leading-relaxed">
+              Один клик — и Telegram работает без блокировок.
+              <br />Безопасно. Анонимно. Без VPN.
+            </p>
+          </div>
+
+          <div className="flex flex-col gap-3 mb-8">
             {[
-              "Telegram на максимальной скорости",
-              "Подключение за 10 секунд",
-              "Работает автоматически 24/7",
-            ].map((f, i) => (
-              <li key={i} className="flex items-center gap-2.5 text-sm text-muted-foreground">
-                <div className="w-5 h-5 bg-primary/10 rounded-full flex items-center justify-center flex-shrink-0">
-                  <Check className="w-3 h-3 text-primary" />
+              { icon: Zap, title: "Один клик", desc: "Прокси добавляется автоматически" },
+              { icon: Shield, title: "Безопасно", desc: "Без логов и отслеживания" },
+              { icon: Lock, title: "Без VPN", desc: "Работает независимо от всего" },
+            ].map(({ icon: Icon, title, desc }, i) => (
+              <div key={i} className="flex items-start gap-4 p-4 rounded-2xl bg-card border border-border/50">
+                <div className="w-11 h-11 flex-shrink-0 rounded-xl ice-block-solid flex items-center justify-center">
+                  <Icon className="w-5 h-5 text-primary-foreground" />
                 </div>
-                {f}
-              </li>
+                <div>
+                  <h3 className="text-sm font-bold text-foreground">{title}</h3>
+                  <p className="text-xs text-muted-foreground mt-0.5">{desc}</p>
+                </div>
+              </div>
             ))}
-          </ul>
-
-          {/* Email */}
-          <label className="text-xs text-muted-foreground mb-1.5 block">Email для чека</label>
-          <input
-            type="email"
-            placeholder="your@email.com"
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            className="w-full h-11 px-4 mb-4 bg-secondary border border-border rounded-xl text-sm text-foreground placeholder:text-muted-foreground outline-none focus:border-primary focus:ring-2 focus:ring-primary/20 transition-all"
-          />
-
-          {/* CTA */}
-          <button
-            onClick={handlePay}
-            disabled={!email || paying}
-            className="group relative w-full flex items-center justify-center gap-2.5 min-h-[52px] px-6 py-3.5 bg-primary text-primary-foreground font-semibold rounded-2xl transition-all active:scale-95 frost-glow-strong overflow-hidden touch-manipulation disabled:opacity-50 disabled:active:scale-100"
-          >
-            <span className="absolute inset-0 animate-shimmer opacity-50" />
-            <Snowflake className="w-5 h-5 relative z-10" />
-            <span className="relative z-10">
-              {paying ? "Создаём оплату…" : "ОПЛАТИТЬ 299 ₽"}
-            </span>
-          </button>
-
-          {error && (
-            <p className="text-xs text-destructive text-center mt-3">{error}</p>
-          )}
-        </div>
-
-        {/* Trust */}
-        <div className="flex items-center justify-center gap-4 text-xs text-muted-foreground mb-4">
-          <div className="flex items-center gap-1.5">
-            <div className="w-2 h-2 rounded-full bg-success animate-pulse" />
-            Работает сейчас
           </div>
-          <div className="flex items-center gap-1.5">
-            <Shield className="w-3.5 h-3.5 text-primary" />
-            Без регистрации
+
+          <div className="bg-card border border-primary/30 rounded-2xl p-5 mb-6">
+            <div className="flex items-baseline justify-between mb-5">
+              <div>
+                <span className="text-4xl font-bold frozen-text">299</span>
+                <span className="text-base text-muted-foreground ml-1">₽/мес</span>
+              </div>
+              <span className="text-[10px] bg-primary/10 text-primary px-2.5 py-1 rounded-full font-medium">
+                Выгодно
+              </span>
+            </div>
+
+            <ul className="space-y-2.5 mb-5">
+              {[
+                "Telegram на максимальной скорости",
+                "Подключение за 10 секунд",
+                "Работает автоматически 24/7",
+              ].map((f, i) => (
+                <li key={i} className="flex items-center gap-2.5 text-sm text-muted-foreground">
+                  <div className="w-5 h-5 bg-primary/10 rounded-full flex items-center justify-center flex-shrink-0">
+                    <Check className="w-3 h-3 text-primary" />
+                  </div>
+                  {f}
+                </li>
+              ))}
+            </ul>
+
+            <label className="text-xs text-muted-foreground mb-1.5 block">Email для чека</label>
+            <input
+              type="email"
+              placeholder="your@email.com"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              className="w-full h-11 px-4 mb-4 bg-secondary border border-border rounded-xl text-sm text-foreground placeholder:text-muted-foreground outline-none focus:border-primary focus:ring-2 focus:ring-primary/20 transition-all"
+            />
+
+            <button
+              onClick={handlePay}
+              disabled={!email || paying}
+              className="group relative w-full flex items-center justify-center gap-2.5 min-h-[52px] px-6 py-3.5 bg-primary text-primary-foreground font-semibold rounded-2xl transition-all active:scale-95 frost-glow-strong overflow-hidden touch-manipulation disabled:opacity-50 disabled:active:scale-100"
+            >
+              <span className="absolute inset-0 animate-shimmer opacity-50" />
+              <Snowflake className="w-5 h-5 relative z-10" />
+              <span className="relative z-10">
+                {paying ? "Создаём оплату…" : "ОПЛАТИТЬ 299 ₽"}
+              </span>
+            </button>
+
+            {error && (
+              <p className="text-xs text-destructive text-center mt-3">{error}</p>
+            )}
+          </div>
+
+          <div className="flex items-center justify-center gap-4 text-xs text-muted-foreground mb-4">
+            <div className="flex items-center gap-1.5">
+              <div className="w-2 h-2 rounded-full bg-success animate-pulse" />
+              Работает сейчас
+            </div>
+            <div className="flex items-center gap-1.5">
+              <Shield className="w-3.5 h-3.5 text-primary" />
+              Без регистрации
+            </div>
           </div>
         </div>
       </div>
-    </div>
+    </>
   )
 }
