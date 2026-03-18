@@ -400,7 +400,10 @@ export default function MiniAppPage() {
 
             <label className="text-xs text-muted-foreground mb-1.5 block">Email для чека</label>
             <input
-              type="email"
+              type="text"
+              inputMode="email"
+              autoComplete="email"
+              autoCapitalize="none"
               placeholder="your@email.com"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
