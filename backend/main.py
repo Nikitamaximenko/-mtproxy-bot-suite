@@ -460,12 +460,24 @@ def check_token(token: UUID, db: Session = Depends(get_db)) -> CheckTokenRespons
     return CheckTokenResponse(found=True, expires_at=sub.expires_at, proxy_link=proxy_link)
 
 
+ADMIN_API_KEY = (os.getenv("ADMIN_API_KEY") or "").strip()
+
+
+def _require_admin(req: Request) -> None:
+    if not ADMIN_API_KEY:
+        raise HTTPException(status_code=403, detail="Admin API not configured")
+    got = (req.headers.get("x-admin-key") or "").strip()
+    if got != ADMIN_API_KEY:
+        raise HTTPException(status_code=403, detail="Forbidden")
+
+
 class LavaTestRequest(BaseModel):
     payment_token: UUID
 
 
 @app.post("/webhooks/lava/test", response_model=OkResponse)
-def lava_test(payload: LavaTestRequest, db: Session = Depends(get_db)) -> OkResponse:
+def lava_test(payload: LavaTestRequest, req: Request, db: Session = Depends(get_db)) -> OkResponse:
+    _require_admin(req)
     sub = db.execute(select(Subscription).where(Subscription.payment_token == str(payload.payment_token))).scalar_one_or_none()
     if sub is None:
         raise HTTPException(status_code=404, detail="Subscription not found for payment_token")
@@ -480,13 +492,15 @@ def lava_test(payload: LavaTestRequest, db: Session = Depends(get_db)) -> OkResp
 
 
 @app.post("/admin/check-expirations", response_model=OkResponse)
-def admin_check_expirations() -> OkResponse:
+def admin_check_expirations(req: Request) -> OkResponse:
+    _require_admin(req)
     _process_expiration_notifications()
     return OkResponse(ok=True)
 
 
 @app.post("/admin/deactivate/{telegram_id}", response_model=OkResponse)
-def admin_deactivate(telegram_id: int, db: Session = Depends(get_db)) -> OkResponse:
+def admin_deactivate(telegram_id: int, req: Request, db: Session = Depends(get_db)) -> OkResponse:
+    _require_admin(req)
     subs = db.execute(
         select(Subscription).where(
             Subscription.telegram_id == telegram_id,
