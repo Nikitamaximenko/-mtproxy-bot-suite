@@ -223,6 +223,10 @@ async def cmd_start(message: Message, session: aiohttp.ClientSession, state: FSM
     await message.answer(
         "Привет! Это <b>Frosty</b>.\n\n"
         "Быстрый MTProxy прямо в Telegram — без VPN и ручных настроек.\n\n"
+        "Как будет:\n"
+        "• ДО оплаты: часть функций может быть нестабильной\n"
+        "• ПОСЛЕ оплаты: ограничения замораживаются, Telegram работает без VPN через MTProxy\n\n"
+        "Преимущество: Frosty работает только для Telegram (не весь интернет), обычно стабильнее чем VPN.\n\n"
         "Выбери действие:",
         parse_mode="HTML",
         reply_markup=main_menu_kb(tg_id),
@@ -286,20 +290,13 @@ async def main() -> None:
         try:
             await bot.set_my_description(
                 description=(
-                    "Telegram без ограничений — за 10 секунд.\n"
-                    "\n"
-                    "Frosty подключает быстрый MTProxy прямо в приложение. "
-                    "Без VPN, без настроек, без логов.\n"
-                    "\n"
-                    "• Один клик — и всё работает\n"
-                    "• 24/7 без перебоев\n"
-                    "• 299 ₽/мес\n"
-                    "\n"
-                    "Нажмите «Запустить», чтобы начать."
+                    "Frosty — MTProxy внутри Telegram, без VPN. "
+                    "До оплаты возможны ограничения, после оплаты они замораживаются. "
+                    "Лимит: до 10 устройств."
                 )
             )
             await bot.set_my_short_description(
-                short_description="Быстрый MTProxy для Telegram. Без VPN, без настроек. 299 ₽/мес."
+                short_description="MTProxy внутри Telegram без VPN. До 10 устройств. 10 секунд."
             )
         except Exception:
             pass
