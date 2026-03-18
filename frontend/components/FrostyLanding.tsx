@@ -336,6 +336,100 @@ function PricingCard({
   )
 }
 
+// Telegram Bot Preview Widget
+function TelegramWidget() {
+  const [step, setStep] = useState(0)
+  
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setStep(prev => (prev + 1) % 4)
+    }, 2500)
+    return () => clearInterval(interval)
+  }, [])
+
+  return (
+    <div className="relative mx-auto max-w-xs">
+      {/* Phone frame */}
+      <div className="relative bg-card rounded-[2.5rem] p-2 shadow-xl border border-border">
+        {/* Screen */}
+        <div className="bg-background rounded-[2rem] overflow-hidden">
+          {/* Telegram header */}
+          <div className="bg-primary px-4 py-3 flex items-center gap-3">
+            <div className="w-10 h-10 rounded-full bg-white/20 flex items-center justify-center">
+              <Snowflake className="w-6 h-6 text-white" />
+            </div>
+            <div>
+              <div className="text-white font-semibold text-sm">Frosty Bot</div>
+              <div className="text-white/70 text-xs">online</div>
+            </div>
+          </div>
+          
+          {/* Chat area */}
+          <div className="h-64 p-4 space-y-3 bg-secondary/30">
+            {/* Bot welcome message */}
+            <div className={`flex transition-all duration-500 ${step >= 0 ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-4'}`}>
+              <div className="max-w-[85%] bg-card rounded-2xl rounded-tl-md px-4 py-2.5 shadow-sm">
+                <p className="text-sm text-foreground">Привет! Нажмите кнопку ниже, чтобы подключить прокси</p>
+              </div>
+            </div>
+            
+            {/* Button message */}
+            <div className={`flex transition-all duration-500 delay-100 ${step >= 1 ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-4'}`}>
+              <div className="max-w-[85%]">
+                <button className="w-full bg-primary text-white rounded-xl px-4 py-2.5 text-sm font-medium flex items-center justify-center gap-2 active:scale-95 transition-transform">
+                  <Snowflake className="w-4 h-4" />
+                  Подключить прокси
+                </button>
+              </div>
+            </div>
+            
+            {/* User tap animation */}
+            <div className={`flex justify-end transition-all duration-300 ${step >= 2 ? 'opacity-100 scale-100' : 'opacity-0 scale-0'}`}>
+              <div className="w-12 h-12 rounded-full bg-primary/20 flex items-center justify-center animate-ping-once">
+                <div className="w-6 h-6 rounded-full bg-primary/40" />
+              </div>
+            </div>
+            
+            {/* Success message */}
+            <div className={`flex transition-all duration-500 ${step >= 3 ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-4'}`}>
+              <div className="max-w-[85%] bg-card rounded-2xl rounded-tl-md px-4 py-2.5 shadow-sm">
+                <div className="flex items-center gap-2">
+                  <div className="w-5 h-5 rounded-full bg-success flex items-center justify-center">
+                    <Check className="w-3 h-3 text-white" />
+                  </div>
+                  <p className="text-sm text-foreground font-medium">Прокси подключен!</p>
+                </div>
+                <p className="text-xs text-muted-foreground mt-1">Telegram теперь работает без ограничений</p>
+              </div>
+            </div>
+          </div>
+          
+          {/* Input area */}
+          <div className="px-3 py-2 border-t border-border bg-card">
+            <div className="flex items-center gap-2">
+              <div className="flex-1 bg-secondary rounded-full px-4 py-2 text-xs text-muted-foreground">
+                Сообщение...
+              </div>
+              <div className="w-8 h-8 rounded-full bg-primary/20 flex items-center justify-center">
+                <svg className="w-4 h-4 text-primary" viewBox="0 0 24 24" fill="currentColor">
+                  <path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/>
+                </svg>
+              </div>
+            </div>
+          </div>
+        </div>
+        
+        {/* Notch */}
+        <div className="absolute top-2 left-1/2 -translate-x-1/2 w-24 h-6 bg-foreground rounded-full" />
+      </div>
+      
+      {/* Decorative elements */}
+      <div className="absolute -top-4 -right-4 w-16 h-16 rounded-2xl ice-block opacity-60 animate-frost-pulse" />
+      <div className="absolute -bottom-4 -left-4 w-12 h-12 rounded-xl ice-block opacity-40 animate-frost-pulse" style={{ animationDelay: '1s' }} />
+    </div>
+  )
+}
+
 function StickyCTA() {
   const [isVisible, setIsVisible] = useState(false)
   const [isHidden, setIsHidden] = useState(false)
@@ -491,6 +585,12 @@ export function FrostyLanding() {
                 <Zap className="w-4 h-4 text-primary" />
                 <span>Мгновенное подключение</span>
               </div>
+            </div>
+
+            {/* Telegram Widget Preview */}
+            <div className="mt-12 md:mt-16">
+              <p className="text-sm text-muted-foreground mb-6 text-center">Вот так просто это работает:</p>
+              <TelegramWidget />
             </div>
           </div>
         </section>
