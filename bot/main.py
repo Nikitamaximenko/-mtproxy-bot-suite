@@ -10,7 +10,6 @@ import aiohttp
 from aiogram import Bot, Dispatcher
 from aiogram.filters import Command, CommandStart
 from aiogram.fsm.context import FSMContext
-from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.types import (
     CallbackQuery,
@@ -32,24 +31,6 @@ PRICE_RUB = int(os.getenv("PRICE_RUB", "299") or "299")
 MINIAPP_PATH = (os.getenv("MINIAPP_PATH") or "/mini").strip() or "/mini"
 
 
-BUY_TEXT = f"💳 Купить подписку {PRICE_RUB}₽"
-PAY_TEXT = f"💳 Оплатить {PRICE_RUB}₽"
-
-
-class CheckoutFlow(StatesGroup):
-    waiting_email = State()
-
-
-# MVP: keep email in memory (per-process). If you restart bot frequently, user may be asked again.
-_email_cache: dict[int, str] = {}
-
-
-def buy_kb() -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(
-        inline_keyboard=[[InlineKeyboardButton(text=BUY_TEXT, url=FRONTEND_URL)]]
-    )
-
-
 def _miniapp_url(tg_id: int) -> str:
     base = FRONTEND_URL.rstrip("/")
     path = MINIAPP_PATH if MINIAPP_PATH.startswith("/") else f"/{MINIAPP_PATH}"
@@ -58,8 +39,7 @@ def _miniapp_url(tg_id: int) -> str:
 
 def main_menu_kb(tg_id: int) -> InlineKeyboardMarkup:
     buttons: list[list[InlineKeyboardButton]] = [
-        [InlineKeyboardButton(text="🚀 Открыть мини‑апп", web_app=WebAppInfo(url=_miniapp_url(tg_id)))],
-        [InlineKeyboardButton(text="💳 Оформить подписку", callback_data="menu:subscribe")],
+        [InlineKeyboardButton(text="💳 Оформить подписку", web_app=WebAppInfo(url=_miniapp_url(tg_id)))],
         [
             InlineKeyboardButton(text="✅ Статус", callback_data="menu:status"),
             InlineKeyboardButton(text="ℹ️ Как это работает", callback_data="menu:help"),
@@ -70,16 +50,6 @@ def main_menu_kb(tg_id: int) -> InlineKeyboardMarkup:
             [InlineKeyboardButton(text="🆘 Поддержка", url=f"https://t.me/{SUPPORT_USERNAME}")]
         )
     return InlineKeyboardMarkup(inline_keyboard=buttons)
-
-
-def pay_kb(payment_url: str, token: str) -> InlineKeyboardMarkup:
-    # callback_data must be <= 64 bytes; UUID fits.
-    return InlineKeyboardMarkup(
-        inline_keyboard=[
-            [InlineKeyboardButton(text=PAY_TEXT, url=payment_url)],
-            [InlineKeyboardButton(text="✅ Я оплатил", callback_data=f"chk:{token}")],
-        ]
-    )
 
 
 def proxy_kb(proxy_link: str) -> InlineKeyboardMarkup:
@@ -94,6 +64,7 @@ def proxy_kb(proxy_link: str) -> InlineKeyboardMarkup:
         )
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
+
 def support_kb() -> InlineKeyboardMarkup | None:
     if not SUPPORT_USERNAME:
         return None
@@ -104,230 +75,14 @@ def support_kb() -> InlineKeyboardMarkup | None:
     )
 
 
-def _is_valid_email(email: str) -> bool:
-    e = email.strip()
-    # Good enough for MVP (avoid rejecting legitimate emails).
-    return "@" in e and "." in e and " " not in e and len(e) <= 255
-
-
-def _mask_email(email: str) -> str:
-    e = email.strip()
-    if "@" not in e:
-        return e
-    left, right = e.split("@", 1)
-    if len(left) <= 2:
-        left_mask = left[:1] + "*"
-    else:
-        left_mask = left[:1] + "*" * (len(left) - 2) + left[-1:]
-    return f"{left_mask}@{right}"
-
 def format_dt(dt_str: str | None) -> str:
     if not dt_str:
         return "неизвестно"
     try:
         dt = datetime.fromisoformat(dt_str.replace("Z", "+00:00"))
-        return dt.strftime("%d.%m.%Y %H:%M")
+        return dt.strftime("%d.%m.%Y")
     except Exception:
         return dt_str
-
-
-async def backend_get(session: aiohttp.ClientSession, path: str) -> dict[str, Any]:
-    url = f"{BACKEND_BASE_URL}{path}"
-    async with session.get(url, timeout=aiohttp.ClientTimeout(total=10)) as resp:
-        data = await resp.json(content_type=None)
-        if resp.status >= 400:
-            raise RuntimeError(f"Backend error {resp.status}: {data}")
-        if not isinstance(data, dict):
-            raise RuntimeError("Unexpected backend response")
-        return data
-
-
-async def backend_post(session: aiohttp.ClientSession, path: str, payload: dict[str, Any]) -> dict[str, Any]:
-    url = f"{BACKEND_BASE_URL}{path}"
-    async with session.post(
-        url,
-        json=payload,
-        timeout=aiohttp.ClientTimeout(total=15),
-        headers={"Content-Type": "application/json"},
-    ) as resp:
-        data = await resp.json(content_type=None)
-        if resp.status >= 400:
-            raise RuntimeError(f"Backend error {resp.status}: {data}")
-        if not isinstance(data, dict):
-            raise RuntimeError("Unexpected backend response")
-        return data
-
-
-async def create_checkout(
-    session: aiohttp.ClientSession, tg_id: int, username: str | None, email: str
-) -> tuple[str, str]:
-    data = await backend_post(
-        session,
-        "/checkout/create",
-        {"telegram_id": tg_id, "username": username or None, "email": email},
-    )
-    payment_url = str(data.get("payment_url") or "").strip()
-    payment_token = str(data.get("payment_token") or "").strip()
-    if not payment_url or not payment_token:
-        raise RuntimeError("Backend did not return payment_url/payment_token")
-    return payment_url, payment_token
-
-
-async def cmd_start(message: Message, session: aiohttp.ClientSession, state: FSMContext) -> None:
-    parts = (message.text or "").split(maxsplit=1)
-    token = parts[1].strip() if len(parts) > 1 else ""
-
-    if token:
-        try:
-            data = await backend_get(session, f"/subscription/token/{token}")
-        except Exception:
-            await message.answer("Не удалось проверить оплату. Попробуйте позже.")
-            return
-
-        if not data.get("found"):
-            await message.answer(
-                "Оплата не найдена или ещё не подтверждена.\n\n"
-                "Если вы только что оплатили — подождите 1–2 минуты и нажмите /start ещё раз.",
-                reply_markup=buy_kb(),
-            )
-            return
-
-        expires_at = format_dt(data.get("expires_at"))
-        proxy_link = data.get("proxy_link") or ""
-        if not proxy_link:
-            await message.answer(
-                f"✅ Подписка активна до {expires_at}\n\n"
-                "Прокси ещё не готов. Попробуйте через минуту или напишите в поддержку."
-            )
-            return
-
-        await message.answer(
-            f"✅ Подписка активна до {expires_at}\n\n"
-            "Нажми «🔌 Подключить прокси» — Telegram сам предложит добавить его.\n"
-            "Если не сработает — нажми «📖 Ручная настройка».",
-            reply_markup=proxy_kb(proxy_link),
-        )
-        return
-
-    tg_id = message.from_user.id if message.from_user else None
-    username = message.from_user.username if message.from_user else None
-    if not tg_id:
-        await message.answer("Не удалось определить ваш Telegram ID.", reply_markup=support_kb())
-        return
-
-    # Clear any pending email state when user re-opens the menu.
-    await state.clear()
-
-    await message.answer(
-        "Привет! Это Frosty.\n\n"
-        "Frosty подключает быстрый MTProxy прямо в Telegram — без VPN и ручных включений.\n\n"
-        "Выбери действие в меню ниже.",
-        reply_markup=main_menu_kb(tg_id),
-    )
-
-
-async def msg_email(message: Message, session: aiohttp.ClientSession, state: FSMContext) -> None:
-    tg_id = message.from_user.id if message.from_user else None
-    username = message.from_user.username if message.from_user else None
-    if not tg_id:
-        await message.answer("Не удалось определить ваш Telegram ID.", reply_markup=support_kb())
-        return
-
-    email = (message.text or "").strip()
-    if not _is_valid_email(email):
-        await message.answer(
-            "Похоже, это не email. Пришли, пожалуйста, email в формате name@example.com",
-            reply_markup=support_kb(),
-        )
-        return
-
-    _email_cache[tg_id] = email.lower()
-    await state.clear()
-
-    try:
-        payment_url, payment_token = await create_checkout(session, tg_id, username, email.lower())
-    except Exception:
-        await message.answer(
-            "Не удалось создать оплату прямо сейчас (платёжный шлюз временно недоступен).\n\n"
-            "Попробуй ещё раз через минуту.",
-            reply_markup=support_kb(),
-        )
-        return
-
-    await message.answer(
-        "Отлично, email сохранён: " + _mask_email(email) + "\n\n"
-        f"Подписка {PRICE_RUB}₽/мес.\n"
-        "Нажми «Оплатить», после оплаты вернись в бота и нажми «Я оплатил».",
-        reply_markup=pay_kb(payment_url, payment_token),
-    )
-
-
-async def cmd_status(message: Message, session: aiohttp.ClientSession) -> None:
-    tg_id = message.from_user.id if message.from_user else None
-    if not tg_id:
-        await message.answer("Не удалось определить ваш Telegram ID.")
-        return
-
-    try:
-        data = await backend_get(session, f"/subscription/{tg_id}")
-    except Exception:
-        await message.answer("Не удалось получить статус подписки. Попробуйте позже.")
-        return
-
-    if not data.get("active"):
-        await message.answer("Подписка не активна.", reply_markup=buy_kb())
-        return
-
-    expires_at = format_dt(data.get("expires_at"))
-    proxy_link = data.get("proxy_link")
-    if proxy_link:
-        await message.answer(
-            f"✅ Подписка активна до {expires_at}",
-            reply_markup=proxy_kb(proxy_link),
-        )
-    else:
-        await message.answer(f"✅ Подписка активна до {expires_at}\n\nПрокси-ссылка пока недоступна.")
-
-
-def _parse_proxy_link(link: str) -> tuple[str, str, str]:
-    """Extract (server, port, secret) from tg://proxy?server=...&port=...&secret=..."""
-    from urllib.parse import parse_qs, urlparse
-    parsed = urlparse(link)
-    params = parse_qs(parsed.query)
-    return (
-        params.get("server", ["—"])[0],
-        params.get("port", ["—"])[0],
-        params.get("secret", ["—"])[0],
-    )
-
-
-def _manual_setup_text(server: str, port: str, secret: str) -> str:
-    return (
-        "<b>Настройка подключения в Telegram</b>\n"
-        "\n"
-        "<b>На смартфоне (Android / iOS)</b>\n"
-        "1. Откройте Telegram\n"
-        "2. Перейдите в <b>Настройки → Данные и память → Прокси</b>\n"
-        "3. Включите «Использовать прокси»\n"
-        "4. Нажмите «Добавить прокси», выберите <b>MTProto</b>\n"
-        "5. Введите параметры:\n"
-        f"   • <b>Сервер:</b> <code>{server}</code>\n"
-        f"   • <b>Порт:</b> <code>{port}</code>\n"
-        f"   • <b>Секрет:</b> <code>{secret}</code>\n"
-        "6. Сохраните — Telegram начнёт использовать прокси\n"
-        "\n"
-        "<b>На компьютере (Telegram Desktop)</b>\n"
-        "1. Откройте Telegram Desktop\n"
-        "2. Перейдите в <b>Настройки → Дополнительно → Тип соединения</b>\n"
-        "3. Выберите «Использовать прокси (MTProto)»\n"
-        "4. Введите:\n"
-        f"   • <b>Сервер:</b> <code>{server}</code>\n"
-        f"   • <b>Порт:</b> <code>{port}</code>\n"
-        f"   • <b>Секрет:</b> <code>{secret}</code>\n"
-        "5. Нажмите Сохранить\n"
-        "\n"
-        "Готово! Telegram будет работать через защищённый прокси — без замедлений и ограничений."
-    )
 
 
 HELP_GENERAL = (
@@ -350,8 +105,46 @@ HELP_GENERAL = (
 )
 
 
-async def cmd_help(message: Message) -> None:
-    await message.answer(HELP_GENERAL, parse_mode="HTML")
+async def backend_get(session: aiohttp.ClientSession, path: str) -> dict[str, Any]:
+    url = f"{BACKEND_BASE_URL}{path}"
+    async with session.get(url, timeout=aiohttp.ClientTimeout(total=10)) as resp:
+        data = await resp.json(content_type=None)
+        if resp.status >= 400:
+            raise RuntimeError(f"Backend error {resp.status}: {data}")
+        if not isinstance(data, dict):
+            raise RuntimeError("Unexpected backend response")
+        return data
+
+
+def _parse_proxy_link(link: str) -> tuple[str, str, str]:
+    from urllib.parse import parse_qs, urlparse
+    parsed = urlparse(link)
+    params = parse_qs(parsed.query)
+    return (
+        params.get("server", ["—"])[0],
+        params.get("port", ["—"])[0],
+        params.get("secret", ["—"])[0],
+    )
+
+
+def _manual_setup_text(server: str, port: str, secret: str) -> str:
+    return (
+        "<b>Настройка подключения в Telegram</b>\n"
+        "\n"
+        "<b>На смартфоне (Android / iOS)</b>\n"
+        "1. Откройте Telegram → <b>Настройки → Данные и память → Прокси</b>\n"
+        "2. Включите «Использовать прокси» → «Добавить прокси» → <b>MTProto</b>\n"
+        "3. Введите:\n"
+        f"   • <b>Сервер:</b> <code>{server}</code>\n"
+        f"   • <b>Порт:</b> <code>{port}</code>\n"
+        f"   • <b>Секрет:</b> <code>{secret}</code>\n"
+        "4. Сохраните\n"
+        "\n"
+        "<b>На компьютере (Telegram Desktop)</b>\n"
+        "1. <b>Настройки → Дополнительно → Тип соединения</b>\n"
+        "2. Выберите «Использовать прокси (MTProto)»\n"
+        "3. Введите те же данные и сохраните"
+    )
 
 
 async def _get_proxy_link(session: aiohttp.ClientSession, tg_id: int) -> str | None:
@@ -364,76 +157,75 @@ async def _get_proxy_link(session: aiohttp.ClientSession, tg_id: int) -> str | N
     return data.get("proxy_link") or None
 
 
-async def cb_copy_proxy_link(query: CallbackQuery, session: aiohttp.ClientSession) -> None:
-    msg = query.message
-    if not msg or not isinstance(msg, Message):
-        await query.answer("Не удалось.", show_alert=True)
+# ── Handlers ──
+
+
+async def cmd_start(message: Message, session: aiohttp.ClientSession, state: FSMContext) -> None:
+    parts = (message.text or "").split(maxsplit=1)
+    token = parts[1].strip() if len(parts) > 1 else ""
+
+    tg_id = message.from_user.id if message.from_user else None
+    if not tg_id:
+        await message.answer("Не удалось определить ваш Telegram ID.", reply_markup=support_kb())
         return
 
-    proxy_link = await _get_proxy_link(session, query.from_user.id)
-    if not proxy_link:
-        await query.answer("Подписка не активна или ссылка недоступна.", show_alert=True)
-        return
+    await state.clear()
 
-    await msg.answer(f"Ссылка для копирования:\n<code>{proxy_link}</code>", parse_mode="HTML")
-    await query.answer("Ссылка отправлена сообщением.", show_alert=False)
+    if token:
+        try:
+            data = await backend_get(session, f"/subscription/token/{token}")
+        except Exception:
+            await message.answer("Не удалось проверить оплату. Попробуйте позже.")
+            return
+
+        if data.get("found"):
+            expires_at = format_dt(data.get("expires_at"))
+            proxy_link = data.get("proxy_link") or ""
+            if proxy_link:
+                await message.answer(
+                    f"✅ Подписка активна до {expires_at}\n\n"
+                    "Нажми «🔌 Подключить прокси» — Telegram сам предложит добавить его.",
+                    reply_markup=proxy_kb(proxy_link),
+                )
+                return
+
+    await message.answer(
+        "Привет! Это <b>Frosty</b>.\n\n"
+        "Быстрый MTProxy прямо в Telegram — без VPN и ручных настроек.\n\n"
+        "Выбери действие:",
+        parse_mode="HTML",
+        reply_markup=main_menu_kb(tg_id),
+    )
 
 
-async def cb_manual_setup(query: CallbackQuery, session: aiohttp.ClientSession) -> None:
-    msg = query.message
-    if not msg or not isinstance(msg, Message):
-        await query.answer("Не удалось.", show_alert=True)
-        return
-
-    proxy_link = await _get_proxy_link(session, query.from_user.id)
-    if not proxy_link:
-        await query.answer("Подписка не активна или ссылка недоступна.", show_alert=True)
-        return
-
-    server, port, secret = _parse_proxy_link(proxy_link)
-    await msg.answer(_manual_setup_text(server, port, secret), parse_mode="HTML")
-    await query.answer()
-
-
-async def cb_check_paid(query: CallbackQuery, session: aiohttp.ClientSession) -> None:
-    msg = query.message
-    if not msg or not isinstance(msg, Message):
-        await query.answer("Не удалось.", show_alert=True)
-        return
-
-    data_str = (query.data or "").strip()
-    if not data_str.startswith("chk:"):
-        await query.answer("Не удалось.", show_alert=True)
-        return
-
-    token = data_str.removeprefix("chk:").strip()
-    if not token:
-        await query.answer("Не удалось.", show_alert=True)
-        return
-
+async def cmd_status(message: Message, session: aiohttp.ClientSession, tg_id: int) -> None:
     try:
-        data = await backend_get(session, f"/subscription/token/{token}")
+        data = await backend_get(session, f"/subscription/{tg_id}")
     except Exception:
-        await query.answer("Backend недоступен.", show_alert=True)
+        await message.answer("Не удалось получить статус. Попробуйте позже.", reply_markup=support_kb())
         return
 
-    if not data.get("found"):
-        await query.answer("Оплата ещё не подтверждена. Попробуй через 1–2 минуты.", show_alert=True)
+    if not data.get("active"):
+        await message.answer(
+            f"Подписка не активна.\n\nСтоимость: {PRICE_RUB} ₽/мес.",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="💳 Оформить подписку", web_app=WebAppInfo(url=_miniapp_url(tg_id)))],
+            ]),
+        )
         return
 
     expires_at = format_dt(data.get("expires_at"))
-    proxy_link = data.get("proxy_link") or ""
-    if not proxy_link:
-        await query.answer("Подписка активна, но прокси ещё готовится. Попробуй чуть позже.", show_alert=True)
-        return
-
-    await msg.answer(
-        f"✅ Подписка активна до {expires_at}\n\n"
-        "Нажми «🔌 Подключить прокси» — Telegram сам предложит добавить его.\n"
-        "Если не сработает — нажми «📖 Ручная настройка».",
-        reply_markup=proxy_kb(proxy_link),
+    proxy_link = data.get("proxy_link")
+    text = (
+        f"✅ <b>Подписка активна</b>\n\n"
+        f"Тариф: {PRICE_RUB} ₽/мес\n"
+        f"Действует до: {expires_at}"
     )
-    await query.answer("Готово.", show_alert=False)
+
+    if proxy_link:
+        await message.answer(text, parse_mode="HTML", reply_markup=proxy_kb(proxy_link))
+    else:
+        await message.answer(text, parse_mode="HTML")
 
 
 async def main() -> None:
@@ -462,19 +254,15 @@ async def main() -> None:
         session: aiohttp.ClientSession = dp["http_session"]
         await cmd_start(message, session, state)
 
-    @dp.message(CheckoutFlow.waiting_email)
-    async def _email(message: Message, state: FSMContext) -> None:
-        session: aiohttp.ClientSession = dp["http_session"]
-        await msg_email(message, session, state)
-
     @dp.message(Command("status"))
     async def _status(message: Message) -> None:
         session: aiohttp.ClientSession = dp["http_session"]
-        await cmd_status(message, session)
+        tg_id = message.from_user.id if message.from_user else 0
+        await cmd_status(message, session, tg_id)
 
     @dp.message(Command("help"))
     async def _help(message: Message) -> None:
-        await cmd_help(message)
+        await message.answer(HELP_GENERAL, parse_mode="HTML")
 
     @dp.callback_query(lambda c: (c.data or "").startswith("menu:"))
     async def _menu(query: CallbackQuery, state: FSMContext) -> None:
@@ -491,39 +279,7 @@ async def main() -> None:
             return
 
         if action == "status":
-            await cmd_status(msg, session)
-            await query.answer()
-            return
-
-        if action == "subscribe":
-            tg_id = query.from_user.id
-            cached = _email_cache.get(tg_id)
-            if not cached:
-                await state.set_state(CheckoutFlow.waiting_email)
-                await msg.answer(
-                    "Перед оплатой пришли email одним сообщением.\n\n"
-                    "Он нужен lava.top для оплаты. Пример: name@example.com",
-                    reply_markup=support_kb(),
-                )
-                await query.answer()
-                return
-
-            try:
-                payment_url, payment_token = await create_checkout(session, tg_id, query.from_user.username, cached)
-            except Exception:
-                await msg.answer(
-                    "Не удалось создать оплату прямо сейчас (платёжный шлюз временно недоступен).\n\n"
-                    "Попробуй ещё раз через минуту.",
-                    reply_markup=support_kb(),
-                )
-                await query.answer()
-                return
-
-            await msg.answer(
-                f"Подписка {PRICE_RUB}₽/мес.\n"
-                "Нажми «Оплатить», после оплаты вернись в бота и нажми «Я оплатил».",
-                reply_markup=pay_kb(payment_url, payment_token),
-            )
+            await cmd_status(msg, session, tg_id=query.from_user.id)
             await query.answer()
             return
 
@@ -532,21 +288,34 @@ async def main() -> None:
     @dp.callback_query(lambda c: c.data == "copy_proxy_link")
     async def _copy(query: CallbackQuery) -> None:
         session: aiohttp.ClientSession = dp["http_session"]
-        await cb_copy_proxy_link(query, session)
+        msg = query.message
+        if not msg or not isinstance(msg, Message):
+            await query.answer("Не удалось.", show_alert=True)
+            return
+        proxy_link = await _get_proxy_link(session, query.from_user.id)
+        if not proxy_link:
+            await query.answer("Подписка не активна.", show_alert=True)
+            return
+        await msg.answer(f"Ссылка для копирования:\n<code>{proxy_link}</code>", parse_mode="HTML")
+        await query.answer()
 
     @dp.callback_query(lambda c: c.data == "manual_setup")
     async def _manual(query: CallbackQuery) -> None:
         session: aiohttp.ClientSession = dp["http_session"]
-        await cb_manual_setup(query, session)
-
-    @dp.callback_query(lambda c: (c.data or "").startswith("chk:"))
-    async def _chk(query: CallbackQuery) -> None:
-        session: aiohttp.ClientSession = dp["http_session"]
-        await cb_check_paid(query, session)
+        msg = query.message
+        if not msg or not isinstance(msg, Message):
+            await query.answer("Не удалось.", show_alert=True)
+            return
+        proxy_link = await _get_proxy_link(session, query.from_user.id)
+        if not proxy_link:
+            await query.answer("Подписка не активна.", show_alert=True)
+            return
+        server, port, secret = _parse_proxy_link(proxy_link)
+        await msg.answer(_manual_setup_text(server, port, secret), parse_mode="HTML")
+        await query.answer()
 
     await dp.start_polling(bot)
 
 
 if __name__ == "__main__":
     asyncio.run(main())
-
