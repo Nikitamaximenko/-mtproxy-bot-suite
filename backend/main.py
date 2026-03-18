@@ -143,6 +143,10 @@ def health() -> HealthResponse:
     return HealthResponse(status="ok")
 
 
+class OkResponse(BaseModel):
+    ok: bool = True
+
+
 class TrackRefRequest(BaseModel):
     telegram_id: int = Field(..., ge=1)
     username: str | None = None
@@ -267,10 +271,6 @@ def checkout_create(payload: CheckoutCreateRequest, db: Session = Depends(get_db
         db.commit()
 
     return CheckoutCreateResponse(payment_url=payment_url, payment_token=token)
-
-
-class OkResponse(BaseModel):
-    ok: bool = True
 
 
 def activate_subscription(sub: Subscription) -> None:
