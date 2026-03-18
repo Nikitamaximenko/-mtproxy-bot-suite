@@ -101,9 +101,23 @@ def get_db() -> Generator[Session, None, None]:
 logging.basicConfig(level=logging.INFO)
 
 
+def _migrate() -> None:
+    """Add columns that create_all won't add to existing tables."""
+    from sqlalchemy import inspect as sa_inspect, text
+    inspector = sa_inspect(engine)
+    if "subscriptions" in inspector.get_table_names():
+        existing = {c["name"] for c in inspector.get_columns("subscriptions")}
+        with engine.begin() as conn:
+            if "notified_expiring" not in existing:
+                conn.execute(text("ALTER TABLE subscriptions ADD COLUMN notified_expiring BOOLEAN NOT NULL DEFAULT FALSE"))
+            if "notified_expired" not in existing:
+                conn.execute(text("ALTER TABLE subscriptions ADD COLUMN notified_expired BOOLEAN NOT NULL DEFAULT FALSE"))
+
+
 @asynccontextmanager
 async def lifespan(application: FastAPI) -> AsyncGenerator[None, None]:
     Base.metadata.create_all(bind=engine)
+    _migrate()
     task = asyncio.create_task(_expiration_loop())
     yield
     task.cancel()
