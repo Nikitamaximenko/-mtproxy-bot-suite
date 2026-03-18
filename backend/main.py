@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import secrets
 from datetime import datetime, timedelta, timezone
@@ -235,8 +236,6 @@ def activate_subscription(sub: Subscription) -> None:
     sub.proxy_port = MT_PROXY_PORT
     sub.proxy_secret = MT_PROXY_SECRET or "dd645eba01a59f188b5ba9db2564b44a00"
 
-
-import logging
 
 logger = logging.getLogger("mtproxy")
 
