@@ -269,10 +269,24 @@ export default function MiniAppPage() {
             <div className="w-20 h-20 rounded-2xl ice-block-solid flex items-center justify-center mx-auto mb-4 frost-glow">
               <Snowflake className="w-10 h-10 text-primary-foreground" />
             </div>
-            <h1 className="text-2xl font-bold text-foreground mb-1">Подписка активна</h1>
-            <div className="flex items-center justify-center gap-2 text-sm text-muted-foreground">
-              <div className="w-2 h-2 rounded-full bg-success animate-pulse" />
-              <span>Ограничения заморожены</span>
+            <div className="bg-card border border-border/50 rounded-2xl p-5 mx-2">
+              <div className="flex items-center justify-between mb-4">
+                <span className="text-sm text-muted-foreground">Статус</span>
+                <span className="flex items-center gap-2 text-sm font-medium text-primary">
+                  <span className="w-2 h-2 rounded-full bg-primary animate-pulse" />
+                  Активна
+                </span>
+              </div>
+              <div className="flex items-center justify-between mb-4">
+                <span className="text-sm text-muted-foreground">Следующий платёж</span>
+                <span className="text-sm font-medium text-foreground">
+                  {expiresAt ? new Date(expiresAt).toLocaleDateString("ru-RU") : "—"}
+                </span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-sm text-muted-foreground">Тариф</span>
+                <span className="text-sm font-medium text-foreground">299 ₽/мес</span>
+              </div>
             </div>
           </div>
 
