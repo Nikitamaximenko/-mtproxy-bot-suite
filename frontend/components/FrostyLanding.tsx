@@ -501,8 +501,8 @@ export function FrostyLanding() {
       answer: "Нет! Frosty работает независимо от VPN и других приложений. Вы можете использовать их одновременно без каких-либо конфликтов."
     },
     {
-      question: "Чем отличается Premium от обычного тарифа?",
-      answer: "Premium дает скорость в 3 раза выше и возможность подключить до 3 устройств или поделиться с близкими. Идеально для семьи или если вам нужна максимальная скорость."
+      question: "Почему разовый платеж, а не подписка?",
+      answer: "Мы верим в честные условия. Один раз оплатили — пользуетесь навсегда. Никаких автоматических списаний и скрытых платежей."
     },
     {
       question: "Как происходит оплата?",
@@ -652,42 +652,42 @@ export function FrostyLanding() {
 
         {/* Pricing Section */}
         <section className="px-4 py-12 md:py-20 bg-secondary/50">
-          <div className="max-w-3xl mx-auto">
+          <div className="max-w-lg mx-auto">
             <h2 className="text-2xl md:text-4xl font-bold text-center text-foreground mb-3">
-              Выберите тариф
+              Одна цена. Навсегда.
             </h2>
             <p className="text-center text-muted-foreground text-base mb-8 md:mb-12">
-              Простые цены. Без скрытых платежей.
+              Без подписок. Без скрытых платежей.
             </p>
 
-            <div className="grid gap-6 md:grid-cols-2 md:items-stretch">
-              <PricingCard
-                title="Обычный"
-                price={500}
-                features={[
-                  "Полный доступ к Telegram",
-                  "Стабильное соединение",
-                  "1 устройство",
-                  "Техподдержка в боте"
-                ]}
-              />
-              <PricingCard
-                title="Premium"
-                price={1000}
-                popular
-                features={[
-                  "Скорость в 3 раза выше",
-                  "До 3 устройств",
-                  "Приоритетные серверы",
-                  "Приоритетная техподдержка"
-                ]}
-              />
-            </div>
+            {/* Single Price Card */}
+            <div className="relative">
+              <div className="absolute inset-0 bg-gradient-to-r from-primary/20 to-cyan-600/20 rounded-3xl blur-xl" />
+              <div className="relative bg-card border-2 border-primary/30 rounded-3xl p-8 text-center">
+                <div className="inline-flex items-baseline mb-4">
+                  <span className="text-6xl font-bold text-foreground">299</span>
+                  <span className="text-2xl text-muted-foreground ml-2">₽</span>
+                </div>
+                <p className="text-primary font-medium mb-6">Разовый платеж</p>
+                
+                <ul className="space-y-3 text-left max-w-xs mx-auto mb-8">
+                  {[
+                    "Telegram без ограничений",
+                    "Работает навсегда",
+                    "Подключение за 10 секунд",
+                    "Не мешает VPN",
+                    "Безопасно и анонимно"
+                  ].map((feature, i) => (
+                    <li key={i} className="flex items-center gap-3 text-muted-foreground">
+                      <div className="w-5 h-5 rounded-full bg-primary/10 flex items-center justify-center flex-shrink-0">
+                        <Check className="w-3 h-3 text-primary" />
+                      </div>
+                      {feature}
+                    </li>
+                  ))}
+                </ul>
 
-            <div className="mt-8 text-center">
-              <div className="inline-flex items-center gap-2 px-4 py-2.5 rounded-full bg-card border border-border text-sm text-muted-foreground">
-                <Users className="w-4 h-4 text-primary" />
-                <span>Premium идеален для семьи</span>
+                <CTAButton size="large" />
               </div>
             </div>
           </div>
