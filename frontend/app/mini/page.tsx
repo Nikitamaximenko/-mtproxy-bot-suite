@@ -33,7 +33,7 @@ function getTgIdFallbackFromUrl(): number | null {
   return Number.isFinite(n) && n > 0 ? n : null
 }
 
-/* ── Payment Modal ── */
+/* ── Payment Waiting Screen ── */
 function PaymentModal({
   url,
   tgId,
@@ -46,7 +46,7 @@ function PaymentModal({
   onPaid: (sub: SubscriptionData) => void
 }) {
   const [checking, setChecking] = useState(false)
-  const [iframeError, setIframeError] = useState(false)
+  const [opened, setOpened] = useState(false)
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
   const checkPayment = useCallback(async () => {
@@ -70,9 +70,18 @@ function PaymentModal({
     }
   }, [checkPayment])
 
+  const handleOpenPayment = () => {
+    openTelegramLink(url)
+    setOpened(true)
+  }
+
+  useEffect(() => {
+    handleOpenPayment()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
   return (
     <div className="fixed inset-0 z-50 bg-background flex flex-col">
-      {/* Header bar */}
       <div className="flex items-center justify-between px-4 py-3 border-b border-border bg-card">
         <div className="flex items-center gap-2">
           <FrostIcon className="w-6 h-6 text-primary" />
@@ -86,31 +95,30 @@ function PaymentModal({
         </button>
       </div>
 
-      {/* Iframe */}
-      <div className="flex-1 relative">
-        {!iframeError ? (
-          <iframe
-            title="Оплата Lava.top"
-            src={url}
-            className="w-full h-full border-0"
-            onError={() => setIframeError(true)}
-            sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-top-navigation"
-          />
-        ) : (
-          <div className="flex flex-col items-center justify-center h-full px-6 text-center gap-4">
-            <p className="text-muted-foreground text-sm">Не удалось загрузить страницу оплаты</p>
-            <button
-              onClick={() => openTelegramLink(url)}
-              className="flex items-center gap-2 px-5 py-3 bg-primary text-primary-foreground font-medium rounded-xl active:scale-95 transition-all touch-manipulation"
-            >
-              <ExternalLink className="w-4 h-4" />
-              Открыть в браузере
-            </button>
+      <div className="flex-1 flex flex-col items-center justify-center px-6 text-center gap-6">
+        <div className="w-20 h-20 rounded-2xl ice-block-solid flex items-center justify-center frost-glow">
+          <Snowflake className="w-10 h-10 text-primary-foreground animate-pulse" />
+        </div>
+
+        <div>
+          <h2 className="text-xl font-bold text-foreground mb-2">
+            {opened ? "Ожидаем оплату" : "Переход к оплате"}
+          </h2>
+          <p className="text-sm text-muted-foreground leading-relaxed">
+            {opened
+              ? "Страница оплаты открыта в браузере.\nПосле оплаты вернитесь сюда — статус обновится автоматически."
+              : "Сейчас откроется страница оплаты…"}
+          </p>
+        </div>
+
+        {opened && (
+          <div className="flex items-center gap-2 text-xs text-muted-foreground">
+            <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+            <span>Проверяем статус каждые 5 сек…</span>
           </div>
         )}
       </div>
 
-      {/* Bottom bar */}
       <div className="px-4 py-3 border-t border-border bg-card space-y-2">
         <button
           onClick={checkPayment}
@@ -125,11 +133,11 @@ function PaymentModal({
           {checking ? "Проверяем…" : "Я оплатил"}
         </button>
         <button
-          onClick={() => openTelegramLink(url)}
+          onClick={handleOpenPayment}
           className="w-full flex items-center justify-center gap-2 py-2.5 text-sm text-muted-foreground touch-manipulation"
         >
           <ExternalLink className="w-3.5 h-3.5" />
-          Открыть в браузере Telegram
+          Открыть страницу оплаты
         </button>
       </div>
     </div>
