@@ -94,6 +94,8 @@ def get_db() -> Generator[Session, None, None]:
         db.close()
 
 
+logging.basicConfig(level=logging.INFO)
+
 app = FastAPI(title="MTProxy Backend", version="0.2.0")
 
 
@@ -234,20 +236,61 @@ def activate_subscription(sub: Subscription) -> None:
     sub.proxy_secret = MT_PROXY_SECRET or "dd645eba01a59f188b5ba9db2564b44a00"
 
 
+import logging
+
+logger = logging.getLogger("mtproxy")
+
+BOT_TOKEN = (os.getenv("BOT_TOKEN") or "").strip()
+
+
+def _notify_telegram(tg_id: int, proxy_link: str) -> None:
+    """Best-effort notification to user via Telegram Bot API."""
+    if not BOT_TOKEN:
+        return
+    try:
+        import urllib.request
+        msg = (
+            "✅ Оплата прошла!\n\n"
+            "Ваша подписка активна 30 дней.\n"
+            "Нажмите кнопку ниже, чтобы подключить прокси."
+        )
+        keyboard = json.dumps({
+            "inline_keyboard": [
+                [{"text": "🔌 Подключить прокси", "url": proxy_link}],
+                [{"text": "📋 Скопировать ссылку", "callback_data": "copy_proxy_link"}],
+                [{"text": "📖 Ручная настройка", "callback_data": "manual_setup"}],
+            ]
+        })
+        data = json.dumps({"chat_id": tg_id, "text": msg, "reply_markup": keyboard}).encode()
+        req = urllib.request.Request(
+            f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage",
+            data=data,
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        urllib.request.urlopen(req, timeout=10)
+    except Exception as exc:
+        logger.warning("Failed to notify tg_id=%s: %s", tg_id, exc)
+
+
 @app.post("/webhooks/lava", response_model=OkResponse)
 async def lava_webhook(req: Request, db: Session = Depends(get_db)) -> OkResponse:
-    # Webhook auth (recommended): lava.top sends your configured key in X-Api-Key header
+    raw_body = await req.body()
+    logger.info("Webhook received: headers=%s body=%s", dict(req.headers), raw_body[:500])
+
     if LAVA_TOP_WEBHOOK_API_KEY:
         got = (req.headers.get("x-api-key") or "").strip()
         if got != LAVA_TOP_WEBHOOK_API_KEY:
+            logger.warning("Webhook key mismatch: got=%s expected=%s", got[:8], LAVA_TOP_WEBHOOK_API_KEY[:8])
             return OkResponse(ok=True)
 
-    payload = await req.json()
+    payload = json.loads(raw_body) if raw_body else {}
     if not isinstance(payload, dict):
         return OkResponse(ok=True)
 
-    # Swagger example: payload has eventType + contractId (and maybe parentContractId)
     event_type = str(payload.get("eventType") or "").strip()
+    logger.info("Webhook eventType=%s contractId=%s", event_type, payload.get("contractId"))
+
     if event_type not in {"payment.success", "subscription.recurring.payment.success"}:
         return OkResponse(ok=True)
 
@@ -257,11 +300,16 @@ async def lava_webhook(req: Request, db: Session = Depends(get_db)) -> OkRespons
 
     sub = db.execute(select(Subscription).where(Subscription.lava_contract_id == contract_id)).scalar_one_or_none()
     if sub is None:
-        # Чтобы вебхук не ретраился бесконечно, отвечаем 200.
+        logger.warning("No subscription found for contractId=%s", contract_id)
         return OkResponse(ok=True)
 
     activate_subscription(sub)
     db.commit()
+    logger.info("Subscription activated for tg_id=%s contract=%s", sub.telegram_id, contract_id)
+
+    proxy_link = f"tg://proxy?server={sub.proxy_server}&port={sub.proxy_port}&secret={sub.proxy_secret}"
+    _notify_telegram(sub.telegram_id, proxy_link)
+
     return OkResponse(ok=True)
 
 
