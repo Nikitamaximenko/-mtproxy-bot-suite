@@ -75,6 +75,62 @@ function StatusBadge({ status }: { status: string }) {
   )
 }
 
+/** Доступ как в API: paid и срок в будущем */
+function isSubAccessActive(s: SubInfo): boolean {
+  if (s.payment_status !== "paid") return false
+  if (!s.expires_at) return false
+  return new Date(s.expires_at).getTime() > Date.now()
+}
+
+function AccessToggle({
+  active,
+  busy,
+  onToggle,
+}: {
+  active: boolean
+  busy: boolean
+  onToggle: () => void
+}) {
+  return (
+    <div className="flex items-center justify-end gap-2">
+      <button
+        type="button"
+        role="switch"
+        aria-checked={active}
+        aria-label={active ? "Деактивировать подписку" : "Активировать подписку"}
+        disabled={busy}
+        onClick={onToggle}
+        className={`relative h-7 w-12 rounded-full transition-colors shrink-0 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 focus:ring-offset-gray-950 disabled:opacity-50 ${
+          active ? "bg-emerald-600" : "bg-gray-600"
+        }`}
+      >
+        <span
+          className={`absolute top-0.5 left-0.5 block h-6 w-6 rounded-full bg-white shadow transition-transform duration-200 ease-out ${
+            active ? "translate-x-5" : "translate-x-0"
+          }`}
+        />
+      </button>
+      <span className="text-xs text-gray-500 w-8 text-right">{busy ? "…" : active ? "Вкл" : "Выкл"}</span>
+    </div>
+  )
+}
+
+/** Во вкладке «Новые» активной подписки в данных нет — только выдача доступа. */
+function GrantAccessButton({ busy, onGrant }: { busy: boolean; onGrant: () => void }) {
+  return (
+    <div className="flex justify-end">
+      <button
+        type="button"
+        disabled={busy}
+        onClick={onGrant}
+        className="px-3 py-1.5 text-xs font-medium rounded-lg bg-emerald-700 text-white hover:bg-emerald-600 disabled:opacity-50 transition-colors"
+      >
+        {busy ? "…" : "Выдать доступ"}
+      </button>
+    </div>
+  )
+}
+
 const STORAGE_KEY = "frosty_admin_key"
 
 export default function AdminPage() {
@@ -89,6 +145,7 @@ export default function AdminPage() {
   const [error, setError] = useState("")
   const [remember, setRemember] = useState(true)
   const [activatingAdmin, setActivatingAdmin] = useState(false)
+  const [pendingTgId, setPendingTgId] = useState<number | null>(null)
   const ADMIN_TG_ID = 231115635
 
   const headers = useCallback(
@@ -152,6 +209,44 @@ export default function AdminPage() {
       }
     },
     [headers, key, persistKey],
+  )
+
+  const setUserSubscription = useCallback(
+    async (telegramId: number, makeActive: boolean) => {
+      setPendingTgId(telegramId)
+      setError("")
+      try {
+        const segment = makeActive ? "activate" : "deactivate"
+        const res = await fetch(`/api/admin/${segment}/${telegramId}`, {
+          method: "POST",
+          headers: {
+            ...headers(),
+            "Content-Type": "application/json",
+          },
+          body: "{}",
+          cache: "no-store",
+        })
+        const data = (await res.json().catch(() => ({}))) as {
+          detail?: string | { msg?: string }[]
+          error?: string
+        }
+        if (!res.ok) {
+          let msg = `Ошибка ${res.status}`
+          if (typeof data.detail === "string") msg = data.detail
+          else if (Array.isArray(data.detail) && data.detail[0] && typeof data.detail[0] === "object") {
+            const d = data.detail[0] as { msg?: string }
+            if (d.msg) msg = d.msg
+          } else if (typeof data.error === "string") msg = data.error
+          throw new Error(msg)
+        }
+        await fetchAll()
+      } catch (e) {
+        setError(e instanceof Error ? e.message : "Не удалось изменить подписку")
+      } finally {
+        setPendingTgId(null)
+      }
+    },
+    [fetchAll, headers],
   )
 
   /** Один раз при монтировании: пробуем ключ из localStorage и не показываем форму входа до проверки */
@@ -262,7 +357,7 @@ export default function AdminPage() {
           <button
             type="button"
             onClick={() => void fetchAll()}
-            disabled={loading || activatingAdmin}
+            disabled={loading || activatingAdmin || pendingTgId !== null}
             className="px-4 py-2 text-sm bg-gray-800 rounded-lg hover:bg-gray-700 transition-colors disabled:opacity-50"
           >
             {loading ? "⟳" : "Обновить"}
@@ -271,28 +366,13 @@ export default function AdminPage() {
             type="button"
             onClick={async () => {
               setActivatingAdmin(true)
-              setError("")
               try {
-                const res = await fetch(`/api/admin/activate/${ADMIN_TG_ID}`, {
-                  method: "POST",
-                  headers: {
-                    ...headers(),
-                    "Content-Type": "application/json",
-                  },
-                  body: JSON.stringify({}),
-                  cache: "no-store",
-                })
-                if (!res.ok) {
-                  throw new Error(`Backend returned ${res.status}`)
-                }
-                await fetchAll()
-              } catch (e) {
-                setError(e instanceof Error ? e.message : "Не удалось активировать подписку")
+                await setUserSubscription(ADMIN_TG_ID, true)
               } finally {
                 setActivatingAdmin(false)
               }
             }}
-            disabled={loading || activatingAdmin}
+            disabled={loading || activatingAdmin || pendingTgId !== null}
             className="px-4 py-2 text-sm bg-blue-700 rounded-lg hover:bg-blue-600 transition-colors disabled:opacity-50"
           >
             {activatingAdmin ? "Активация…" : "Вернуть подписку админа"}
@@ -395,6 +475,9 @@ export default function AdminPage() {
             <strong>Новые</strong> — записи в <code className="text-gray-400">users</code> без оплаченной или
             истёкшей подписки (только pending или без подписок). <strong>Платные</strong> — когда-либо оплатили
             (paid/expired); показана последняя запись подписки.
+            <span className="block mt-1">
+              Тумблер <strong>Доступ</strong>: вкл — ручная активация (+30 дней), выкл — отзыв (как /admin/deactivate).
+            </span>
           </p>
 
           {userTab === "new" ? (
@@ -408,6 +491,7 @@ export default function AdminPage() {
                       <th className="px-4 py-3 font-medium">Username</th>
                       <th className="px-4 py-3 font-medium">Ref</th>
                       <th className="px-4 py-3 font-medium">Регистрация</th>
+                      <th className="px-4 py-3 font-medium text-right">Доступ</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -421,11 +505,17 @@ export default function AdminPage() {
                         <td className="px-4 py-3 text-gray-300">{u.username ? `@${u.username}` : "—"}</td>
                         <td className="px-4 py-3 font-mono text-xs text-gray-500">{u.ref_source ?? "—"}</td>
                         <td className="px-4 py-3 text-gray-400">{formatDate(u.created_at)}</td>
+                        <td className="px-4 py-3 text-right">
+                          <GrantAccessButton
+                            busy={pendingTgId === u.telegram_id}
+                            onGrant={() => void setUserSubscription(u.telegram_id, true)}
+                          />
+                        </td>
                       </tr>
                     ))}
                     {newUsers.length === 0 && (
                       <tr>
-                        <td colSpan={5} className="px-4 py-8 text-center text-gray-500">
+                        <td colSpan={6} className="px-4 py-8 text-center text-gray-500">
                           Нет пользователей в этой категории
                         </td>
                       </tr>
@@ -447,36 +537,49 @@ export default function AdminPage() {
                       <th className="px-4 py-3 font-medium">Истекает</th>
                       <th className="px-4 py-3 font-medium">Создана</th>
                       <th className="px-4 py-3 font-medium">Прокси</th>
+                      <th className="px-4 py-3 font-medium text-right">Доступ</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {subscribers.map((s) => (
-                      <tr
-                        key={s.id}
-                        className="border-b border-gray-800/50 hover:bg-gray-800/30 transition-colors"
-                      >
-                        <td className="px-4 py-3 font-mono text-gray-400">{s.id}</td>
-                        <td className="px-4 py-3 font-mono">{s.telegram_id}</td>
-                        <td className="px-4 py-3 text-gray-300">
-                          {s.username ? `@${s.username}` : "—"}
-                        </td>
-                        <td className="px-4 py-3">
-                          <StatusBadge status={s.payment_status} />
-                        </td>
-                        <td className="px-4 py-3 text-gray-300">{formatDate(s.expires_at)}</td>
-                        <td className="px-4 py-3 text-gray-400">{formatDate(s.created_at)}</td>
-                        <td className="px-4 py-3">
-                          {s.has_proxy ? (
-                            <span className="text-emerald-400">✓</span>
-                          ) : (
-                            <span className="text-gray-600">—</span>
-                          )}
-                        </td>
-                      </tr>
-                    ))}
+                    {subscribers.map((s) => {
+                      const accessOn = isSubAccessActive(s)
+                      return (
+                        <tr
+                          key={s.id}
+                          className="border-b border-gray-800/50 hover:bg-gray-800/30 transition-colors"
+                        >
+                          <td className="px-4 py-3 font-mono text-gray-400">{s.id}</td>
+                          <td className="px-4 py-3 font-mono">{s.telegram_id}</td>
+                          <td className="px-4 py-3 text-gray-300">
+                            {s.username ? `@${s.username}` : "—"}
+                          </td>
+                          <td className="px-4 py-3">
+                            <StatusBadge status={s.payment_status} />
+                          </td>
+                          <td className="px-4 py-3 text-gray-300">{formatDate(s.expires_at)}</td>
+                          <td className="px-4 py-3 text-gray-400">{formatDate(s.created_at)}</td>
+                          <td className="px-4 py-3">
+                            {s.has_proxy ? (
+                              <span className="text-emerald-400">✓</span>
+                            ) : (
+                              <span className="text-gray-600">—</span>
+                            )}
+                          </td>
+                          <td className="px-4 py-3 text-right">
+                            <AccessToggle
+                              active={accessOn}
+                              busy={pendingTgId === s.telegram_id}
+                              onToggle={() =>
+                                void setUserSubscription(s.telegram_id, !accessOn)
+                              }
+                            />
+                          </td>
+                        </tr>
+                      )
+                    })}
                     {subscribers.length === 0 && (
                       <tr>
-                        <td colSpan={7} className="px-4 py-8 text-center text-gray-500">
+                        <td colSpan={8} className="px-4 py-8 text-center text-gray-500">
                           Нет платных подписчиков
                         </td>
                       </tr>
