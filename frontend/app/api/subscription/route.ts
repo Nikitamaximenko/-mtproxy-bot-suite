@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
 
 export async function GET(req: NextRequest) {
-  const backendUrl = process.env.BACKEND_URL || "http://localhost:8000"
+  const backendUrl = (process.env.BACKEND_URL || "http://localhost:8000").replace(/\/+$/, "")
   const tgIdStr = req.nextUrl.searchParams.get("tg_id")
   const tgId = Number(tgIdStr)
   if (!Number.isFinite(tgId) || tgId < 1) {

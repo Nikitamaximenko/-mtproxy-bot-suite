@@ -30,6 +30,11 @@ LAVA_TOP_API_BASE_URL = (os.getenv("LAVA_TOP_API_BASE_URL") or "https://gate.lav
 LAVA_TOP_API_KEY = (os.getenv("LAVA_TOP_API_KEY") or "").strip()  # used to call lava.top Public API (X-Api-Key)
 LAVA_TOP_OFFER_ID = (os.getenv("LAVA_TOP_OFFER_ID") or "").strip()  # offerId (uuid) to charge (your product/subscription price)
 
+# For subscription offers in RUB, lava.top often needs these (see gate.lava.top docs /api/v3/invoice examples):
+LAVA_TOP_PERIODICITY = (os.getenv("LAVA_TOP_PERIODICITY") or "").strip()  # e.g. MONTHLY
+LAVA_TOP_PAYMENT_PROVIDER = (os.getenv("LAVA_TOP_PAYMENT_PROVIDER") or "").strip()  # e.g. SMART_GLOCAL, PAY2ME
+LAVA_TOP_PAYMENT_METHOD = (os.getenv("LAVA_TOP_PAYMENT_METHOD") or "").strip()  # e.g. CARD, SBP
+
 # Webhooks are authenticated by lava.top sending your service API key in X-Api-Key header
 LAVA_TOP_WEBHOOK_API_KEY = (os.getenv("LAVA_TOP_WEBHOOK_API_KEY") or "").strip()
 
@@ -195,9 +200,15 @@ def _create_lava_top_invoice(email: str) -> tuple[str, str | None]:
         "email": email,
         "offerId": LAVA_TOP_OFFER_ID,
         "currency": "RUB",
-        # Optional: "buyerLanguage": "RU"
     }
+    if LAVA_TOP_PERIODICITY:
+        payload["periodicity"] = LAVA_TOP_PERIODICITY
+    if LAVA_TOP_PAYMENT_PROVIDER:
+        payload["paymentProvider"] = LAVA_TOP_PAYMENT_PROVIDER
+    if LAVA_TOP_PAYMENT_METHOD:
+        payload["paymentMethod"] = LAVA_TOP_PAYMENT_METHOD
 
+    import urllib.error
     import urllib.request
 
     req = urllib.request.Request(
@@ -210,17 +221,28 @@ def _create_lava_top_invoice(email: str) -> tuple[str, str | None]:
         },
         method="POST",
     )
-    with urllib.request.urlopen(req, timeout=20) as resp:
-        raw = resp.read().decode("utf-8")
+    try:
+        with urllib.request.urlopen(req, timeout=20) as resp:
+            raw = resp.read().decode("utf-8")
+    except urllib.error.HTTPError as e:
+        body = e.read().decode("utf-8", errors="replace")[:2000]
+        try:
+            err_json = json.loads(body)
+            msg = err_json.get("error") or err_json.get("message") or body
+        except json.JSONDecodeError:
+            msg = body or str(e.reason)
+        raise RuntimeError(f"lava HTTP {e.code}: {msg}") from e
+    except urllib.error.URLError as e:
+        raise RuntimeError(f"lava network error: {e.reason}") from e
 
     data = json.loads(raw)
     if not isinstance(data, dict):
         raise RuntimeError("Unexpected lava.top response")
 
-    payment_url = str(data.get("paymentUrl") or "").strip()
+    payment_url = str(data.get("paymentUrl") or data.get("payment_url") or "").strip()
     contract_id = str(data.get("id") or "").strip() or None
     if not payment_url:
-        raise RuntimeError("lava.top did not return paymentUrl")
+        raise RuntimeError(f"lava.top did not return paymentUrl, response keys: {list(data.keys())}")
     return payment_url, contract_id
 
 

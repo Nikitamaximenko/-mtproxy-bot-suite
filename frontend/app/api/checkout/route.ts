@@ -1,5 +1,21 @@
 import { NextRequest, NextResponse } from "next/server"
 
+function fastapiDetailToString(raw: string): string {
+  try {
+    const p = JSON.parse(raw)
+    if (typeof p?.detail === "string") return p.detail
+    if (Array.isArray(p?.detail)) {
+      return p.detail
+        .map((d: { msg?: string; type?: string }) => d?.msg || JSON.stringify(d))
+        .filter(Boolean)
+        .join("; ")
+    }
+  } catch {
+    /* not JSON */
+  }
+  return raw.slice(0, 500)
+}
+
 function badBackendConfig(): string | null {
   const u = process.env.BACKEND_URL || ""
   const isProd = process.env.NODE_ENV === "production" || process.env.VERCEL === "1" || !!process.env.RAILWAY_ENVIRONMENT
@@ -60,13 +76,7 @@ export async function POST(req: NextRequest) {
 
   if (!res.ok) {
     const raw = await res.text().catch(() => "")
-    let backendDetail = ""
-    try {
-      const parsed = JSON.parse(raw)
-      if (typeof parsed?.detail === "string") backendDetail = parsed.detail
-    } catch {
-      /* text body */
-    }
+    const backendDetail = raw ? fastapiDetailToString(raw) : ""
     console.error("[checkout] backend error", res.status, backendDetail || raw.slice(0, 500))
     return NextResponse.json(
       {

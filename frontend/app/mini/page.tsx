@@ -150,6 +150,7 @@ export default function MiniAppPage() {
   const [paying, setPaying] = useState(false)
   const [paymentUrl, setPaymentUrl] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [errorDetail, setErrorDetail] = useState<string | null>(null)
   const [copied, setCopied] = useState(false)
   const [justPaid, setJustPaid] = useState(false)
 
@@ -180,14 +181,16 @@ export default function MiniAppPage() {
     if (!email || !tgId) return
     setPaying(true)
     setError(null)
+    setErrorDetail(null)
     try {
       const res = await fetch("/api/checkout", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ telegram_id: tgId, username: tgUser?.username, email }),
       })
-      const data = await res.json()
+      const data = (await res.json()) as { error?: string; payment_url?: string; details?: string }
       if (!res.ok || !data?.payment_url) {
+        if (data?.details) setErrorDetail(String(data.details).slice(0, 500))
         throw new Error(data?.error || "Не удалось создать оплату")
       }
       setPaymentUrl(String(data.payment_url))
@@ -440,7 +443,14 @@ export default function MiniAppPage() {
             </button>
 
             {error && (
-              <p className="text-xs text-destructive text-center mt-3">{error}</p>
+              <div className="mt-3 space-y-1">
+                <p className="text-xs text-destructive text-center">{error}</p>
+                {errorDetail && (
+                  <p className="text-[10px] text-muted-foreground text-center break-words px-1">
+                    {errorDetail}
+                  </p>
+                )}
+              </div>
             )}
           </div>
 
