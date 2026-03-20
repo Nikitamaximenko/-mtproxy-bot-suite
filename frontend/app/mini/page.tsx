@@ -46,8 +46,15 @@ function PaymentModal({
   onPaid: (sub: SubscriptionData) => void
 }) {
   const [checking, setChecking] = useState(false)
-  const [opened, setOpened] = useState(false)
+  const [opened, setOpened] = useState(true)
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
+
+  const handleOpenPayment = useCallback(() => {
+    openTelegramLink(url)
+    setOpened(true)
+  }, [url])
+
+  // Оплата уже открыта из handlePay сразу после /api/checkout; здесь только повтор по кнопке
 
   const checkPayment = useCallback(async () => {
     setChecking(true)
@@ -69,11 +76,6 @@ function PaymentModal({
       if (pollRef.current) clearInterval(pollRef.current)
     }
   }, [checkPayment])
-
-  const handleOpenPayment = () => {
-    openTelegramLink(url)
-    setOpened(true)
-  }
 
   return (
     <div className="fixed inset-0 z-50 bg-background flex flex-col">
@@ -116,23 +118,25 @@ function PaymentModal({
 
       <div className="px-4 py-3 border-t border-border bg-card space-y-2">
         <button
+          type="button"
+          onClick={handleOpenPayment}
+          className="w-full flex items-center justify-center gap-2 min-h-[48px] px-5 py-3 bg-primary text-primary-foreground font-semibold rounded-xl active:scale-95 transition-all frost-glow touch-manipulation"
+        >
+          <ExternalLink className="w-4 h-4" />
+          Открыть страницу оплаты
+        </button>
+        <button
+          type="button"
           onClick={checkPayment}
           disabled={checking}
-          className="w-full flex items-center justify-center gap-2 min-h-[48px] px-5 py-3 bg-primary text-primary-foreground font-semibold rounded-xl active:scale-95 transition-all frost-glow touch-manipulation disabled:opacity-60"
+          className="w-full flex items-center justify-center gap-2 min-h-[48px] px-5 py-3 bg-secondary text-secondary-foreground font-medium rounded-xl active:scale-95 transition-all touch-manipulation disabled:opacity-60"
         >
           {checking ? (
             <RefreshCw className="w-4 h-4 animate-spin" />
           ) : (
             <Check className="w-4 h-4" />
           )}
-          {checking ? "Проверяем…" : "Я оплатил"}
-        </button>
-        <button
-          onClick={handleOpenPayment}
-          className="w-full flex items-center justify-center gap-2 py-2.5 text-sm text-muted-foreground touch-manipulation"
-        >
-          <ExternalLink className="w-3.5 h-3.5" />
-          Открыть страницу оплаты
+          {checking ? "Проверяем…" : "Проверить оплату"}
         </button>
       </div>
     </div>
@@ -197,7 +201,10 @@ export default function MiniAppPage() {
         if (data?.details) setErrorDetail(String(data.details).slice(0, 500))
         throw new Error(data?.error || "Не удалось создать оплату")
       }
-      setPaymentUrl(String(data.payment_url))
+      const payUrl = String(data.payment_url)
+      // Сразу после ответа API — раньше тайл модалки; надёжнее, чем только setTimeout внутри модалки
+      openTelegramLink(payUrl)
+      setPaymentUrl(payUrl)
     } catch (e) {
       setError(e instanceof Error ? e.message : "Что-то пошло не так")
     } finally {

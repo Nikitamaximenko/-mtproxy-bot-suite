@@ -29,14 +29,29 @@ export function openTelegramLink(url: string) {
 
   const isTgLink = resolved.startsWith("https://t.me/")
 
+  try {
+    wa?.ready?.()
+  } catch {
+    /* ignore */
+  }
+
   if (isTgLink && wa?.openTelegramLink) {
     wa.openTelegramLink(resolved)
     return
   }
-  if (!isTgLink && wa?.openLink) {
-    wa.openLink(resolved)
+  if (!isTgLink && typeof wa?.openLink === "function") {
+    try {
+      // try_instant_view: false — внешняя оплата (Lava и т.д.), не Instant View
+      wa.openLink(resolved, { try_instant_view: false })
+    } catch {
+      try {
+        wa.openLink(resolved)
+      } catch {
+        /* fall through */
+      }
+    }
     return
   }
-  window.location.href = resolved
+  window.location.assign(resolved)
 }
 
