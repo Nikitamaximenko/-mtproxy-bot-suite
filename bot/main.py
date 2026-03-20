@@ -198,12 +198,14 @@ async def cmd_start(message: Message, session: aiohttp.ClientSession, state: FSM
         else:
             ref_source = param[:64]
 
-    # Track referral source
-    await backend_post(session, "/track-ref", {
-        "telegram_id": tg_id,
-        "username": username,
-        "ref_source": ref_source,
-    })
+    # Трекинг в фоне — не блокируем приветствие, если бэкенд долго отвечает или недоступен
+    asyncio.create_task(
+        backend_post(
+            session,
+            "/track-ref",
+            {"telegram_id": tg_id, "username": username, "ref_source": ref_source},
+        )
+    )
 
     if token:
         try:
@@ -235,6 +237,17 @@ async def cmd_start(message: Message, session: aiohttp.ClientSession, state: FSM
         "• медиа загружаются стабильнее, скорость ровнее\n"
         "• не нужно держать включённым VPN и постоянно что-то переключать\n\n"
         "Преимущество перед VPN: Frosty проксирует только Telegram (не весь интернет), поэтому обычно стабильнее и быстрее.\n\n"
+        "<b>Бесплатный прокси vs Frosty</b>\n\n"
+        "<b>Типичный бесплатный / публичный MTProxy:</b>\n"
+        "• на сервере часто сидит толпа людей — скорость низкая и бывают обрывы\n"
+        "• неизвестно, кто владелец и как обрабатывается трафик\n"
+        "• адреса быстро банят — приходится листать списки и снова настраивать Telegram\n"
+        "• нет поддержки, если перестало грузиться или отвалилось\n\n"
+        "<b>Frosty (платный MTProxy для тебя):</b>\n"
+        "• доступ для подписчиков — без очереди из случайных пользователей\n"
+        "• один понятный способ подключения прямо в Telegram, без вечного поиска новых прокси\n"
+        "• есть поддержка и подписка с понятными условиями\n"
+        "• мы не храним содержимое переписки (без логов сообщений)\n\n"
         "Выбери действие:",
         parse_mode="HTML",
         reply_markup=main_menu_kb(tg_id),
