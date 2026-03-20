@@ -10,6 +10,7 @@ import socket
 import time
 import urllib.error
 import urllib.request
+from urllib.parse import urljoin
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
 from typing import Any, AsyncGenerator, Generator, Literal
@@ -307,6 +308,23 @@ class CheckoutCreateResponse(BaseModel):
     payment_token: UUID
 
 
+def _normalize_payment_url(url: str) -> str:
+    """
+    Lava иногда возвращает paymentUrl без схемы или как путь (/pay/...).
+    В Telegram WebApp такая ссылка открывается относительно домена мини-аппа (Vercel) → 404 Next.js.
+    """
+    u = (url or "").strip()
+    if not u:
+        return u
+    if u.startswith("//"):
+        return "https:" + u
+    low = u.lower()
+    if low.startswith("http://") or low.startswith("https://"):
+        return u
+    base = f"{LAVA_TOP_API_BASE_URL}/"
+    return urljoin(base, u)
+
+
 def _create_lava_top_invoice(email: str) -> tuple[str, str | None]:
     """
     lava.top Public API: POST /api/v3/invoice with X-Api-Key.
@@ -446,6 +464,7 @@ def checkout_create(payload: CheckoutCreateRequest, db: Session = Depends(get_db
         sub.lava_contract_id = lava_contract_id
         db.commit()
 
+    payment_url = _normalize_payment_url(payment_url)
     return CheckoutCreateResponse(payment_url=payment_url, payment_token=token)
 
 

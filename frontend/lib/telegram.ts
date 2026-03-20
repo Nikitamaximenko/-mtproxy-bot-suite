@@ -3,6 +3,21 @@ export type TelegramWebAppUser = {
   username?: string
 }
 
+/** Lava может вернуть относительный paymentUrl — иначе в WebApp откроется Vercel и даст 404. */
+export function normalizePaymentUrl(url: string): string {
+  const u = url.trim()
+  if (!u) return u
+  if (u.startsWith("//")) return `https:${u}`
+  if (/^https?:\/\//i.test(u)) return u
+  if (/^tg:/i.test(u)) return u
+  const base = "https://gate.lava.top/"
+  try {
+    return new URL(u, base).href
+  } catch {
+    return u
+  }
+}
+
 export function getTelegramUser(): TelegramWebAppUser | null {
   if (typeof window === "undefined") return null
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -21,7 +36,7 @@ export function openTelegramLink(url: string) {
 
   // WebApp.openTelegramLink only accepts https://t.me/ links,
   // so convert tg:// protocol to https://t.me/ equivalent.
-  let resolved = url
+  let resolved = normalizePaymentUrl(url)
   if (resolved.startsWith("tg://")) {
     const stripped = resolved.slice("tg://".length)
     resolved = `https://t.me/${stripped}`
