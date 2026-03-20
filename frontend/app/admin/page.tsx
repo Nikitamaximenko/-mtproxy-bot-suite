@@ -62,6 +62,8 @@ export default function AdminPage() {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState("")
   const [remember, setRemember] = useState(true)
+  const [activatingAdmin, setActivatingAdmin] = useState(false)
+  const ADMIN_TG_ID = 231115635
 
   const headers = useCallback(
     (overrideKey?: string) => ({ "x-admin-key": overrideKey ?? key }),
@@ -77,7 +79,7 @@ export default function AdminPage() {
       const [sRes, pRes, subRes] = await Promise.all([
         fetch("/api/admin/stats", { headers: headers(activeKey), cache: "no-store" }),
         fetch("/api/admin/proxy-status", { headers: headers(activeKey), cache: "no-store" }),
-        fetch("/api/admin/subscriptions", { headers: headers(activeKey), cache: "no-store" }),
+        fetch("/api/admin/users", { headers: headers(activeKey), cache: "no-store" }),
       ])
 
       if (sRes.status === 403) {
@@ -175,13 +177,44 @@ export default function AdminPage() {
     <div className="min-h-screen bg-gray-950 text-white">
       <header className="border-b border-gray-800 px-6 py-4 flex items-center justify-between">
         <h1 className="text-xl font-bold">Frosty Admin</h1>
-        <button
-          onClick={fetchAll}
-          disabled={loading}
-          className="px-4 py-2 text-sm bg-gray-800 rounded-lg hover:bg-gray-700 transition-colors disabled:opacity-50"
-        >
-          {loading ? "⟳" : "Обновить"}
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => fetchAll()}
+            disabled={loading || activatingAdmin}
+            className="px-4 py-2 text-sm bg-gray-800 rounded-lg hover:bg-gray-700 transition-colors disabled:opacity-50"
+          >
+            {loading ? "⟳" : "Обновить"}
+          </button>
+          <button
+            onClick={async () => {
+              setActivatingAdmin(true)
+              setError("")
+              try {
+                const res = await fetch(`/api/admin/activate/${ADMIN_TG_ID}`, {
+                  method: "POST",
+                  headers: {
+                    ...headers(),
+                    "Content-Type": "application/json",
+                  },
+                  body: JSON.stringify({}),
+                  cache: "no-store",
+                })
+                if (!res.ok) {
+                  throw new Error(`Backend returned ${res.status}`)
+                }
+                await fetchAll()
+              } catch (e) {
+                setError(e instanceof Error ? e.message : "Не удалось активировать подписку")
+              } finally {
+                setActivatingAdmin(false)
+              }
+            }}
+            disabled={loading || activatingAdmin}
+            className="px-4 py-2 text-sm bg-blue-700 rounded-lg hover:bg-blue-600 transition-colors disabled:opacity-50"
+          >
+            {activatingAdmin ? "Активация…" : "Вернуть подписку админа"}
+          </button>
+        </div>
       </header>
 
       <main className="max-w-6xl mx-auto px-6 py-8 space-y-8">
@@ -233,7 +266,7 @@ export default function AdminPage() {
 
         {/* Subscriptions Table */}
         <section>
-          <h2 className="text-lg font-semibold mb-4 text-gray-300">Подписки (последние 100)</h2>
+          <h2 className="text-lg font-semibold mb-4 text-gray-300">Пользователи (уникальные, последние 100)</h2>
           <div className="bg-gray-900 border border-gray-800 rounded-2xl overflow-hidden">
             <div className="overflow-x-auto">
               <table className="w-full text-sm">

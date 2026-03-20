@@ -13,7 +13,7 @@ from uuid import UUID, uuid4
 from dotenv import load_dotenv
 from fastapi import Depends, FastAPI, HTTPException, Request
 from pydantic import BaseModel, Field
-from sqlalchemy import Boolean, DateTime, Integer, String, create_engine, false as sa_false, select
+from sqlalchemy import Boolean, DateTime, Integer, String, and_, create_engine, false as sa_false, func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column, sessionmaker
 
@@ -138,13 +138,13 @@ class HealthResponse(BaseModel):
     status: Literal["ok"]
 
 
+class OkResponse(BaseModel):
+    ok: bool = True
+
+
 @app.get("/health", response_model=HealthResponse)
 def health() -> HealthResponse:
     return HealthResponse(status="ok")
-
-
-class OkResponse(BaseModel):
-    ok: bool = True
 
 
 class TrackRefRequest(BaseModel):
@@ -229,6 +229,7 @@ def checkout_create(payload: CheckoutCreateRequest, db: Session = Depends(get_db
     tg_id = int(payload.telegram_id)
     username = payload.username.strip() if payload.username else None
     email = payload.email.strip().lower() if payload.email else None
+    logger.info("Checkout create: tg_id=%s email=%s", tg_id, email or "(none)")
 
     existing_user = db.execute(select(User).where(User.telegram_id == tg_id)).scalar_one_or_none()
     if existing_user is None:
@@ -261,8 +262,16 @@ def checkout_create(payload: CheckoutCreateRequest, db: Session = Depends(get_db
         try:
             payment_url, lava_contract_id = _create_lava_top_invoice(email)
         except Exception as e:
-            # If lava.top is configured, failing silently makes prod debugging impossible.
-            raise HTTPException(status_code=502, detail=f"lava.top invoice create failed: {type(e).__name__}: {e}")
+            logger.warning("lava.top invoice create failed for tg_id=%s: %s", tg_id, e)
+            # Fallback to legacy URL if configured (not placeholder)
+            if "YOUR_ID" not in (LAVA_PAY_URL_TEMPLATE or ""):
+                payment_url = LAVA_PAY_URL_TEMPLATE.format(payment_token=str(token))
+                logger.info("Using LAVA_PAY_URL_TEMPLATE fallback")
+            else:
+                raise HTTPException(
+                    status_code=502,
+                    detail=f"lava.top invoice create failed: {type(e).__name__}: {e}",
+                )
     else:
         payment_url = LAVA_PAY_URL_TEMPLATE.format(payment_token=str(token))
 
@@ -285,6 +294,7 @@ logger = logging.getLogger("mtproxy")
 
 BOT_TOKEN = (os.getenv("BOT_TOKEN") or "").strip()
 FRONTEND_URL = (os.getenv("FRONTEND_URL") or "").strip().rstrip("/")
+ADMIN_NOTIFY_CHAT_ID = (os.getenv("ADMIN_NOTIFY_CHAT_ID") or "").strip()
 
 
 def _send_tg(tg_id: int, text: str, keyboard: dict | None = None) -> None:
@@ -319,6 +329,17 @@ def _notify_payment_success(tg_id: int, proxy_link: str) -> None:
         "Ваша подписка активна 30 дней.\n"
         "Нажмите кнопку ниже, чтобы подключить прокси."
     ), kb)
+
+
+def _notify_admin_payment(tg_id: int) -> None:
+    """Notify admin in Telegram when a payment succeeds."""
+    if not ADMIN_NOTIFY_CHAT_ID or not BOT_TOKEN:
+        return
+    try:
+        chat_id = int(ADMIN_NOTIFY_CHAT_ID)
+    except ValueError:
+        return
+    _send_tg(chat_id, f"💰 Оплата получена от пользователя <code>{tg_id}</code>")
 
 
 def _notify_expiring(tg_id: int, expires_at: datetime) -> None:
@@ -415,18 +436,28 @@ async def lava_webhook(req: Request, db: Session = Depends(get_db)) -> OkRespons
         return OkResponse(ok=True)
 
     event_type = str(payload.get("eventType") or "").strip()
-    logger.info("Webhook eventType=%s contractId=%s", event_type, payload.get("contractId"))
+    product = payload.get("product") or {}
+    buyer = payload.get("buyer") or {}
+    contract_id = (
+        str(payload.get("contractId") or product.get("contractId") or buyer.get("contractId") or "").strip()
+    )
+    parent_contract_id = (
+        str(payload.get("parentContractId") or product.get("parentContractId") or buyer.get("parentContractId") or "").strip()
+    )
+    logger.info("Webhook eventType=%s contractId=%s parentContractId=%s", event_type, contract_id or None, parent_contract_id or None)
 
     if event_type not in {"payment.success", "subscription.recurring.payment.success"}:
         return OkResponse(ok=True)
 
-    contract_id = str(payload.get("contractId") or "").strip()
-    if not contract_id:
+    # payment.success: use contractId (first payment)
+    # subscription.recurring.payment.success: use parentContractId (we saved the first contract)
+    lookup_id = contract_id if event_type == "payment.success" else (parent_contract_id or contract_id)
+    if not lookup_id:
         return OkResponse(ok=True)
 
-    sub = db.execute(select(Subscription).where(Subscription.lava_contract_id == contract_id)).scalar_one_or_none()
+    sub = db.execute(select(Subscription).where(Subscription.lava_contract_id == lookup_id)).scalar_one_or_none()
     if sub is None:
-        logger.warning("No subscription found for contractId=%s", contract_id)
+        logger.warning("No subscription found for contractId=%s (event=%s)", lookup_id, event_type)
         return OkResponse(ok=True)
 
     activate_subscription(sub)
@@ -435,6 +466,7 @@ async def lava_webhook(req: Request, db: Session = Depends(get_db)) -> OkRespons
 
     proxy_link = f"tg://proxy?server={sub.proxy_server}&port={sub.proxy_port}&secret={sub.proxy_secret}"
     _notify_payment_success(sub.telegram_id, proxy_link)
+    _notify_admin_payment(sub.telegram_id)
 
     return OkResponse(ok=True)
 
@@ -546,6 +578,74 @@ def admin_deactivate(telegram_id: int, req: Request, db: Session = Depends(get_d
     return OkResponse(ok=True)
 
 
+class AdminUserDebugResponse(BaseModel):
+    telegram_id: int
+    user_exists: bool
+    username: str | None
+    subscriptions: list[dict]
+
+
+@app.get("/admin/user/{telegram_id}", response_model=AdminUserDebugResponse)
+def admin_user_debug(telegram_id: int, req: Request, db: Session = Depends(get_db)) -> AdminUserDebugResponse:
+    """Debug: check if user exists and their subscriptions."""
+    _require_admin(req)
+    user = db.execute(select(User).where(User.telegram_id == telegram_id)).scalar_one_or_none()
+    subs = db.execute(
+        select(Subscription).where(Subscription.telegram_id == telegram_id).order_by(Subscription.created_at.desc())
+    ).scalars().all()
+    return AdminUserDebugResponse(
+        telegram_id=telegram_id,
+        user_exists=user is not None,
+        username=user.username if user else None,
+        subscriptions=[
+            {
+                "id": s.id,
+                "payment_status": s.payment_status,
+                "expires_at": s.expires_at.isoformat() if s.expires_at else None,
+                "lava_contract_id": s.lava_contract_id,
+                "created_at": s.created_at.isoformat() if s.created_at else None,
+            }
+            for s in subs
+        ],
+    )
+
+
+@app.post("/admin/activate/{telegram_id}", response_model=OkResponse)
+def admin_activate(telegram_id: int, req: Request, db: Session = Depends(get_db)) -> OkResponse:
+    """
+    Admin helper: force-activate subscription for MVP testing.
+    Extends an existing subscription (latest by created_at) by 30 days,
+    or creates a new paid subscription record if none exists.
+    """
+    _require_admin(req)
+
+    sub = (
+        db.execute(
+            select(Subscription)
+            .where(Subscription.telegram_id == telegram_id)
+            .order_by(Subscription.created_at.desc())
+            .limit(1)
+        )
+        .scalars()
+        .first()
+    )
+
+    if sub is None:
+        token = uuid4()
+        sub = Subscription(
+            telegram_id=telegram_id,
+            payment_token=str(token),
+            payment_status="paid",
+        )
+        db.add(sub)
+        db.commit()
+        db.refresh(sub)
+
+    activate_subscription(sub)
+    db.commit()
+    return OkResponse(ok=True)
+
+
 # ── Admin Dashboard API ──
 
 
@@ -567,8 +667,6 @@ class AdminStatsResponse(BaseModel):
 def admin_stats(req: Request, db: Session = Depends(get_db)) -> AdminStatsResponse:
     _require_admin(req)
     now = utcnow()
-
-    from sqlalchemy import func
 
     total_users = db.execute(select(func.count()).select_from(User)).scalar() or 0
 
@@ -638,6 +736,48 @@ def admin_subscriptions(req: Request, db: Session = Depends(get_db)) -> AdminSub
     subs = db.execute(
         select(Subscription).order_by(Subscription.created_at.desc()).limit(100)
     ).scalars().all()
+
+    items = [
+        SubInfo(
+            id=s.id,
+            telegram_id=s.telegram_id,
+            payment_status=s.payment_status,
+            expires_at=s.expires_at,
+            created_at=s.created_at,
+            has_proxy=bool(s.proxy_server and s.proxy_port and s.proxy_secret),
+        )
+        for s in subs
+    ]
+    return AdminSubsResponse(subscriptions=items, total=len(items))
+
+
+@app.get("/admin/users", response_model=AdminSubsResponse)
+def admin_users(req: Request, db: Session = Depends(get_db)) -> AdminSubsResponse:
+    """Unique users with their latest subscription status (one row per telegram_id)."""
+    _require_admin(req)
+    latest_subq = (
+        select(
+            Subscription.telegram_id.label("tg_id"),
+            func.max(Subscription.created_at).label("max_created"),
+        )
+        .group_by(Subscription.telegram_id)
+    ).subquery()
+
+    subs = (
+        db.execute(
+            select(Subscription)
+            .join(
+                latest_subq,
+                and_(
+                    Subscription.telegram_id == latest_subq.c.tg_id,
+                    Subscription.created_at == latest_subq.c.max_created,
+                ),
+            )
+            .order_by(Subscription.created_at.desc())
+            .limit(100)
+        )
+        .scalars().all()
+    )
 
     items = [
         SubInfo(

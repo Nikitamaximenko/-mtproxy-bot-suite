@@ -75,11 +75,6 @@ function PaymentModal({
     setOpened(true)
   }
 
-  useEffect(() => {
-    handleOpenPayment()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
-
   return (
     <div className="fixed inset-0 z-50 bg-background flex flex-col">
       <div className="flex items-center justify-between px-4 py-3 border-b border-border bg-card">
