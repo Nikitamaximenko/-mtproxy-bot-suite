@@ -916,9 +916,15 @@ def admin_deactivate(telegram_id: int, req: Request, db: Session = Depends(get_d
             Subscription.payment_status == "paid",
         )
     ).scalars().all()
+    now = utcnow()
     for sub in subs:
         sub.payment_status = "expired"
+        sub.expires_at = now
+        sub.proxy_server = None
+        sub.proxy_port = None
+        sub.proxy_secret = None
     db.commit()
+    logger.info("Admin deactivated subscriptions for tg_id=%s (%d row(s))", telegram_id, len(subs))
     return OkResponse(ok=True)
 
 
