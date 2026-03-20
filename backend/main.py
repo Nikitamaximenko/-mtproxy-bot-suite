@@ -7,7 +7,7 @@ import os
 import socket
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
-from typing import AsyncGenerator, Generator, Literal
+from typing import Any, AsyncGenerator, Generator, Literal
 from uuid import UUID, uuid4
 
 from dotenv import load_dotenv
@@ -77,8 +77,13 @@ class User(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     telegram_id: Mapped[int] = mapped_column(BigInteger, unique=True, index=True, nullable=False)
     username: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    first_name: Mapped[str | None] = mapped_column(String(64), nullable=True)
     ref_source: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
+    marketing_opt_out: Mapped[bool] = mapped_column(Boolean, default=False, server_default=sa_false(), nullable=False)
+    nudge_1_sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    nudge_2_sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    nudge_3_sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
 PaymentStatus = Literal["pending", "paid"]
@@ -139,6 +144,36 @@ def _migrate() -> None:
         with engine.begin() as conn:
             if "ref_source" not in existing:
                 conn.execute(text("ALTER TABLE users ADD COLUMN ref_source VARCHAR(64)"))
+            if "first_name" not in existing:
+                conn.execute(text("ALTER TABLE users ADD COLUMN first_name VARCHAR(64)"))
+            if "marketing_opt_out" not in existing:
+                if engine.dialect.name == "postgresql":
+                    conn.execute(
+                        text("ALTER TABLE users ADD COLUMN marketing_opt_out BOOLEAN NOT NULL DEFAULT FALSE")
+                    )
+                else:
+                    conn.execute(text("ALTER TABLE users ADD COLUMN marketing_opt_out BOOLEAN NOT NULL DEFAULT 0"))
+            if "nudge_1_sent_at" not in existing:
+                if engine.dialect.name == "postgresql":
+                    conn.execute(
+                        text("ALTER TABLE users ADD COLUMN nudge_1_sent_at TIMESTAMP WITH TIME ZONE")
+                    )
+                else:
+                    conn.execute(text("ALTER TABLE users ADD COLUMN nudge_1_sent_at DATETIME"))
+            if "nudge_2_sent_at" not in existing:
+                if engine.dialect.name == "postgresql":
+                    conn.execute(
+                        text("ALTER TABLE users ADD COLUMN nudge_2_sent_at TIMESTAMP WITH TIME ZONE")
+                    )
+                else:
+                    conn.execute(text("ALTER TABLE users ADD COLUMN nudge_2_sent_at DATETIME"))
+            if "nudge_3_sent_at" not in existing:
+                if engine.dialect.name == "postgresql":
+                    conn.execute(
+                        text("ALTER TABLE users ADD COLUMN nudge_3_sent_at TIMESTAMP WITH TIME ZONE")
+                    )
+                else:
+                    conn.execute(text("ALTER TABLE users ADD COLUMN nudge_3_sent_at DATETIME"))
 
     # PostgreSQL: принудительно BIGINT для telegram_id (уже BIGINT — будет ошибка, игнорируем).
     if engine.dialect.name == "postgresql":
@@ -191,6 +226,7 @@ def health() -> HealthResponse:
 class TrackRefRequest(BaseModel):
     telegram_id: int = Field(..., ge=1)
     username: str | None = None
+    first_name: str | None = Field(default=None, max_length=64)
     ref_source: str | None = Field(default=None, max_length=64)
 
 
@@ -201,14 +237,36 @@ def track_ref(payload: TrackRefRequest, db: Session = Depends(get_db)) -> OkResp
         user = User(
             telegram_id=payload.telegram_id,
             username=payload.username,
+            first_name=payload.first_name,
             ref_source=payload.ref_source,
         )
         db.add(user)
         db.commit()
-    elif payload.ref_source and not user.ref_source:
-        user.ref_source = payload.ref_source
+    else:
+        changed = False
+        if payload.ref_source and not user.ref_source:
+            user.ref_source = payload.ref_source
+            changed = True
         if payload.username:
             user.username = payload.username
+            changed = True
+        if payload.first_name:
+            user.first_name = payload.first_name
+            changed = True
+        if changed:
+            db.commit()
+    return OkResponse(ok=True)
+
+
+class MarketingOptOutRequest(BaseModel):
+    telegram_id: int = Field(..., ge=1)
+
+
+@app.post("/marketing/opt-out", response_model=OkResponse)
+def marketing_opt_out(payload: MarketingOptOutRequest, db: Session = Depends(get_db)) -> OkResponse:
+    user = db.execute(select(User).where(User.telegram_id == payload.telegram_id)).scalar_one_or_none()
+    if user is not None:
+        user.marketing_opt_out = True
         db.commit()
     return OkResponse(ok=True)
 
@@ -380,7 +438,112 @@ logger = logging.getLogger("mtproxy")
 
 BOT_TOKEN = (os.getenv("BOT_TOKEN") or "").strip()
 FRONTEND_URL = (os.getenv("FRONTEND_URL") or "").strip().rstrip("/")
+MINIAPP_PATH = (os.getenv("MINIAPP_PATH") or "/mini").strip() or "/mini"
 ADMIN_NOTIFY_CHAT_ID = (os.getenv("ADMIN_NOTIFY_CHAT_ID") or "").strip()
+
+
+def _miniapp_public_url(tg_id: int) -> str:
+    """Публичный URL мини-аппа (как в боте), для кнопки web_app в рассылках."""
+    import time as _time
+
+    if not FRONTEND_URL:
+        return ""
+    path = MINIAPP_PATH if MINIAPP_PATH.startswith("/") else f"/{MINIAPP_PATH}"
+    v = int(_time.time())
+    return f"{FRONTEND_URL}{path}?tg_id={tg_id}&v={v}"
+
+
+def _sales_subscribe_keyboard(tg_id: int) -> dict[str, Any] | None:
+    url = _miniapp_public_url(tg_id)
+    if not url:
+        return None
+    return {
+        "inline_keyboard": [
+            [{"text": "💳 Оформить подписку", "web_app": {"url": url}}],
+        ]
+    }
+
+
+def _sales_greeting(user: User) -> str:
+    if user.first_name:
+        return user.first_name
+    if user.username:
+        return f"@{user.username}"
+    return "Привет"
+
+
+def _sales_nudge_message(step: int, user: User) -> str:
+    g = _sales_greeting(user)
+    price = PAYMENT_AMOUNT_RUB
+    ref_line = ""
+    if user.ref_source:
+        ref_line = f"\n\nТы заходил по ссылке с меткой <code>{user.ref_source}</code>."
+    if step == 1:
+        return (
+            f"{g}, коротко напомню: бесплатные прокси часто перегружены и непредсказуемы, "
+            f"а <b>Frosty</b> — доступ без очереди «на всех».\n\n"
+            "Проверь сторис и видео после подключения — обычно разница заметна сразу.\n\n"
+            f"Оформление — <b>{price} ₽/мес</b>, подключение в пару касаний.{ref_line}\n\n"
+            "<i>Не хотите рассылку — команда /stop</i>"
+        )
+    if step == 2:
+        return (
+            f"{g}, <b>Frosty</b> держит MTProxy для Telegram 24/7 — без VPN на весь интернет "
+            "и без пляски с публичными списками.\n\n"
+            "Если есть вопрос — нажми «Поддержка» в главном меню бота.\n\n"
+            f"<b>{price} ₽/мес</b>, подключение за ~10 секунд.{ref_line}\n\n"
+            "<i>Отписаться от напоминаний: /stop</i>"
+        )
+    return (
+        f"{g}, последнее напоминание: если Telegram всё ещё тормозит без прокси, "
+        "попробуй Frosty — многие подключают один раз и не возвращаются к бесплатным прокси.\n\n"
+        f"<b>{price} ₽/мес</b>. Ниже кнопка оформления.{ref_line}\n\n"
+        "<i>/stop — больше не пришлём такие сообщения</i>"
+    )
+
+
+def _process_sales_nudges() -> None:
+    """Отложенные напоминания неплатящим (раз в час вместе с expiration loop)."""
+    if not BOT_TOKEN or not FRONTEND_URL:
+        return
+    db = SessionLocal()
+    try:
+        now = utcnow()
+        paid_rows = db.execute(
+            select(Subscription.telegram_id)
+            .where(Subscription.payment_status.in_(["paid", "expired"]))
+            .distinct()
+        ).scalars().all()
+        paid_set = set(paid_rows)
+
+        users = db.execute(
+            select(User).where(User.marketing_opt_out == False)  # noqa: E712
+        ).scalars().all()
+
+        for user in users:
+            if user.telegram_id in paid_set:
+                continue
+            tg = int(user.telegram_id)
+            mini_kb = _sales_subscribe_keyboard(tg)
+            if user.nudge_1_sent_at is None and user.created_at + timedelta(hours=2) <= now:
+                if _send_tg(tg, _sales_nudge_message(1, user), mini_kb):
+                    user.nudge_1_sent_at = now
+                    logger.info("Sales nudge 1 sent tg_id=%s", tg)
+            elif user.nudge_2_sent_at is None and user.created_at + timedelta(hours=24) <= now:
+                if _send_tg(tg, _sales_nudge_message(2, user), mini_kb):
+                    user.nudge_2_sent_at = now
+                    logger.info("Sales nudge 2 sent tg_id=%s", tg)
+            elif user.nudge_3_sent_at is None and user.created_at + timedelta(hours=72) <= now:
+                if _send_tg(tg, _sales_nudge_message(3, user), mini_kb):
+                    user.nudge_3_sent_at = now
+                    logger.info("Sales nudge 3 sent tg_id=%s", tg)
+
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()
 
 
 def _send_tg(tg_id: int, text: str, keyboard: dict | None = None) -> bool:
@@ -498,13 +661,17 @@ def _process_expiration_notifications() -> None:
 
 
 async def _expiration_loop() -> None:
-    """Background loop: check expiring subscriptions every hour."""
+    """Background loop: expiring subscriptions + sales nudges (hourly)."""
     await asyncio.sleep(10)  # let the app start
     while True:
         try:
             _process_expiration_notifications()
         except Exception:
             logger.exception("Expiration check failed")
+        try:
+            _process_sales_nudges()
+        except Exception:
+            logger.exception("Sales nudges failed")
         await asyncio.sleep(3600)
 
 

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import html
 import logging
 import os
 from datetime import datetime
@@ -50,6 +51,16 @@ def main_menu_kb(tg_id: int) -> InlineKeyboardMarkup:
         [InlineKeyboardButton(text="ℹ️ Как это работает", callback_data="menu:help")],
         row3,
     ])
+
+
+def subscribe_cta_kb(tg_id: int) -> InlineKeyboardMarkup:
+    """Персональный CTA: оплата + отписка от напоминаний."""
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="💳 Оформить подписку", web_app=WebAppInfo(url=_miniapp_url(tg_id)))],
+            [InlineKeyboardButton(text="🔕 Не присылать напоминания", callback_data="marketing:optout")],
+        ]
+    )
 
 
 def proxy_kb(proxy_link: str) -> InlineKeyboardMarkup:
@@ -182,6 +193,7 @@ async def cmd_start(message: Message, session: aiohttp.ClientSession, state: FSM
 
     tg_id = message.from_user.id if message.from_user else None
     username = message.from_user.username if message.from_user else None
+    first_name = message.from_user.first_name if message.from_user else None
     if not tg_id:
         await message.answer("Не удалось определить ваш Telegram ID.", reply_markup=support_kb())
         return
@@ -203,7 +215,12 @@ async def cmd_start(message: Message, session: aiohttp.ClientSession, state: FSM
         backend_post(
             session,
             "/track-ref",
-            {"telegram_id": tg_id, "username": username, "ref_source": ref_source},
+            {
+                "telegram_id": tg_id,
+                "username": username,
+                "first_name": first_name,
+                "ref_source": ref_source,
+            },
         )
     )
 
@@ -251,6 +268,31 @@ async def cmd_start(message: Message, session: aiohttp.ClientSession, state: FSM
         "Выбери действие:",
         parse_mode="HTML",
         reply_markup=main_menu_kb(tg_id),
+    )
+
+    greet = first_name or (f"@{username}" if username else "Привет")
+    cta_lines = [
+        f"<b>{html.escape(greet)}</b>, отдельно для тебя:",
+        "",
+        "За <b>~10 секунд</b> можно включить MTProxy прямо здесь — сторис и видео обычно идут ровнее, "
+        "<b>без VPN</b> на весь телефон.",
+        "",
+        f"Тариф <b>{PRICE_RUB} ₽/мес</b>. Нажми кнопку — оплата и доступ в пару шагов.",
+    ]
+    if ref_source:
+        cta_lines.extend(["", f"<i>Вход по метке: {html.escape(ref_source)}</i>"])
+    cta_lines.extend(["", "<i>Не нужны напоминания — кнопка ниже или команда /stop</i>"])
+    await message.answer("\n".join(cta_lines), parse_mode="HTML", reply_markup=subscribe_cta_kb(tg_id))
+
+
+async def cmd_stop(message: Message, session: aiohttp.ClientSession) -> None:
+    tg_id = message.from_user.id if message.from_user else 0
+    if not tg_id:
+        return
+    await backend_post(session, "/marketing/opt-out", {"telegram_id": tg_id})
+    await message.answer(
+        "Ок — напоминания о подписке больше не пришлём.\n\n"
+        "Сервис доступен как раньше: снова нажми /start, если передумаешь."
     )
 
 
@@ -352,6 +394,20 @@ async def main() -> None:
     async def _help(message: Message) -> None:
         await message.answer(HELP_GENERAL, parse_mode="HTML")
 
+    @dp.message(Command("stop"))
+    async def _stop(message: Message) -> None:
+        session: aiohttp.ClientSession = dp["http_session"]
+        await cmd_stop(message, session)
+
+    @dp.callback_query(lambda c: c.data == "marketing:optout")
+    async def _marketing_optout(query: CallbackQuery) -> None:
+        session: aiohttp.ClientSession = dp["http_session"]
+        await backend_post(session, "/marketing/opt-out", {"telegram_id": query.from_user.id})
+        await query.answer("Отписали от напоминаний.")
+        msg = query.message
+        if msg and isinstance(msg, Message):
+            await msg.answer("Готово: рассылки напоминаний отключены. Вернуться можно через /start.")
+
     @dp.callback_query(lambda c: (c.data or "").startswith("menu:"))
     async def _menu(query: CallbackQuery, state: FSMContext) -> None:
         session: aiohttp.ClientSession = dp["http_session"]
@@ -368,6 +424,27 @@ async def main() -> None:
                 reply_markup=main_menu_kb(tg_id),
             )
             await query.answer()
+            return
+
+        if action == "subscribe":
+            tg_id = query.from_user.id
+            await query.answer()
+            await msg.answer(
+                f"<b>Frosty</b> — <b>{PRICE_RUB} ₽/мес</b>.\n\n"
+                "Нажми кнопку — откроется оплата в мини-приложении.",
+                parse_mode="HTML",
+                reply_markup=InlineKeyboardMarkup(
+                    inline_keyboard=[
+                        [
+                            InlineKeyboardButton(
+                                text="💳 Оформить подписку",
+                                web_app=WebAppInfo(url=_miniapp_url(tg_id)),
+                            )
+                        ],
+                        [InlineKeyboardButton(text="🏠 Главное меню", callback_data="menu:main")],
+                    ]
+                ),
+            )
             return
 
         if action == "help":
