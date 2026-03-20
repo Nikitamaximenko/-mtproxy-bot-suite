@@ -4,7 +4,7 @@ import asyncio
 import html
 import logging
 import os
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any
 
 import aiohttp
@@ -32,13 +32,16 @@ SUPPORT_USERNAME = os.getenv("SUPPORT_USERNAME", "").lstrip("@").strip()
 PRICE_RUB = int(os.getenv("PRICE_RUB", "299") or "299")
 MINIAPP_PATH = (os.getenv("MINIAPP_PATH") or "/mini").strip() or "/mini"
 
+_log = logging.getLogger(__name__)
+
 
 def _miniapp_url(tg_id: int) -> str:
     base = FRONTEND_URL.rstrip("/")
     path = MINIAPP_PATH if MINIAPP_PATH.startswith("/") else f"/{MINIAPP_PATH}"
     # Telegram WebView иногда агрессивно кэширует статику.
     # Параметр v заставляет загрузить свежую верстку/скрипты после деплоя.
-    v = int(datetime.utcnow().timestamp())
+    # FIX: datetime.utcnow() deprecated since Python 3.12 — use timezone-aware alternative
+    v = int(datetime.now(timezone.utc).timestamp())
     return f"{base}{path}?tg_id={tg_id}&v={v}"
 
 
@@ -139,8 +142,9 @@ async def backend_post(session: aiohttp.ClientSession, path: str, payload: dict[
     try:
         async with session.post(url, json=payload, timeout=aiohttp.ClientTimeout(total=5)):
             pass
-    except Exception:
-        pass
+    except Exception as exc:
+        # FIX: Log failures instead of silently swallowing them — makes backend issues diagnosable
+        _log.warning("backend_post %s failed: %s", path, exc)
 
 
 def _parse_proxy_link(link: str) -> tuple[str, str, str]:
@@ -182,6 +186,14 @@ async def _get_proxy_link(session: aiohttp.ClientSession, tg_id: int) -> str | N
     if not data.get("active"):
         return None
     return data.get("proxy_link") or None
+
+
+def _get_session(dp: Dispatcher) -> aiohttp.ClientSession:
+    """FIX: Centralised session access with a clear error if startup didn't complete."""
+    session: aiohttp.ClientSession | None = dp.get("http_session")
+    if session is None:
+        raise RuntimeError("HTTP session is not initialised — on_startup may have failed")
+    return session
 
 
 # ── Handlers ──
@@ -239,6 +251,14 @@ async def cmd_start(message: Message, session: aiohttp.ClientSession, state: FSM
                     f"✅ Подписка активна до {expires_at}\n\n"
                     "Нажми «🔌 Подключить прокси» — Telegram сам предложит добавить его.",
                     reply_markup=proxy_kb(proxy_link),
+                )
+                return
+            else:
+                # FIX: Payment found but proxy not yet assigned — inform the user instead
+                # of silently falling through to the welcome screen.
+                await message.answer(
+                    f"✅ Оплата найдена, подписка активируется...\n\n"
+                    "Обычно это занимает несколько секунд. Нажми /status чтобы проверить."
                 )
                 return
 
@@ -330,16 +350,16 @@ async def cmd_status(message: Message, session: aiohttp.ClientSession, tg_id: in
 
     expires_at = format_dt(data.get("expires_at"))
     proxy_link = data.get("proxy_link")
-    text = (
+    status_text = (
         f"✅ <b>Подписка активна</b>\n\n"
         f"Тариф: {PRICE_RUB} ₽/мес\n"
         f"Действует до: {expires_at}"
     )
 
     if proxy_link:
-        await message.answer(text, parse_mode="HTML", reply_markup=proxy_kb(proxy_link))
+        await message.answer(status_text, parse_mode="HTML", reply_markup=proxy_kb(proxy_link))
     else:
-        await message.answer(text, parse_mode="HTML")
+        await message.answer(status_text, parse_mode="HTML")
 
 
 async def main() -> None:
@@ -369,7 +389,7 @@ async def main() -> None:
             )
         except Exception:
             pass
-        logging.getLogger(__name__).info("Bot started")
+        _log.info("Bot started")
 
     async def on_shutdown(**kwargs: Any) -> None:
         session: aiohttp.ClientSession | None = dp.get("http_session")
@@ -381,12 +401,12 @@ async def main() -> None:
 
     @dp.message(CommandStart())
     async def _start(message: Message, state: FSMContext) -> None:
-        session: aiohttp.ClientSession = dp["http_session"]
+        session = _get_session(dp)
         await cmd_start(message, session, state)
 
     @dp.message(Command("status"))
     async def _status(message: Message) -> None:
-        session: aiohttp.ClientSession = dp["http_session"]
+        session = _get_session(dp)
         tg_id = message.from_user.id if message.from_user else 0
         await cmd_status(message, session, tg_id)
 
@@ -396,12 +416,12 @@ async def main() -> None:
 
     @dp.message(Command("stop"))
     async def _stop(message: Message) -> None:
-        session: aiohttp.ClientSession = dp["http_session"]
+        session = _get_session(dp)
         await cmd_stop(message, session)
 
     @dp.callback_query(lambda c: c.data == "marketing:optout")
     async def _marketing_optout(query: CallbackQuery) -> None:
-        session: aiohttp.ClientSession = dp["http_session"]
+        session = _get_session(dp)
         await backend_post(session, "/marketing/opt-out", {"telegram_id": query.from_user.id})
         await query.answer("Отписали от напоминаний.")
         msg = query.message
@@ -410,7 +430,7 @@ async def main() -> None:
 
     @dp.callback_query(lambda c: (c.data or "").startswith("menu:"))
     async def _menu(query: CallbackQuery, state: FSMContext) -> None:
-        session: aiohttp.ClientSession = dp["http_session"]
+        session = _get_session(dp)
         action = (query.data or "").split(":", 1)[1] if query.data else ""
         msg = query.message
         if not msg or not isinstance(msg, Message):
@@ -461,7 +481,7 @@ async def main() -> None:
 
     @dp.callback_query(lambda c: c.data == "copy_proxy_link")
     async def _copy(query: CallbackQuery) -> None:
-        session: aiohttp.ClientSession = dp["http_session"]
+        session = _get_session(dp)
         msg = query.message
         if not msg or not isinstance(msg, Message):
             await query.answer("Не удалось.", show_alert=True)
@@ -475,7 +495,7 @@ async def main() -> None:
 
     @dp.callback_query(lambda c: c.data == "manual_setup")
     async def _manual(query: CallbackQuery) -> None:
-        session: aiohttp.ClientSession = dp["http_session"]
+        session = _get_session(dp)
         msg = query.message
         if not msg or not isinstance(msg, Message):
             await query.answer("Не удалось.", show_alert=True)

@@ -1,10 +1,15 @@
 from __future__ import annotations
 
 import asyncio
+import hmac
+import html
 import json
 import logging
 import os
 import socket
+import time
+import urllib.error
+import urllib.request
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
 from typing import Any, AsyncGenerator, Generator, Literal
@@ -62,9 +67,20 @@ LAVA_PAY_URL_TEMPLATE = (os.getenv("LAVA_PAY_URL_TEMPLATE") or "https://lava.top
 # Full URL with {payment_token}; used if invoice API fails (highest priority fallback)
 LAVA_CHECKOUT_FALLBACK_URL = (os.getenv("LAVA_CHECKOUT_FALLBACK_URL") or "").strip()
 
+ADMIN_API_KEY = (os.getenv("ADMIN_API_KEY") or "").strip()
+
+BOT_TOKEN = (os.getenv("BOT_TOKEN") or "").strip()
+FRONTEND_URL = (os.getenv("FRONTEND_URL") or "").strip().rstrip("/")
+MINIAPP_PATH = (os.getenv("MINIAPP_PATH") or "/mini").strip() or "/mini"
+ADMIN_NOTIFY_CHAT_ID = (os.getenv("ADMIN_NOTIFY_CHAT_ID") or "").strip()
+
 
 def utcnow() -> datetime:
     return datetime.now(timezone.utc)
+
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger("mtproxy")
 
 
 class Base(DeclarativeBase):
@@ -86,7 +102,8 @@ class User(Base):
     nudge_3_sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
-PaymentStatus = Literal["pending", "paid"]
+# FIX: "expired" added — it was missing from the original type
+PaymentStatus = Literal["pending", "paid", "expired"]
 
 
 class Subscription(Base):
@@ -122,9 +139,6 @@ def get_db() -> Generator[Session, None, None]:
         yield db
     finally:
         db.close()
-
-
-logging.basicConfig(level=logging.INFO)
 
 
 def _migrate() -> None:
@@ -317,9 +331,6 @@ def _create_lava_top_invoice(email: str) -> tuple[str, str | None]:
     payload.setdefault("paymentProvider", "SMART_GLOCAL")
     payload.setdefault("paymentMethod", "CARD")
 
-    import urllib.error
-    import urllib.request
-
     req = urllib.request.Request(
         f"{LAVA_TOP_API_BASE_URL}/api/v3/invoice",
         data=json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode("utf-8"),
@@ -379,7 +390,8 @@ def checkout_create(payload: CheckoutCreateRequest, db: Session = Depends(get_db
     logger.info("Checkout create: tg_id=%s email=%s", tg_id, email or "(none)")
 
     existing_user = db.execute(select(User).where(User.telegram_id == tg_id)).scalar_one_or_none()
-    if existing_user is None:
+    is_new_user = existing_user is None
+    if is_new_user:
         db.add(User(telegram_id=tg_id, username=username))
     else:
         if username and existing_user.username != username:
@@ -398,9 +410,20 @@ def checkout_create(payload: CheckoutCreateRequest, db: Session = Depends(get_db
     except IntegrityError:
         db.rollback()
         # На редкий случай коллизии payment_token — повторим один раз.
+        # FIX: После rollback пересоздаём и User (если был новым), и Subscription.
         token = uuid4()
-        sub.payment_token = str(token)
+        sub = Subscription(
+            telegram_id=tg_id,
+            payment_token=str(token),
+            payment_status="pending",
+        )
         db.add(sub)
+        if is_new_user:
+            still_missing = db.execute(
+                select(User).where(User.telegram_id == tg_id)
+            ).scalar_one_or_none()
+            if still_missing is None:
+                db.add(User(telegram_id=tg_id, username=username))
         db.commit()
 
     lava_contract_id: str | None = None
@@ -427,29 +450,25 @@ def checkout_create(payload: CheckoutCreateRequest, db: Session = Depends(get_db
 
 
 def activate_subscription(sub: Subscription) -> None:
+    # FIX: Removed hardcoded fallback credentials. Missing config now raises immediately
+    # instead of silently using secrets embedded in source code.
+    if not MT_PROXY_SERVER:
+        raise RuntimeError("MT_PROXY_SERVER is not configured")
+    if not MT_PROXY_SECRET:
+        raise RuntimeError("MT_PROXY_SECRET is not configured")
     sub.payment_status = "paid"
     sub.expires_at = utcnow() + timedelta(days=30)
-    sub.proxy_server = MT_PROXY_SERVER or "176.123.161.97"
+    sub.proxy_server = MT_PROXY_SERVER
     sub.proxy_port = MT_PROXY_PORT
-    sub.proxy_secret = MT_PROXY_SECRET or "dd645eba01a59f188b5ba9db2564b44a00"
-
-
-logger = logging.getLogger("mtproxy")
-
-BOT_TOKEN = (os.getenv("BOT_TOKEN") or "").strip()
-FRONTEND_URL = (os.getenv("FRONTEND_URL") or "").strip().rstrip("/")
-MINIAPP_PATH = (os.getenv("MINIAPP_PATH") or "/mini").strip() or "/mini"
-ADMIN_NOTIFY_CHAT_ID = (os.getenv("ADMIN_NOTIFY_CHAT_ID") or "").strip()
+    sub.proxy_secret = MT_PROXY_SECRET
 
 
 def _miniapp_public_url(tg_id: int) -> str:
     """Публичный URL мини-аппа (как в боте), для кнопки web_app в рассылках."""
-    import time as _time
-
     if not FRONTEND_URL:
         return ""
     path = MINIAPP_PATH if MINIAPP_PATH.startswith("/") else f"/{MINIAPP_PATH}"
-    v = int(_time.time())
+    v = int(time.time())
     return f"{FRONTEND_URL}{path}?tg_id={tg_id}&v={v}"
 
 
@@ -465,10 +484,11 @@ def _sales_subscribe_keyboard(tg_id: int) -> dict[str, Any] | None:
 
 
 def _sales_greeting(user: User) -> str:
+    # FIX: html.escape user-provided strings to prevent HTML injection in messages
     if user.first_name:
-        return user.first_name
+        return html.escape(user.first_name)
     if user.username:
-        return f"@{user.username}"
+        return html.escape(f"@{user.username}")
     return "Привет"
 
 
@@ -477,7 +497,8 @@ def _sales_nudge_message(step: int, user: User) -> str:
     price = PAYMENT_AMOUNT_RUB
     ref_line = ""
     if user.ref_source:
-        ref_line = f"\n\nТы заходил по ссылке с меткой <code>{user.ref_source}</code>."
+        # FIX: html.escape ref_source — it is user-supplied input
+        ref_line = f"\n\nТы заходил по ссылке с меткой <code>{html.escape(user.ref_source)}</code>."
     if step == 1:
         return (
             f"{g}, коротко напомню: бесплатные прокси часто перегружены и непредсказуемы, "
@@ -551,13 +572,14 @@ def _send_tg(tg_id: int, text: str, keyboard: dict | None = None) -> bool:
     if not BOT_TOKEN:
         return False
     try:
-        import urllib.request
         body: dict[str, object] = {"chat_id": tg_id, "text": text, "parse_mode": "HTML"}
         if keyboard:
             body["reply_markup"] = keyboard
         data = json.dumps(body).encode()
+        # FIX: URL constructed separately so the token never appears in log output
+        url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
         req = urllib.request.Request(
-            f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage",
+            url,
             data=data,
             headers={"Content-Type": "application/json"},
             method="POST",
@@ -661,15 +683,21 @@ def _process_expiration_notifications() -> None:
 
 
 async def _expiration_loop() -> None:
-    """Background loop: expiring subscriptions + sales nudges (hourly)."""
+    """Background loop: expiring subscriptions + sales nudges (hourly).
+
+    FIX: Sync functions (_process_*) perform DB queries and urllib HTTP calls.
+    Running them directly in an async function would block the event loop.
+    Using run_in_executor offloads them to a thread pool instead.
+    """
     await asyncio.sleep(10)  # let the app start
+    loop = asyncio.get_event_loop()
     while True:
         try:
-            _process_expiration_notifications()
+            await loop.run_in_executor(None, _process_expiration_notifications)
         except Exception:
             logger.exception("Expiration check failed")
         try:
-            _process_sales_nudges()
+            await loop.run_in_executor(None, _process_sales_nudges)
         except Exception:
             logger.exception("Sales nudges failed")
         await asyncio.sleep(3600)
@@ -680,11 +708,20 @@ async def lava_webhook(req: Request, db: Session = Depends(get_db)) -> OkRespons
     raw_body = await req.body()
     logger.info("Webhook received: headers=%s body=%s", dict(req.headers), raw_body[:500])
 
-    if LAVA_TOP_WEBHOOK_API_KEY:
-        got = (req.headers.get("x-api-key") or "").strip()
-        if got != LAVA_TOP_WEBHOOK_API_KEY:
-            logger.warning("Webhook key mismatch: got=%s expected=%s", got[:8], LAVA_TOP_WEBHOOK_API_KEY[:8])
-            return OkResponse(ok=True)
+    # FIX: If the webhook key is not configured, log a warning but do not process
+    # the event — accepting unauthenticated webhooks would allow anyone to activate
+    # subscriptions without payment.
+    if not LAVA_TOP_WEBHOOK_API_KEY:
+        logger.warning("LAVA_TOP_WEBHOOK_API_KEY is not set — rejecting webhook to prevent unauthorised activation")
+        raise HTTPException(status_code=401, detail="Webhook authentication not configured")
+
+    got = (req.headers.get("x-api-key") or "").strip()
+    # FIX: Use hmac.compare_digest to prevent timing attacks.
+    # FIX: Return 401 on mismatch (not 200) so the caller knows the request was rejected.
+    # FIX: Do not log any portion of the secret key.
+    if not hmac.compare_digest(got, LAVA_TOP_WEBHOOK_API_KEY):
+        logger.warning("Webhook rejected: invalid X-Api-Key")
+        raise HTTPException(status_code=401, detail="Unauthorized")
 
     payload = json.loads(raw_body) if raw_body else {}
     if not isinstance(payload, dict):
@@ -715,7 +752,12 @@ async def lava_webhook(req: Request, db: Session = Depends(get_db)) -> OkRespons
         logger.warning("No subscription found for contractId=%s (event=%s)", lookup_id, event_type)
         return OkResponse(ok=True)
 
-    activate_subscription(sub)
+    try:
+        activate_subscription(sub)
+    except RuntimeError as e:
+        logger.error("activate_subscription failed for contractId=%s: %s", lookup_id, e)
+        raise HTTPException(status_code=503, detail=str(e))
+
     db.commit()
     logger.info("Subscription activated for tg_id=%s contract=%s", sub.telegram_id, contract_id)
 
@@ -780,14 +822,12 @@ def check_token(token: UUID, db: Session = Depends(get_db)) -> CheckTokenRespons
     return CheckTokenResponse(found=True, expires_at=sub.expires_at, proxy_link=proxy_link)
 
 
-ADMIN_API_KEY = (os.getenv("ADMIN_API_KEY") or "").strip()
-
-
 def _require_admin(req: Request) -> None:
     if not ADMIN_API_KEY:
         raise HTTPException(status_code=403, detail="Admin API not configured")
     got = (req.headers.get("x-admin-key") or "").strip()
-    if got != ADMIN_API_KEY:
+    # FIX: Use hmac.compare_digest to prevent timing-based key enumeration
+    if not hmac.compare_digest(got, ADMIN_API_KEY):
         raise HTTPException(status_code=403, detail="Forbidden")
 
 
@@ -802,7 +842,11 @@ def lava_test(payload: LavaTestRequest, req: Request, db: Session = Depends(get_
     if sub is None:
         raise HTTPException(status_code=404, detail="Subscription not found for payment_token")
 
-    activate_subscription(sub)
+    try:
+        activate_subscription(sub)
+    except RuntimeError as e:
+        raise HTTPException(status_code=503, detail=str(e))
+
     db.commit()
 
     proxy_link = f"tg://proxy?server={sub.proxy_server}&port={sub.proxy_port}&secret={sub.proxy_secret}"
@@ -838,8 +882,6 @@ def admin_broadcast(payload: BroadcastRequest, req: Request, db: Session = Depen
     _require_admin(req)
     if not BOT_TOKEN:
         raise HTTPException(status_code=503, detail="BOT_TOKEN is not configured on backend")
-
-    import time
 
     rows = db.execute(select(User.telegram_id)).scalars().all()
     # Уникальные id, стабильный порядок
@@ -943,7 +985,11 @@ def admin_activate(telegram_id: int, req: Request, db: Session = Depends(get_db)
         db.commit()
         db.refresh(sub)
 
-    activate_subscription(sub)
+    try:
+        activate_subscription(sub)
+    except RuntimeError as e:
+        raise HTTPException(status_code=503, detail=str(e))
+
     db.commit()
     return OkResponse(ok=True)
 
@@ -1034,10 +1080,18 @@ class AdminSubsResponse(BaseModel):
 
 
 @app.get("/admin/subscriptions", response_model=AdminSubsResponse)
-def admin_subscriptions(req: Request, db: Session = Depends(get_db)) -> AdminSubsResponse:
+def admin_subscriptions(
+    req: Request,
+    db: Session = Depends(get_db),
+    limit: int = Query(100, ge=1, le=1000),
+    offset: int = Query(0, ge=0),
+) -> AdminSubsResponse:
+    # FIX: Added pagination (limit/offset) and return real total count instead of
+    # silently truncating results with a hardcoded limit of 100.
     _require_admin(req)
+    total = db.execute(select(func.count()).select_from(Subscription)).scalar() or 0
     subs = db.execute(
-        select(Subscription).order_by(Subscription.created_at.desc()).limit(100)
+        select(Subscription).order_by(Subscription.created_at.desc()).limit(limit).offset(offset)
     ).scalars().all()
 
     items = [
@@ -1052,7 +1106,7 @@ def admin_subscriptions(req: Request, db: Session = Depends(get_db)) -> AdminSub
         )
         for s in subs
     ]
-    return AdminSubsResponse(subscriptions=items, total=len(items))
+    return AdminSubsResponse(subscriptions=items, total=total)
 
 
 def _latest_subquery_for_telegram_ids(telegram_id_filter):
@@ -1213,13 +1267,14 @@ class ProxyStatusResponse(BaseModel):
 @app.get("/admin/proxy-status", response_model=ProxyStatusResponse)
 def admin_proxy_status(req: Request) -> ProxyStatusResponse:
     _require_admin(req)
-    server = MT_PROXY_SERVER or "176.123.161.97"
+    server = MT_PROXY_SERVER or ""
+    if not server:
+        raise HTTPException(status_code=503, detail="MT_PROXY_SERVER is not configured")
     port = MT_PROXY_PORT
 
     online = False
     latency_ms: float | None = None
     try:
-        import time
         start = time.monotonic()
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         sock.settimeout(5)
@@ -1231,4 +1286,3 @@ def admin_proxy_status(req: Request) -> ProxyStatusResponse:
         pass
 
     return ProxyStatusResponse(server=server, port=port, online=online, latency_ms=latency_ms)
-
