@@ -27,10 +27,104 @@ function FrostIcon({ className }: { className?: string }) {
   )
 }
 
+const MINI_TG_STORAGE_KEY = "frosty_mini_tg_id"
+
 function getTgIdFallbackFromUrl(): number | null {
   const tgId = new URLSearchParams(window.location.search).get("tg_id")
   const n = Number(tgId)
   return Number.isFinite(n) && n > 0 ? n : null
+}
+
+function readStoredTgId(): number | null {
+  if (typeof window === "undefined") return null
+  try {
+    const s = sessionStorage.getItem(MINI_TG_STORAGE_KEY)
+    if (!s) return null
+    const n = Number(s)
+    return Number.isFinite(n) && n > 0 ? n : null
+  } catch {
+    return null
+  }
+}
+
+/** Если открыли /mini в обычном браузере — запрос ID вместо пустого экрана */
+function TgIdFallbackScreen({ onContinue }: { onContinue: (id: number) => void }) {
+  const [raw, setRaw] = useState("")
+  const [localError, setLocalError] = useState<string | null>(null)
+
+  const submit = () => {
+    const n = Number(String(raw).replace(/\s/g, ""))
+    if (!Number.isFinite(n) || n < 1) {
+      setLocalError("Введите числовой Telegram ID (например 123456789)")
+      return
+    }
+    try {
+      sessionStorage.setItem(MINI_TG_STORAGE_KEY, String(n))
+    } catch {
+      /* ignore */
+    }
+    try {
+      const u = new URL(window.location.href)
+      u.searchParams.set("tg_id", String(n))
+      window.history.replaceState({}, "", u.toString())
+    } catch {
+      /* ignore */
+    }
+    setLocalError(null)
+    onContinue(n)
+  }
+
+  return (
+    <div className="min-h-screen bg-background flex items-center justify-center px-4 py-10">
+      <div className="w-full max-w-sm space-y-6 text-center">
+        <FrostIcon className="w-16 h-16 text-primary mx-auto animate-float" />
+        <div>
+          <h1 className="text-xl font-bold text-foreground">Frosty — оплата</h1>
+          <p className="text-sm text-muted-foreground mt-2 leading-relaxed">
+            Из Telegram страница откроется сама. В браузере укажите свой{" "}
+            <span className="text-foreground font-medium">Telegram ID</span> — тот же, к которому привяжется
+            подписка.
+          </p>
+        </div>
+        <div className="bg-card border border-border rounded-2xl p-4 text-left space-y-3">
+          <label className="block text-xs font-medium text-muted-foreground">Telegram ID</label>
+          <input
+            type="text"
+            inputMode="numeric"
+            autoComplete="off"
+            placeholder="Например 591337712"
+            value={raw}
+            onChange={(e) => {
+              setRaw(e.target.value)
+              setLocalError(null)
+            }}
+            onKeyDown={(e) => e.key === "Enter" && submit()}
+            className="w-full h-11 px-4 bg-secondary border border-border rounded-xl text-sm text-foreground placeholder:text-muted-foreground outline-none focus:border-primary focus:ring-2 focus:ring-primary/20"
+          />
+          {localError ? <p className="text-xs text-destructive">{localError}</p> : null}
+          <button
+            type="button"
+            onClick={submit}
+            className="w-full min-h-[48px] rounded-xl bg-primary text-primary-foreground font-semibold frost-glow touch-manipulation active:scale-[0.98] transition-transform"
+          >
+            Продолжить
+          </button>
+        </div>
+        <p className="text-xs text-muted-foreground">
+          Как узнать ID: напишите боту{" "}
+          <a
+            href="https://t.me/userinfobot"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-primary underline underline-offset-2"
+          >
+            @userinfobot
+          </a>
+          .
+        </p>
+      </div>
+    </div>
+  )
 }
 
 /* ── Payment Waiting Screen ── */
@@ -163,7 +257,14 @@ export default function MiniAppPage() {
   const showEmailError = emailTouched && email.length > 0 && !isEmailValid
 
   useEffect(() => {
-    if (!tgId) setTgId(getTgIdFallbackFromUrl())
+    if (tgId) return
+    const urlId = getTgIdFallbackFromUrl()
+    if (urlId) {
+      setTgId(urlId)
+      return
+    }
+    const stored = readStoredTgId()
+    if (stored) setTgId(stored)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
@@ -229,16 +330,9 @@ export default function MiniAppPage() {
     setJustPaid(true)
   }, [])
 
-  /* ── No tg_id ── */
+  /* ── No tg_id (браузер без WebApp) ── */
   if (!tgId) {
-    return (
-      <div className="min-h-screen flex items-center justify-center px-6 text-center text-muted-foreground">
-        <div>
-          <FrostIcon className="w-16 h-16 text-primary mx-auto mb-4 animate-float" />
-          <p className="text-lg">Откройте мини‑апп из Telegram</p>
-        </div>
-      </div>
-    )
+    return <TgIdFallbackScreen onContinue={setTgId} />
   }
 
   /* ── Loading ── */
