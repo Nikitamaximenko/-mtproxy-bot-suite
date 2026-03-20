@@ -12,7 +12,7 @@ from uuid import UUID, uuid4
 
 from dotenv import load_dotenv
 from fastapi import Depends, FastAPI, HTTPException, Request
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import Boolean, DateTime, Integer, String, and_, create_engine, false as sa_false, func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column, sessionmaker
@@ -45,8 +45,10 @@ MT_PROXY_SERVER = (os.getenv("MT_PROXY_SERVER") or "").strip()
 MT_PROXY_PORT = int(os.getenv("MT_PROXY_PORT", "443").strip() or "443")
 MT_PROXY_SECRET = (os.getenv("MT_PROXY_SECRET") or "").strip()
 
-# Optional legacy fallback (if lava.top API is not configured)
+# Optional legacy fallback (if lava.top API is not configured or fails)
 LAVA_PAY_URL_TEMPLATE = (os.getenv("LAVA_PAY_URL_TEMPLATE") or "https://lava.top/pay/YOUR_ID?order_id={payment_token}").strip()
+# Full URL with {payment_token}; used if invoice API fails (highest priority fallback)
+LAVA_CHECKOUT_FALLBACK_URL = (os.getenv("LAVA_CHECKOUT_FALLBACK_URL") or "").strip()
 
 
 def utcnow() -> datetime:
@@ -182,6 +184,17 @@ class CheckoutCreateRequest(BaseModel):
     username: str | None = Field(default=None, max_length=64)
     email: str | None = Field(default=None, max_length=255)
 
+    @field_validator("telegram_id", mode="before")
+    @classmethod
+    def _telegram_id_from_string(cls, v: object) -> int:
+        if isinstance(v, str) and v.strip().isdigit():
+            return int(v)
+        if isinstance(v, int):
+            return v
+        if isinstance(v, str):
+            return int(v.strip())
+        raise ValueError("telegram_id must be a positive integer")
+
 
 class CheckoutCreateResponse(BaseModel):
     payment_url: str
@@ -207,6 +220,10 @@ def _create_lava_top_invoice(email: str) -> tuple[str, str | None]:
         payload["paymentProvider"] = LAVA_TOP_PAYMENT_PROVIDER
     if LAVA_TOP_PAYMENT_METHOD:
         payload["paymentMethod"] = LAVA_TOP_PAYMENT_METHOD
+    # Без этого Lava часто отклоняет инвойс для подписки RUB (paymentUrl не создаётся).
+    payload.setdefault("periodicity", "MONTHLY")
+    payload.setdefault("paymentProvider", "SMART_GLOCAL")
+    payload.setdefault("paymentMethod", "CARD")
 
     import urllib.error
     import urllib.request
@@ -244,6 +261,24 @@ def _create_lava_top_invoice(email: str) -> tuple[str, str | None]:
     if not payment_url:
         raise RuntimeError(f"lava.top did not return paymentUrl, response keys: {list(data.keys())}")
     return payment_url, contract_id
+
+
+def _checkout_fallback_payment_url(payment_token: str) -> str:
+    """Всегда вернуть ссылку, даже если API Lava упал (чтобы пользователь не видел 502)."""
+    token = payment_token
+    if LAVA_CHECKOUT_FALLBACK_URL and "{payment_token}" in LAVA_CHECKOUT_FALLBACK_URL:
+        return LAVA_CHECKOUT_FALLBACK_URL.format(payment_token=token)
+    tmpl = LAVA_PAY_URL_TEMPLATE or ""
+    if "{payment_token}" in tmpl and "YOUR_ID" not in tmpl:
+        return tmpl.format(payment_token=token)
+    if LAVA_TOP_OFFER_ID:
+        return f"https://lava.top/pay/{LAVA_TOP_OFFER_ID}?order_id={token}"
+    if "{payment_token}" in tmpl:
+        return tmpl.format(payment_token=token)
+    raise HTTPException(
+        status_code=503,
+        detail="Нет LAVA_TOP_OFFER_ID: укажи оффер в Railway или LAVA_CHECKOUT_FALLBACK_URL",
+    )
 
 
 @app.post("/checkout/create", response_model=CheckoutCreateResponse)
@@ -284,18 +319,15 @@ def checkout_create(payload: CheckoutCreateRequest, db: Session = Depends(get_db
         try:
             payment_url, lava_contract_id = _create_lava_top_invoice(email)
         except Exception as e:
-            logger.warning("lava.top invoice create failed for tg_id=%s: %s", tg_id, e)
-            # Fallback to legacy URL if configured (not placeholder)
-            if "YOUR_ID" not in (LAVA_PAY_URL_TEMPLATE or ""):
-                payment_url = LAVA_PAY_URL_TEMPLATE.format(payment_token=str(token))
-                logger.info("Using LAVA_PAY_URL_TEMPLATE fallback")
-            else:
-                raise HTTPException(
-                    status_code=502,
-                    detail=f"lava.top invoice create failed: {type(e).__name__}: {e}",
-                )
+            logger.error("lava.top invoice failed tg_id=%s, using fallback URL: %s", tg_id, e)
+            payment_url = _checkout_fallback_payment_url(str(token))
     else:
-        payment_url = LAVA_PAY_URL_TEMPLATE.format(payment_token=str(token))
+        try:
+            payment_url = LAVA_PAY_URL_TEMPLATE.format(payment_token=str(token))
+        except Exception:
+            payment_url = _checkout_fallback_payment_url(str(token))
+        if "YOUR_ID" in payment_url:
+            payment_url = _checkout_fallback_payment_url(str(token))
 
     if lava_contract_id:
         sub.lava_contract_id = lava_contract_id

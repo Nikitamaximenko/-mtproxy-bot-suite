@@ -186,7 +186,11 @@ export default function MiniAppPage() {
       const res = await fetch("/api/checkout", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ telegram_id: tgId, username: tgUser?.username, email }),
+        body: JSON.stringify({
+          telegram_id: String(tgId),
+          username: tgUser?.username,
+          email,
+        }),
       })
       const data = (await res.json()) as { error?: string; payment_url?: string; details?: string }
       if (!res.ok || !data?.payment_url) {
