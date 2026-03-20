@@ -11,7 +11,7 @@ from typing import AsyncGenerator, Generator, Literal
 from uuid import UUID, uuid4
 
 from dotenv import load_dotenv
-from fastapi import Depends, FastAPI, HTTPException, Request
+from fastapi import Depends, FastAPI, HTTPException, Query, Request
 from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import (
     BigInteger,
@@ -854,6 +854,7 @@ def admin_stats(req: Request, db: Session = Depends(get_db)) -> AdminStatsRespon
 class SubInfo(BaseModel):
     id: int
     telegram_id: int
+    username: str | None = None
     payment_status: str
     expires_at: datetime | None
     created_at: datetime
@@ -876,6 +877,7 @@ def admin_subscriptions(req: Request, db: Session = Depends(get_db)) -> AdminSub
         SubInfo(
             id=s.id,
             telegram_id=s.telegram_id,
+            username=None,
             payment_status=s.payment_status,
             expires_at=s.expires_at,
             created_at=s.created_at,
@@ -884,48 +886,154 @@ def admin_subscriptions(req: Request, db: Session = Depends(get_db)) -> AdminSub
         for s in subs
     ]
     return AdminSubsResponse(subscriptions=items, total=len(items))
+
+
+def _latest_subquery_for_telegram_ids(telegram_id_filter):
+    """Subquery: (tg_id, max_created) for latest Subscription row per user, optional filter by telegram ids."""
+    stmt = select(
+        Subscription.telegram_id.label("tg_id"),
+        func.max(Subscription.created_at).label("max_created"),
+    ).group_by(Subscription.telegram_id)
+    if telegram_id_filter is not None:
+        stmt = stmt.where(Subscription.telegram_id.in_(telegram_id_filter))
+    return stmt.subquery()
 
 
 @app.get("/admin/users", response_model=AdminSubsResponse)
 def admin_users(req: Request, db: Session = Depends(get_db)) -> AdminSubsResponse:
     """Unique users with their latest subscription status (one row per telegram_id)."""
     _require_admin(req)
-    latest_subq = (
-        select(
-            Subscription.telegram_id.label("tg_id"),
-            func.max(Subscription.created_at).label("max_created"),
-        )
-        .group_by(Subscription.telegram_id)
-    ).subquery()
+    latest_subq = _latest_subquery_for_telegram_ids(None)
 
-    subs = (
-        db.execute(
-            select(Subscription)
-            .join(
-                latest_subq,
-                and_(
-                    Subscription.telegram_id == latest_subq.c.tg_id,
-                    Subscription.created_at == latest_subq.c.max_created,
-                ),
-            )
-            .order_by(Subscription.created_at.desc())
-            .limit(100)
+    rows = db.execute(
+        select(Subscription, User.username)
+        .join(
+            latest_subq,
+            and_(
+                Subscription.telegram_id == latest_subq.c.tg_id,
+                Subscription.created_at == latest_subq.c.max_created,
+            ),
         )
-        .scalars().all()
-    )
+        .outerjoin(User, User.telegram_id == Subscription.telegram_id)
+        .order_by(Subscription.created_at.desc())
+        .limit(5000)
+    ).all()
 
     items = [
         SubInfo(
             id=s.id,
             telegram_id=s.telegram_id,
+            username=uname,
             payment_status=s.payment_status,
             expires_at=s.expires_at,
             created_at=s.created_at,
             has_proxy=bool(s.proxy_server and s.proxy_port and s.proxy_secret),
         )
-        for s in subs
+        for s, uname in rows
     ]
     return AdminSubsResponse(subscriptions=items, total=len(items))
+
+
+class RegistryUserInfo(BaseModel):
+    id: int
+    telegram_id: int
+    username: str | None
+    ref_source: str | None
+    created_at: datetime
+
+
+class AdminUsersOverviewResponse(BaseModel):
+    """Все записи из users без оплаченной/истёкшей подписки vs платящие клиенты."""
+
+    new_users: list[RegistryUserInfo]
+    subscribers: list[SubInfo]
+    new_users_total: int
+    subscribers_total: int
+    users_table_total: int
+
+
+@app.get("/admin/users-overview", response_model=AdminUsersOverviewResponse)
+def admin_users_overview(
+    req: Request,
+    db: Session = Depends(get_db),
+    limit: int = Query(5000, ge=1, le=20000),
+) -> AdminUsersOverviewResponse:
+    _require_admin(req)
+
+    users_table_total = db.execute(select(func.count()).select_from(User)).scalar() or 0
+
+    paid_telegram_ids = (
+        select(Subscription.telegram_id)
+        .where(Subscription.payment_status.in_(["paid", "expired"]))
+        .distinct()
+    )
+
+    new_users_list = (
+        db.execute(
+            select(User)
+            .where(User.telegram_id.notin_(paid_telegram_ids))
+            .order_by(User.created_at.desc())
+            .limit(limit)
+        )
+        .scalars()
+        .all()
+    )
+
+    new_users_total = (
+        db.execute(
+            select(func.count()).select_from(User).where(User.telegram_id.notin_(paid_telegram_ids))
+        ).scalar()
+        or 0
+    )
+
+    paid_ids_subq = paid_telegram_ids.subquery()
+    latest_subq = _latest_subquery_for_telegram_ids(select(paid_ids_subq.c.telegram_id))
+
+    sub_rows = db.execute(
+        select(Subscription, User.username)
+        .join(
+            latest_subq,
+            and_(
+                Subscription.telegram_id == latest_subq.c.tg_id,
+                Subscription.created_at == latest_subq.c.max_created,
+            ),
+        )
+        .outerjoin(User, User.telegram_id == Subscription.telegram_id)
+        .order_by(Subscription.created_at.desc())
+        .limit(limit)
+    ).all()
+
+    subscribers = [
+        SubInfo(
+            id=s.id,
+            telegram_id=s.telegram_id,
+            username=uname,
+            payment_status=s.payment_status,
+            expires_at=s.expires_at,
+            created_at=s.created_at,
+            has_proxy=bool(s.proxy_server and s.proxy_port and s.proxy_secret),
+        )
+        for s, uname in sub_rows
+    ]
+
+    subscribers_total = db.execute(select(func.count()).select_from(paid_ids_subq)).scalar() or 0
+
+    return AdminUsersOverviewResponse(
+        new_users=[
+            RegistryUserInfo(
+                id=u.id,
+                telegram_id=int(u.telegram_id),
+                username=u.username,
+                ref_source=u.ref_source,
+                created_at=u.created_at,
+            )
+            for u in new_users_list
+        ],
+        subscribers=subscribers,
+        new_users_total=int(new_users_total),
+        subscribers_total=int(subscribers_total),
+        users_table_total=int(users_table_total),
+    )
 
 
 class ProxyStatusResponse(BaseModel):

@@ -26,17 +26,37 @@ type ProxyStatus = {
 type SubInfo = {
   id: number
   telegram_id: number
+  username?: string | null
   payment_status: string
   expires_at: string | null
   created_at: string
   has_proxy: boolean
 }
 
+type RegistryUser = {
+  id: number
+  telegram_id: number
+  username: string | null
+  ref_source: string | null
+  created_at: string
+}
+
+type UsersOverview = {
+  new_users: RegistryUser[]
+  subscribers: SubInfo[]
+  new_users_total: number
+  subscribers_total: number
+  users_table_total: number
+}
+
 function formatDate(iso: string | null) {
   if (!iso) return "—"
   return new Date(iso).toLocaleDateString("ru-RU", {
-    day: "2-digit", month: "2-digit", year: "numeric",
-    hour: "2-digit", minute: "2-digit",
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
   })
 }
 
@@ -47,18 +67,24 @@ function StatusBadge({ status }: { status: string }) {
     expired: "bg-red-100 text-red-800",
   }
   return (
-    <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${colors[status] || "bg-gray-100 text-gray-600"}`}>
+    <span
+      className={`px-2 py-0.5 rounded-full text-xs font-medium ${colors[status] || "bg-gray-100 text-gray-600"}`}
+    >
       {status}
     </span>
   )
 }
 
+const STORAGE_KEY = "frosty_admin_key"
+
 export default function AdminPage() {
   const [key, setKey] = useState("")
   const [authed, setAuthed] = useState(false)
+  const [bootstrapped, setBootstrapped] = useState(false)
   const [stats, setStats] = useState<Stats | null>(null)
   const [proxy, setProxy] = useState<ProxyStatus | null>(null)
-  const [subs, setSubs] = useState<SubInfo[]>([])
+  const [overview, setOverview] = useState<UsersOverview | null>(null)
+  const [userTab, setUserTab] = useState<"new" | "subscribers">("new")
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState("")
   const [remember, setRemember] = useState(true)
@@ -70,70 +96,122 @@ export default function AdminPage() {
     [key],
   )
 
+  const persistKey = useCallback(
+    (activeKey: string) => {
+      if (remember && activeKey) {
+        try {
+          localStorage.setItem(STORAGE_KEY, activeKey)
+        } catch {
+          /* ignore */
+        }
+      } else {
+        try {
+          localStorage.removeItem(STORAGE_KEY)
+        } catch {
+          /* ignore */
+        }
+      }
+    },
+    [remember],
+  )
+
   const fetchAll = useCallback(
     async (overrideKey?: string) => {
       const activeKey = overrideKey ?? key
-    setLoading(true)
-    setError("")
-    try {
-      const [sRes, pRes, subRes] = await Promise.all([
-        fetch("/api/admin/stats", { headers: headers(activeKey), cache: "no-store" }),
-        fetch("/api/admin/proxy-status", { headers: headers(activeKey), cache: "no-store" }),
-        fetch("/api/admin/users", { headers: headers(activeKey), cache: "no-store" }),
-      ])
+      setLoading(true)
+      setError("")
+      try {
+        const [sRes, pRes, ovRes] = await Promise.all([
+          fetch("/api/admin/stats", { headers: headers(activeKey), cache: "no-store" }),
+          fetch("/api/admin/proxy-status", { headers: headers(activeKey), cache: "no-store" }),
+          fetch("/api/admin/users-overview", { headers: headers(activeKey), cache: "no-store" }),
+        ])
 
-      if (sRes.status === 403) {
-        setAuthed(false)
-        setError("Неверный ключ")
-        return
+        if (sRes.status === 403 || ovRes.status === 403) {
+          setAuthed(false)
+          setOverview(null)
+          setError("Неверный ключ")
+          try {
+            localStorage.removeItem(STORAGE_KEY)
+          } catch {
+            /* ignore */
+          }
+          return
+        }
+
+        const [sData, pData, ovData] = await Promise.all([sRes.json(), pRes.json(), ovRes.json()])
+        setStats(sData)
+        setProxy(pData)
+        setOverview(ovData as UsersOverview)
+        setAuthed(true)
+        persistKey(activeKey)
+      } catch {
+        setError("Не удалось загрузить данные")
+      } finally {
+        setLoading(false)
       }
-
-      const [sData, pData, subData] = await Promise.all([sRes.json(), pRes.json(), subRes.json()])
-      setStats(sData)
-      setProxy(pData)
-      setSubs(subData.subscriptions || [])
-      setAuthed(true)
-
-      // Save key locally so you don't need to re-enter it on each refresh.
-      // Note: key will be stored in browser localStorage.
-      if (remember) {
-        try {
-          localStorage.setItem("frosty_admin_key", activeKey)
-        } catch {}
-      } else {
-        try {
-          localStorage.removeItem("frosty_admin_key")
-        } catch {}
-      }
-    } catch {
-      setError("Не удалось загрузить данные")
-    } finally {
-      setLoading(false)
-    }
     },
-    [headers, remember, key],
+    [headers, key, persistKey],
   )
 
+  /** Один раз при монтировании: пробуем ключ из localStorage и не показываем форму входа до проверки */
   useEffect(() => {
-    try {
-      const saved = localStorage.getItem("frosty_admin_key")
+    let cancelled = false
+    ;(async () => {
+      let saved = ""
+      try {
+        saved = localStorage.getItem(STORAGE_KEY) ?? ""
+      } catch {
+        /* ignore */
+      }
       if (saved) {
         setKey(saved)
-        fetchAll(saved)
+        await fetchAll(saved)
       }
-    } catch {}
+      if (!cancelled) setBootstrapped(true)
+    })()
+    return () => {
+      cancelled = true
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   useEffect(() => {
     if (!authed) return
-    const interval = setInterval(fetchAll, 30000)
+    const interval = setInterval(() => {
+      void fetchAll()
+    }, 30000)
     return () => clearInterval(interval)
   }, [authed, fetchAll])
 
   const handleLogin = (e: React.FormEvent) => {
     e.preventDefault()
-    fetchAll()
+    void fetchAll()
+  }
+
+  const handleLogout = () => {
+    try {
+      localStorage.removeItem(STORAGE_KEY)
+    } catch {
+      /* ignore */
+    }
+    setAuthed(false)
+    setOverview(null)
+    setStats(null)
+    setProxy(null)
+    setKey("")
+    setError("")
+  }
+
+  if (!bootstrapped) {
+    return (
+      <div className="min-h-screen bg-gray-950 flex items-center justify-center px-4">
+        <div className="text-center text-gray-400">
+          <p className="text-lg">Загрузка…</p>
+          <p className="text-sm mt-2">Проверяем сохранённый вход</p>
+        </div>
+      </div>
+    )
   }
 
   if (!authed) {
@@ -158,7 +236,7 @@ export default function AdminPage() {
               onChange={(e) => setRemember(e.target.checked)}
               className="w-4 h-4"
             />
-            Запомнить ключ на этом устройстве
+            Запомнить на этом компьютере (localStorage)
           </label>
           <button
             type="submit"
@@ -173,19 +251,24 @@ export default function AdminPage() {
     )
   }
 
+  const newUsers = overview?.new_users ?? []
+  const subscribers = overview?.subscribers ?? []
+
   return (
     <div className="min-h-screen bg-gray-950 text-white">
-      <header className="border-b border-gray-800 px-6 py-4 flex items-center justify-between">
+      <header className="border-b border-gray-800 px-6 py-4 flex items-center justify-between flex-wrap gap-3">
         <h1 className="text-xl font-bold">Frosty Admin</h1>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
           <button
-            onClick={() => fetchAll()}
+            type="button"
+            onClick={() => void fetchAll()}
             disabled={loading || activatingAdmin}
             className="px-4 py-2 text-sm bg-gray-800 rounded-lg hover:bg-gray-700 transition-colors disabled:opacity-50"
           >
             {loading ? "⟳" : "Обновить"}
           </button>
           <button
+            type="button"
             onClick={async () => {
               setActivatingAdmin(true)
               setError("")
@@ -214,18 +297,28 @@ export default function AdminPage() {
           >
             {activatingAdmin ? "Активация…" : "Вернуть подписку админа"}
           </button>
+          <button
+            type="button"
+            onClick={handleLogout}
+            className="px-4 py-2 text-sm bg-red-900/60 border border-red-800 rounded-lg hover:bg-red-900 transition-colors"
+          >
+            Выйти
+          </button>
         </div>
       </header>
 
+      {error ? <p className="text-center text-red-400 text-sm py-2">{error}</p> : null}
+
       <main className="max-w-6xl mx-auto px-6 py-8 space-y-8">
-        {/* Proxy Status */}
         <section>
           <h2 className="text-lg font-semibold mb-4 text-gray-300">Прокси-сервер</h2>
           <div className="bg-gray-900 border border-gray-800 rounded-2xl p-6">
             {proxy ? (
               <div className="flex items-center justify-between flex-wrap gap-4">
                 <div className="flex items-center gap-3">
-                  <div className={`w-3 h-3 rounded-full ${proxy.online ? "bg-emerald-400 animate-pulse" : "bg-red-500"}`} />
+                  <div
+                    className={`w-3 h-3 rounded-full ${proxy.online ? "bg-emerald-400 animate-pulse" : "bg-red-500"}`}
+                  />
                   <span className="text-lg font-medium">
                     {proxy.server}:{proxy.port}
                   </span>
@@ -245,16 +338,24 @@ export default function AdminPage() {
           </div>
         </section>
 
-        {/* Stats */}
         <section>
           <h2 className="text-lg font-semibold mb-4 text-gray-300">Аналитика</h2>
-          <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
+          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
             {[
               { label: "Пользователей", value: stats?.total_users ?? "—", color: "text-blue-400" },
-              { label: "Активных", value: stats?.active_subscriptions ?? "—", color: "text-emerald-400" },
+              {
+                label: "В таблице users",
+                value: overview?.users_table_total ?? "—",
+                color: "text-cyan-400",
+              },
+              { label: "Активных подписок", value: stats?.active_subscriptions ?? "—", color: "text-emerald-400" },
               { label: "Истекших", value: stats?.expired_subscriptions ?? "—", color: "text-orange-400" },
               { label: "Ожидают оплату", value: stats?.pending_payments ?? "—", color: "text-yellow-400" },
-              { label: "Выручка (≈)", value: stats ? `${stats.revenue_estimate.toLocaleString("ru-RU")} ₽` : "—", color: "text-green-400" },
+              {
+                label: "Выручка (≈)",
+                value: stats ? `${stats.revenue_estimate.toLocaleString("ru-RU")} ₽` : "—",
+                color: "text-green-400",
+              },
             ].map(({ label, value, color }) => (
               <div key={label} className="bg-gray-900 border border-gray-800 rounded-2xl p-5">
                 <div className="text-xs text-gray-400 mb-1">{label}</div>
@@ -264,53 +365,129 @@ export default function AdminPage() {
           </div>
         </section>
 
-        {/* Subscriptions Table */}
         <section>
-          <h2 className="text-lg font-semibold mb-4 text-gray-300">Пользователи (уникальные, последние 100)</h2>
-          <div className="bg-gray-900 border border-gray-800 rounded-2xl overflow-hidden">
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="border-b border-gray-800 text-gray-400 text-left">
-                    <th className="px-4 py-3 font-medium">ID</th>
-                    <th className="px-4 py-3 font-medium">Telegram ID</th>
-                    <th className="px-4 py-3 font-medium">Статус</th>
-                    <th className="px-4 py-3 font-medium">Истекает</th>
-                    <th className="px-4 py-3 font-medium">Создана</th>
-                    <th className="px-4 py-3 font-medium">Прокси</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {subs.map((s) => (
-                    <tr key={s.id} className="border-b border-gray-800/50 hover:bg-gray-800/30 transition-colors">
-                      <td className="px-4 py-3 font-mono text-gray-400">{s.id}</td>
-                      <td className="px-4 py-3 font-mono">{s.telegram_id}</td>
-                      <td className="px-4 py-3"><StatusBadge status={s.payment_status} /></td>
-                      <td className="px-4 py-3 text-gray-300">{formatDate(s.expires_at)}</td>
-                      <td className="px-4 py-3 text-gray-400">{formatDate(s.created_at)}</td>
-                      <td className="px-4 py-3">
-                        {s.has_proxy ? (
-                          <span className="text-emerald-400">✓</span>
-                        ) : (
-                          <span className="text-gray-600">—</span>
-                        )}
-                      </td>
-                    </tr>
-                  ))}
-                  {subs.length === 0 && (
-                    <tr>
-                      <td colSpan={6} className="px-4 py-8 text-center text-gray-500">
-                        Нет подписок
-                      </td>
-                    </tr>
-                  )}
-                </tbody>
-              </table>
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-4">
+            <h2 className="text-lg font-semibold text-gray-300">Пользователи из БД</h2>
+            <div className="flex rounded-xl bg-gray-900 border border-gray-800 p-1 w-fit">
+              <button
+                type="button"
+                onClick={() => setUserTab("new")}
+                className={`px-4 py-2 text-sm rounded-lg transition-colors ${
+                  userTab === "new" ? "bg-blue-600 text-white" : "text-gray-400 hover:text-white"
+                }`}
+              >
+                Новые ({overview?.new_users_total ?? newUsers.length})
+              </button>
+              <button
+                type="button"
+                onClick={() => setUserTab("subscribers")}
+                className={`px-4 py-2 text-sm rounded-lg transition-colors ${
+                  userTab === "subscribers"
+                    ? "bg-blue-600 text-white"
+                    : "text-gray-400 hover:text-white"
+                }`}
+              >
+                Платные подписчики ({overview?.subscribers_total ?? subscribers.length})
+              </button>
             </div>
           </div>
+          <p className="text-xs text-gray-500 mb-3">
+            <strong>Новые</strong> — записи в <code className="text-gray-400">users</code> без оплаченной или
+            истёкшей подписки (только pending или без подписок). <strong>Платные</strong> — когда-либо оплатили
+            (paid/expired); показана последняя запись подписки.
+          </p>
+
+          {userTab === "new" ? (
+            <div className="bg-gray-900 border border-gray-800 rounded-2xl overflow-hidden">
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b border-gray-800 text-gray-400 text-left">
+                      <th className="px-4 py-3 font-medium">ID</th>
+                      <th className="px-4 py-3 font-medium">Telegram ID</th>
+                      <th className="px-4 py-3 font-medium">Username</th>
+                      <th className="px-4 py-3 font-medium">Ref</th>
+                      <th className="px-4 py-3 font-medium">Регистрация</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {newUsers.map((u) => (
+                      <tr
+                        key={u.id}
+                        className="border-b border-gray-800/50 hover:bg-gray-800/30 transition-colors"
+                      >
+                        <td className="px-4 py-3 font-mono text-gray-400">{u.id}</td>
+                        <td className="px-4 py-3 font-mono">{u.telegram_id}</td>
+                        <td className="px-4 py-3 text-gray-300">{u.username ? `@${u.username}` : "—"}</td>
+                        <td className="px-4 py-3 font-mono text-xs text-gray-500">{u.ref_source ?? "—"}</td>
+                        <td className="px-4 py-3 text-gray-400">{formatDate(u.created_at)}</td>
+                      </tr>
+                    ))}
+                    {newUsers.length === 0 && (
+                      <tr>
+                        <td colSpan={5} className="px-4 py-8 text-center text-gray-500">
+                          Нет пользователей в этой категории
+                        </td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          ) : (
+            <div className="bg-gray-900 border border-gray-800 rounded-2xl overflow-hidden">
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b border-gray-800 text-gray-400 text-left">
+                      <th className="px-4 py-3 font-medium">ID подписки</th>
+                      <th className="px-4 py-3 font-medium">Telegram ID</th>
+                      <th className="px-4 py-3 font-medium">Username</th>
+                      <th className="px-4 py-3 font-medium">Статус</th>
+                      <th className="px-4 py-3 font-medium">Истекает</th>
+                      <th className="px-4 py-3 font-medium">Создана</th>
+                      <th className="px-4 py-3 font-medium">Прокси</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {subscribers.map((s) => (
+                      <tr
+                        key={s.id}
+                        className="border-b border-gray-800/50 hover:bg-gray-800/30 transition-colors"
+                      >
+                        <td className="px-4 py-3 font-mono text-gray-400">{s.id}</td>
+                        <td className="px-4 py-3 font-mono">{s.telegram_id}</td>
+                        <td className="px-4 py-3 text-gray-300">
+                          {s.username ? `@${s.username}` : "—"}
+                        </td>
+                        <td className="px-4 py-3">
+                          <StatusBadge status={s.payment_status} />
+                        </td>
+                        <td className="px-4 py-3 text-gray-300">{formatDate(s.expires_at)}</td>
+                        <td className="px-4 py-3 text-gray-400">{formatDate(s.created_at)}</td>
+                        <td className="px-4 py-3">
+                          {s.has_proxy ? (
+                            <span className="text-emerald-400">✓</span>
+                          ) : (
+                            <span className="text-gray-600">—</span>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                    {subscribers.length === 0 && (
+                      <tr>
+                        <td colSpan={7} className="px-4 py-8 text-center text-gray-500">
+                          Нет платных подписчиков
+                        </td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
         </section>
 
-        {/* Referral Sources */}
         {stats?.referrals && stats.referrals.length > 0 && (
           <section>
             <h2 className="text-lg font-semibold mb-4 text-gray-300">Источники трафика</h2>
@@ -326,7 +503,10 @@ export default function AdminPage() {
                   </thead>
                   <tbody>
                     {stats.referrals.map((r) => (
-                      <tr key={r.source} className="border-b border-gray-800/50 hover:bg-gray-800/30 transition-colors">
+                      <tr
+                        key={r.source}
+                        className="border-b border-gray-800/50 hover:bg-gray-800/30 transition-colors"
+                      >
                         <td className="px-4 py-3 font-medium">{r.source}</td>
                         <td className="px-4 py-3 font-mono text-xs text-gray-400">
                           t.me/FrostyBot?start={r.source}
