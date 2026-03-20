@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-import html
 import logging
 import os
 from datetime import datetime, timezone
@@ -54,16 +53,6 @@ def main_menu_kb(tg_id: int) -> InlineKeyboardMarkup:
         [InlineKeyboardButton(text="ℹ️ Как это работает", callback_data="menu:help")],
         row3,
     ])
-
-
-def subscribe_cta_kb(tg_id: int) -> InlineKeyboardMarkup:
-    """Персональный CTA: оплата + отписка от напоминаний."""
-    return InlineKeyboardMarkup(
-        inline_keyboard=[
-            [InlineKeyboardButton(text="💳 Оформить подписку", web_app=WebAppInfo(url=_miniapp_url(tg_id)))],
-            [InlineKeyboardButton(text="🔕 Не присылать напоминания", callback_data="marketing:optout")],
-        ]
-    )
 
 
 def proxy_kb(proxy_link: str) -> InlineKeyboardMarkup:
@@ -289,20 +278,6 @@ async def cmd_start(message: Message, session: aiohttp.ClientSession, state: FSM
         parse_mode="HTML",
         reply_markup=main_menu_kb(tg_id),
     )
-
-    greet = first_name or (f"@{username}" if username else "Привет")
-    cta_lines = [
-        f"<b>{html.escape(greet)}</b>, отдельно для тебя:",
-        "",
-        "За <b>~10 секунд</b> можно включить MTProxy прямо здесь — сторис и видео обычно идут ровнее, "
-        "<b>без VPN</b> на весь телефон.",
-        "",
-        f"Тариф <b>{PRICE_RUB} ₽/мес</b>. Нажми кнопку — оплата и доступ в пару шагов.",
-    ]
-    if ref_source:
-        cta_lines.extend(["", f"<i>Вход по метке: {html.escape(ref_source)}</i>"])
-    cta_lines.extend(["", "<i>Не нужны напоминания — кнопка ниже или команда /stop</i>"])
-    await message.answer("\n".join(cta_lines), parse_mode="HTML", reply_markup=subscribe_cta_kb(tg_id))
 
 
 async def cmd_stop(message: Message, session: aiohttp.ClientSession) -> None:
