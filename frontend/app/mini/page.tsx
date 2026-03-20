@@ -387,17 +387,26 @@ export default function MiniAppPage() {
 
           <div className="flex flex-col gap-3 mb-8">
             {[
-              { icon: Zap, title: "Один клик", desc: "Прокси добавляется автоматически" },
-              { icon: Shield, title: "Безопасно", desc: "Без логов и отслеживания" },
-              { icon: Lock, title: "Без VPN", desc: "Работает независимо от всего" },
-            ].map(({ icon: Icon, title, desc }, i) => (
+              {
+                icon: Zap,
+                title: "Прокси только для ВАС, полная анонимность и безопасность",
+              },
+              {
+                icon: Shield,
+                title:
+                  "Никаких переключений, один раз поставил и забыл. Все работает автоматически и не мешает работе других приложений",
+              },
+              {
+                icon: Lock,
+                title: "Работает совместно с включенным VPN, не мешает его работе.",
+              },
+            ].map(({ icon: Icon, title }, i) => (
               <div key={i} className="flex items-start gap-4 p-4 rounded-2xl bg-card border border-border/50">
                 <div className="w-11 h-11 flex-shrink-0 rounded-xl ice-block-solid flex items-center justify-center">
                   <Icon className="w-5 h-5 text-primary-foreground" />
                 </div>
                 <div>
-                  <h3 className="text-sm font-bold text-foreground">{title}</h3>
-                  <p className="text-xs text-muted-foreground mt-0.5">{desc}</p>
+                  <p className="text-sm font-bold text-foreground leading-snug">{title}</p>
                 </div>
               </div>
             ))}
