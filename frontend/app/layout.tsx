@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from 'next'
 import { Inter } from 'next/font/google'
 import { Analytics } from '@vercel/analytics/next'
+import { BackendKeepAlive } from '@/components/BackendKeepAlive'
 import './globals.css'
 
 const _inter = Inter({ subsets: ["latin", "cyrillic"], variable: "--font-inter" });
@@ -45,6 +46,7 @@ export default function RootLayout({
   return (
     <html lang="ru">
       <body className="font-sans antialiased">
+        <BackendKeepAlive />
         {children}
         <Analytics />
       </body>

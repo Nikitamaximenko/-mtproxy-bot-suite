@@ -13,7 +13,19 @@ from uuid import UUID, uuid4
 from dotenv import load_dotenv
 from fastapi import Depends, FastAPI, HTTPException, Request
 from pydantic import BaseModel, Field, field_validator
-from sqlalchemy import Boolean, DateTime, Integer, String, and_, create_engine, false as sa_false, func, select
+from sqlalchemy import (
+    BigInteger,
+    Boolean,
+    DateTime,
+    Integer,
+    String,
+    and_,
+    create_engine,
+    false as sa_false,
+    func,
+    select,
+    text,
+)
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column, sessionmaker
 
@@ -63,7 +75,7 @@ class User(Base):
     __tablename__ = "users"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    telegram_id: Mapped[int] = mapped_column(Integer, unique=True, index=True, nullable=False)
+    telegram_id: Mapped[int] = mapped_column(BigInteger, unique=True, index=True, nullable=False)
     username: Mapped[str | None] = mapped_column(String(64), nullable=True)
     ref_source: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
@@ -76,7 +88,7 @@ class Subscription(Base):
     __tablename__ = "subscriptions"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    telegram_id: Mapped[int] = mapped_column(Integer, index=True, nullable=False)
+    telegram_id: Mapped[int] = mapped_column(BigInteger, index=True, nullable=False)
 
     proxy_secret: Mapped[str | None] = mapped_column(String(64), nullable=True)
     proxy_server: Mapped[str | None] = mapped_column(String(255), nullable=True)
@@ -112,7 +124,7 @@ logging.basicConfig(level=logging.INFO)
 
 def _migrate() -> None:
     """Add columns that create_all won't add to existing tables."""
-    from sqlalchemy import inspect as sa_inspect, text
+    from sqlalchemy import inspect as sa_inspect
     inspector = sa_inspect(engine)
     tables = inspector.get_table_names()
     if "subscriptions" in tables:
@@ -127,6 +139,28 @@ def _migrate() -> None:
         with engine.begin() as conn:
             if "ref_source" not in existing:
                 conn.execute(text("ALTER TABLE users ADD COLUMN ref_source VARCHAR(64)"))
+
+    # PostgreSQL: принудительно BIGINT для telegram_id (уже BIGINT — будет ошибка, игнорируем).
+    if engine.dialect.name == "postgresql":
+        try:
+            with engine.connect() as conn:
+                conn.execute(
+                    text("""
+                        ALTER TABLE users
+                        ALTER COLUMN telegram_id TYPE BIGINT
+                        USING telegram_id::bigint
+                    """)
+                )
+                conn.execute(
+                    text("""
+                        ALTER TABLE subscriptions
+                        ALTER COLUMN telegram_id TYPE BIGINT
+                        USING telegram_id::bigint
+                    """)
+                )
+                conn.commit()
+        except Exception:
+            pass
 
 
 @asynccontextmanager
@@ -349,10 +383,10 @@ FRONTEND_URL = (os.getenv("FRONTEND_URL") or "").strip().rstrip("/")
 ADMIN_NOTIFY_CHAT_ID = (os.getenv("ADMIN_NOTIFY_CHAT_ID") or "").strip()
 
 
-def _send_tg(tg_id: int, text: str, keyboard: dict | None = None) -> None:
-    """Best-effort send message via Telegram Bot API."""
+def _send_tg(tg_id: int, text: str, keyboard: dict | None = None) -> bool:
+    """Send message via Telegram Bot API. Returns True if request completed without error."""
     if not BOT_TOKEN:
-        return
+        return False
     try:
         import urllib.request
         body: dict[str, object] = {"chat_id": tg_id, "text": text, "parse_mode": "HTML"}
@@ -366,8 +400,10 @@ def _send_tg(tg_id: int, text: str, keyboard: dict | None = None) -> None:
             method="POST",
         )
         urllib.request.urlopen(req, timeout=10)
+        return True
     except Exception as exc:
         logger.warning("Failed to send to tg_id=%s: %s", tg_id, exc)
+        return False
 
 
 def _notify_payment_success(tg_id: int, proxy_link: str) -> None:
@@ -613,6 +649,53 @@ def admin_check_expirations(req: Request) -> OkResponse:
     _require_admin(req)
     _process_expiration_notifications()
     return OkResponse(ok=True)
+
+
+class BroadcastRequest(BaseModel):
+    message: str = Field(..., min_length=1, max_length=4096)
+
+
+class BroadcastResponse(BaseModel):
+    ok: bool
+    total: int
+    sent: int
+    failed: int
+
+
+@app.post("/admin/broadcast", response_model=BroadcastResponse)
+def admin_broadcast(payload: BroadcastRequest, req: Request, db: Session = Depends(get_db)) -> BroadcastResponse:
+    """
+    Рассылка HTML-текста всем пользователям из таблицы users (по telegram_id).
+    Заголовок: x-admin-key. Лимит Telegram на сообщение — 4096 символов.
+    """
+    _require_admin(req)
+    if not BOT_TOKEN:
+        raise HTTPException(status_code=503, detail="BOT_TOKEN is not configured on backend")
+
+    import time
+
+    rows = db.execute(select(User.telegram_id)).scalars().all()
+    # Уникальные id, стабильный порядок
+    seen: set[int] = set()
+    ids: list[int] = []
+    for raw in rows:
+        uid = int(raw)
+        if uid not in seen:
+            seen.add(uid)
+            ids.append(uid)
+
+    msg = payload.message.strip()
+    sent = 0
+    failed = 0
+    for uid in ids:
+        if _send_tg(uid, msg):
+            sent += 1
+        else:
+            failed += 1
+        time.sleep(0.05)  # ~20 msg/s, мягче к лимитам Telegram
+
+    logger.info("Broadcast finished total=%s sent=%s failed=%s", len(ids), sent, failed)
+    return BroadcastResponse(ok=True, total=len(ids), sent=sent, failed=failed)
 
 
 @app.post("/admin/deactivate/{telegram_id}", response_model=OkResponse)
