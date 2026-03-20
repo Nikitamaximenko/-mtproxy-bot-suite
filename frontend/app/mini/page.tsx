@@ -151,12 +151,16 @@ export default function MiniAppPage() {
   const [loading, setLoading] = useState(true)
 
   const [email, setEmail] = useState("")
+  const [emailTouched, setEmailTouched] = useState(false)
   const [paying, setPaying] = useState(false)
   const [paymentUrl, setPaymentUrl] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [errorDetail, setErrorDetail] = useState<string | null>(null)
   const [copied, setCopied] = useState(false)
   const [justPaid, setJustPaid] = useState(false)
+
+  const isEmailValid = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())
+  const showEmailError = emailTouched && email.length > 0 && !isEmailValid
 
   useEffect(() => {
     if (!tgId) setTgId(getTgIdFallbackFromUrl())
@@ -327,21 +331,6 @@ export default function MiniAppPage() {
             </div>
           )}
 
-          <div className="bg-card border border-border/50 rounded-2xl p-5 mb-4">
-            <div className="flex items-center justify-between py-2">
-              <span className="text-sm text-muted-foreground">Тариф</span>
-              <span className="text-sm font-medium text-foreground">299 ₽/мес</span>
-            </div>
-            {expiresAt && (
-              <div className="flex items-center justify-between py-2 border-t border-border">
-                <span className="text-sm text-muted-foreground">Следующий платёж</span>
-                <span className="text-sm font-medium text-foreground">
-                  {new Date(expiresAt).toLocaleDateString("ru-RU")}
-                </span>
-              </div>
-            )}
-          </div>
-
           <div className="flex flex-col gap-2 mt-6">
             {[
               { icon: Shield, text: "Полная безопасность — без логов" },
@@ -446,13 +435,22 @@ export default function MiniAppPage() {
               autoCapitalize="none"
               placeholder="your@email.com"
               value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              className="w-full h-11 px-4 mb-4 bg-secondary border border-border rounded-xl text-sm text-foreground placeholder:text-muted-foreground outline-none focus:border-primary focus:ring-2 focus:ring-primary/20 transition-all"
+              onChange={(e) => { setEmail(e.target.value); setEmailTouched(true) }}
+              onBlur={() => setEmailTouched(true)}
+              className={`w-full h-11 px-4 bg-secondary border rounded-xl text-sm text-foreground placeholder:text-muted-foreground outline-none transition-all ${
+                showEmailError
+                  ? "border-destructive focus:border-destructive focus:ring-2 focus:ring-destructive/20"
+                  : "border-border focus:border-primary focus:ring-2 focus:ring-primary/20"
+              }`}
             />
+            {showEmailError && (
+              <p className="text-xs text-destructive mt-1.5 mb-2">Введите корректный email (например, you@mail.ru)</p>
+            )}
+            {!showEmailError && <div className="mb-4" />}
 
             <button
               onClick={handlePay}
-              disabled={!email || paying}
+              disabled={!email || !isEmailValid || paying}
               className="group relative w-full flex items-center justify-center gap-2.5 min-h-[52px] px-6 py-3.5 bg-primary text-primary-foreground font-semibold rounded-2xl transition-all active:scale-95 frost-glow-strong overflow-hidden touch-manipulation disabled:opacity-50 disabled:active:scale-100"
             >
               <span className="absolute inset-0 animate-shimmer opacity-50" />
