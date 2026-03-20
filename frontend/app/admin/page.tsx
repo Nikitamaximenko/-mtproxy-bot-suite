@@ -9,6 +9,7 @@ type RefStat = {
 
 type Stats = {
   total_users: number
+  marketing_opt_out_users: number
   active_subscriptions: number
   expired_subscriptions: number
   pending_payments: number
@@ -146,7 +147,22 @@ export default function AdminPage() {
   const [remember, setRemember] = useState(true)
   const [activatingAdmin, setActivatingAdmin] = useState(false)
   const [pendingTgId, setPendingTgId] = useState<number | null>(null)
+  const [broadcastText, setBroadcastText] = useState("")
+  const [includeOptedOut, setIncludeOptedOut] = useState(false)
+  const [broadcastBusy, setBroadcastBusy] = useState(false)
+  const [broadcastResult, setBroadcastResult] = useState<{
+    total: number
+    sent: number
+    failed: number
+  } | null>(null)
   const ADMIN_TG_ID = 231115635
+
+  const broadcastRecipientEstimate =
+    stats == null
+      ? null
+      : includeOptedOut
+        ? stats.total_users
+        : Math.max(0, stats.total_users - stats.marketing_opt_out_users)
 
   const headers = useCallback(
     (overrideKey?: string) => ({ "x-admin-key": overrideKey ?? key }),
@@ -197,7 +213,11 @@ export default function AdminPage() {
         }
 
         const [sData, pData, ovData] = await Promise.all([sRes.json(), pRes.json(), ovRes.json()])
-        setStats(sData)
+        const rawStats = sData as Stats & { marketing_opt_out_users?: number }
+        setStats({
+          ...rawStats,
+          marketing_opt_out_users: rawStats.marketing_opt_out_users ?? 0,
+        })
         setProxy(pData)
         setOverview(ovData as UsersOverview)
         setAuthed(true)
@@ -248,6 +268,64 @@ export default function AdminPage() {
     },
     [fetchAll, headers],
   )
+
+  const sendBroadcast = useCallback(async () => {
+    const text = broadcastText.trim()
+    if (!text || broadcastRecipientEstimate === null || broadcastRecipientEstimate === 0) return
+
+    const ok = window.confirm(
+      `Отправить сообщение ${broadcastRecipientEstimate} получателям в Telegram?\n\n` +
+        (includeOptedOut
+          ? "Включая отписавшихся от маркетинга."
+          : "Без пользователей, отписавшихся от маркетинга (/stop)."),
+    )
+    if (!ok) return
+
+    setBroadcastBusy(true)
+    setBroadcastResult(null)
+    setError("")
+    try {
+      const res = await fetch("/api/admin/broadcast", {
+        method: "POST",
+        headers: {
+          ...headers(),
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          message: text,
+          include_opted_out: includeOptedOut,
+        }),
+        cache: "no-store",
+      })
+      const data = (await res.json().catch(() => ({}))) as {
+        detail?: string
+        total?: number
+        sent?: number
+        failed?: number
+      }
+      if (!res.ok) {
+        throw new Error(typeof data.detail === "string" ? data.detail : `Ошибка ${res.status}`)
+      }
+      if (
+        typeof data.total !== "number" ||
+        typeof data.sent !== "number" ||
+        typeof data.failed !== "number"
+      ) {
+        throw new Error("Некорректный ответ сервера")
+      }
+      setBroadcastResult({ total: data.total, sent: data.sent, failed: data.failed })
+      setBroadcastText("")
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Не удалось отправить рассылку")
+    } finally {
+      setBroadcastBusy(false)
+    }
+  }, [
+    broadcastRecipientEstimate,
+    broadcastText,
+    headers,
+    includeOptedOut,
+  ])
 
   /** Один раз при монтировании: пробуем ключ из localStorage и не показываем форму входа до проверки */
   useEffect(() => {
@@ -357,7 +435,7 @@ export default function AdminPage() {
           <button
             type="button"
             onClick={() => void fetchAll()}
-            disabled={loading || activatingAdmin || pendingTgId !== null}
+            disabled={loading || activatingAdmin || pendingTgId !== null || broadcastBusy}
             className="px-4 py-2 text-sm bg-gray-800 rounded-lg hover:bg-gray-700 transition-colors disabled:opacity-50"
           >
             {loading ? "⟳" : "Обновить"}
@@ -372,7 +450,7 @@ export default function AdminPage() {
                 setActivatingAdmin(false)
               }
             }}
-            disabled={loading || activatingAdmin || pendingTgId !== null}
+            disabled={loading || activatingAdmin || pendingTgId !== null || broadcastBusy}
             className="px-4 py-2 text-sm bg-blue-700 rounded-lg hover:bg-blue-600 transition-colors disabled:opacity-50"
           >
             {activatingAdmin ? "Активация…" : "Вернуть подписку админа"}
@@ -442,6 +520,89 @@ export default function AdminPage() {
                 <div className={`text-2xl font-bold ${color}`}>{value}</div>
               </div>
             ))}
+          </div>
+        </section>
+
+        <section>
+          <h2 className="text-lg font-semibold mb-2 text-gray-300">Рассылка в боте</h2>
+          <p className="text-xs text-gray-500 mb-4">
+            Одно сообщение всем пользователям из таблицы <code className="text-gray-400">users</code> через
+            Telegram Bot API (<strong>HTML</strong>: <code className="text-gray-400">&lt;b&gt;</code>,{" "}
+            <code className="text-gray-400">&lt;i&gt;</code>, <code className="text-gray-400">&lt;a href&gt;</code>
+            , <code className="text-gray-400">&lt;code&gt;</code>). Макс. 4096 символов. Отправка с небольшой
+            задержкой между чатами (~20/сек), при большой базе займёт время.
+          </p>
+          <div className="bg-gray-900 border border-gray-800 rounded-2xl p-6 space-y-4">
+            <div className="flex flex-wrap items-baseline gap-x-4 gap-y-1 text-sm">
+              <span className="text-gray-400">
+                Получателей (оценка):{" "}
+                <strong className="text-white font-mono">
+                  {broadcastRecipientEstimate === null ? "—" : broadcastRecipientEstimate}
+                </strong>
+              </span>
+              {stats != null && (
+                <>
+                  <span className="text-gray-600">·</span>
+                  <span className="text-gray-500">
+                    всего в БД: {stats.total_users}, отписались от рассылок:{" "}
+                    {stats.marketing_opt_out_users}
+                  </span>
+                </>
+              )}
+            </div>
+            <label className="flex items-start gap-3 cursor-pointer select-none text-sm text-gray-300 max-w-xl">
+              <input
+                type="checkbox"
+                checked={includeOptedOut}
+                onChange={(e) => setIncludeOptedOut(e.target.checked)}
+                disabled={broadcastBusy}
+                className="mt-1 w-4 h-4 shrink-0"
+              />
+              <span>
+                Включить пользователей, отписавшихся от маркетинга (<code className="text-gray-500">/stop</code>
+                ). По умолчанию они <strong className="text-amber-400/90">не</strong> получают рассылку.
+              </span>
+            </label>
+            <div>
+              <textarea
+                value={broadcastText}
+                onChange={(e) => setBroadcastText(e.target.value.slice(0, 4096))}
+                disabled={broadcastBusy}
+                rows={6}
+                placeholder="Текст для всех получателей…"
+                className="w-full px-4 py-3 bg-gray-950 border border-gray-700 rounded-xl text-white placeholder:text-gray-600 outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 font-mono text-sm resize-y min-h-[120px] disabled:opacity-60"
+              />
+              <div className="flex justify-end mt-1 text-xs text-gray-500">
+                {broadcastText.length} / 4096
+              </div>
+            </div>
+            <div className="flex flex-wrap items-center gap-3">
+              <button
+                type="button"
+                onClick={() => void sendBroadcast()}
+                disabled={
+                  broadcastBusy ||
+                  !broadcastText.trim() ||
+                  broadcastRecipientEstimate === null ||
+                  broadcastRecipientEstimate === 0
+                }
+                className="px-5 py-2.5 text-sm font-semibold rounded-xl bg-violet-600 text-white hover:bg-violet-500 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+              >
+                {broadcastBusy ? "Отправка…" : "Отправить рассылку"}
+              </button>
+              {broadcastResult ? (
+                <span className="text-sm text-gray-400">
+                  Готово: отправлено <strong className="text-emerald-400">{broadcastResult.sent}</strong> из{" "}
+                  <strong className="text-white">{broadcastResult.total}</strong>
+                  {broadcastResult.failed > 0 ? (
+                    <>
+                      , ошибок:{" "}
+                      <strong className="text-red-400">{broadcastResult.failed}</strong>
+                    </>
+                  ) : null}
+                </span>
+              ) : null}
+            </div>
           </div>
         </section>
 

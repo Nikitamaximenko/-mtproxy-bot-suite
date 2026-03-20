@@ -883,6 +883,8 @@ def admin_check_expirations(req: Request) -> OkResponse:
 
 class BroadcastRequest(BaseModel):
     message: str = Field(..., min_length=1, max_length=4096)
+    # По умолчанию не трогаем тех, кто отписался от маркетинга (как nudge-рассылки).
+    include_opted_out: bool = False
 
 
 class BroadcastResponse(BaseModel):
@@ -897,12 +899,16 @@ def admin_broadcast(payload: BroadcastRequest, req: Request, db: Session = Depen
     """
     Рассылка HTML-текста всем пользователям из таблицы users (по telegram_id).
     Заголовок: x-admin-key. Лимит Telegram на сообщение — 4096 символов.
+    По умолчанию исключаются пользователи с marketing_opt_out (см. include_opted_out).
     """
     _require_admin(req)
     if not BOT_TOKEN:
         raise HTTPException(status_code=503, detail="BOT_TOKEN is not configured on backend")
 
-    rows = db.execute(select(User.telegram_id)).scalars().all()
+    q = select(User.telegram_id)
+    if not payload.include_opted_out:
+        q = q.where(User.marketing_opt_out == False)  # noqa: E712
+    rows = db.execute(q).scalars().all()
     # Уникальные id, стабильный порядок
     seen: set[int] = set()
     ids: list[int] = []
@@ -1029,6 +1035,7 @@ class RefStat(BaseModel):
 
 class AdminStatsResponse(BaseModel):
     total_users: int
+    marketing_opt_out_users: int
     active_subscriptions: int
     expired_subscriptions: int
     pending_payments: int
@@ -1042,6 +1049,12 @@ def admin_stats(req: Request, db: Session = Depends(get_db)) -> AdminStatsRespon
     now = utcnow()
 
     total_users = db.execute(select(func.count()).select_from(User)).scalar() or 0
+    marketing_opt_out_users = (
+        db.execute(
+            select(func.count()).select_from(User).where(User.marketing_opt_out == True),  # noqa: E712
+        ).scalar()
+        or 0
+    )
 
     active = db.execute(
         select(func.count()).select_from(Subscription).where(
@@ -1081,6 +1094,7 @@ def admin_stats(req: Request, db: Session = Depends(get_db)) -> AdminStatsRespon
 
     return AdminStatsResponse(
         total_users=total_users,
+        marketing_opt_out_users=marketing_opt_out_users,
         active_subscriptions=active,
         expired_subscriptions=expired,
         pending_payments=pending,
