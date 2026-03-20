@@ -273,11 +273,9 @@ def _checkout_fallback_payment_url(payment_token: str) -> str:
         return tmpl.format(payment_token=token)
     if LAVA_TOP_OFFER_ID:
         return f"https://lava.top/pay/{LAVA_TOP_OFFER_ID}?order_id={token}"
-    if "{payment_token}" in tmpl:
-        return tmpl.format(payment_token=token)
     raise HTTPException(
         status_code=503,
-        detail="Нет LAVA_TOP_OFFER_ID: укажи оффер в Railway или LAVA_CHECKOUT_FALLBACK_URL",
+        detail="Нет LAVA_TOP_OFFER_ID: укажи оффер или LAVA_CHECKOUT_FALLBACK_URL с {payment_token}",
     )
 
 
