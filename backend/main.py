@@ -910,14 +910,14 @@ def checkout_create_prodamus(payload: ProdamusCheckoutRequest, db: Session = Dep
                 db.add(User(telegram_id=tg_id, username=username))
         db.commit()
 
-    base = PRODAMUS_PAYMENT_URL.rstrip("/") + "/"
-    payment_url = (
-        f"{base}?order_id={token}"
-        f"&do=link"
-        f"&products[0][name]=Frosty+MTProxy"
-        f"&products[0][price]=299"
-        f"&products[0][quantity]=1"
-    )
+    from urllib.parse import urlencode as _urlencode
+    params = _urlencode({
+        "order_id": str(token),
+        "products[0][name]": "Frosty MTProxy",
+        "products[0][price]": "299",
+        "products[0][quantity]": "1",
+    })
+    payment_url = f"https://admaster.payform.ru/?{params}"
     logger.info("Prodamus payment_url created for tg_id=%s token=%s", tg_id, token)
     return ProdamusCheckoutResponse(payment_url=payment_url, payment_token=token)
 

@@ -269,6 +269,7 @@ export default function MiniAppPage() {
   const [emailTouched, setEmailTouched] = useState(false)
   const [paying, setPaying] = useState(false)
   const [payingSBP, setPayingSBP] = useState(false)
+  const [showPayModal, setShowPayModal] = useState(false)
   const [paymentUrl, setPaymentUrl] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [errorDetail, setErrorDetail] = useState<string | null>(null)
@@ -567,8 +568,8 @@ export default function MiniAppPage() {
 
           {/* 6. CTA Button */}
           <button
-            onClick={handlePay}
-            disabled={!email || !isEmailValid || paying}
+            onClick={() => setShowPayModal(true)}
+            disabled={!email || !isEmailValid || paying || payingSBP}
             className="w-full font-bold touch-manipulation active:scale-[0.98] transition-transform disabled:opacity-50 disabled:active:scale-100"
             style={{
               background: "#2AABEE",
@@ -578,7 +579,7 @@ export default function MiniAppPage() {
               fontSize: "17px",
             }}
           >
-            {paying ? "Создаём оплату…" : "Подключить за 299 ₽ →"}
+            Подключить за 299 ₽ →
           </button>
 
           {error && (
@@ -598,29 +599,62 @@ export default function MiniAppPage() {
             Отмена в любой момент — напишите в поддержку
           </p>
 
-          {/* SBP alternative */}
-          <p className="text-center text-xs mt-3" style={{ color: "#6B7280" }}>
-            — или —
-          </p>
-          <button
-            onClick={handlePaySBP}
-            disabled={!email || !isEmailValid || payingSBP || paying}
-            className="w-full font-medium touch-manipulation active:scale-[0.98] transition-transform disabled:opacity-50 disabled:active:scale-100"
-            style={{
-              background: "#F7F8FA",
-              color: "#374151",
-              height: "48px",
-              borderRadius: "14px",
-              fontSize: "15px",
-              border: "1px solid #E5E7EB",
-              marginTop: "8px",
-            }}
-          >
-            {payingSBP ? "Создаём оплату…" : "Оплатить через СБП →"}
-          </button>
-          <p className="text-center text-xs mt-2" style={{ color: "#6B7280" }}>
-            СБП · Перевод через банк · Без автопродления
-          </p>
+          {/* Payment method modal */}
+          {showPayModal && (
+            <div
+              className="fixed inset-0 z-50 flex items-end justify-center"
+              style={{ background: "rgba(0,0,0,0.45)" }}
+              onClick={() => setShowPayModal(false)}
+            >
+              <div
+                className="w-full max-w-sm px-4 pb-8 pt-6"
+                style={{ background: "#FFFFFF", borderRadius: "20px 20px 0 0" }}
+                onClick={(e) => e.stopPropagation()}
+              >
+                <p className="text-center text-base font-semibold mb-5" style={{ color: "#111827" }}>
+                  Как хотите оплатить?
+                </p>
+                <button
+                  onClick={() => { setShowPayModal(false); void handlePay() }}
+                  disabled={paying}
+                  className="w-full font-bold touch-manipulation active:scale-[0.98] transition-transform disabled:opacity-50"
+                  style={{
+                    background: "#2AABEE",
+                    color: "#FFFFFF",
+                    height: "52px",
+                    borderRadius: "14px",
+                    fontSize: "16px",
+                    marginBottom: "10px",
+                  }}
+                >
+                  {paying ? "Создаём оплату…" : "Картой / СБП с автопродлением"}
+                </button>
+                <button
+                  onClick={() => { setShowPayModal(false); void handlePaySBP() }}
+                  disabled={payingSBP}
+                  className="w-full font-medium touch-manipulation active:scale-[0.98] transition-transform disabled:opacity-50"
+                  style={{
+                    background: "#F7F8FA",
+                    color: "#374151",
+                    height: "52px",
+                    borderRadius: "14px",
+                    fontSize: "16px",
+                    border: "1px solid #E5E7EB",
+                    marginBottom: "12px",
+                  }}
+                >
+                  {payingSBP ? "Создаём оплату…" : "СБП / Перевод через банк"}
+                </button>
+                <button
+                  onClick={() => setShowPayModal(false)}
+                  className="w-full text-sm touch-manipulation"
+                  style={{ color: "#6B7280" }}
+                >
+                  Отмена
+                </button>
+              </div>
+            </div>
+          )}
         </div>
       </div>
     </>
