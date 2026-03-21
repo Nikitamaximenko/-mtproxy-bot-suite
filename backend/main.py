@@ -605,8 +605,19 @@ def _send_tg(tg_id: int, text: str, keyboard: dict | None = None) -> bool:
         )
         urllib.request.urlopen(req, timeout=10)
         return True
+    except urllib.error.HTTPError as exc:
+        # 403 = bot blocked by user, 400 = chat not found — expected, skip silently
+        if exc.code in (400, 403):
+            logger.debug("_send_tg skipped tg_id=%s: HTTP %s %s", tg_id, exc.code, exc.reason)
+        else:
+            try:
+                body_text = exc.read().decode("utf-8", errors="replace")
+            except Exception:
+                body_text = "<unreadable>"
+            logger.warning("_send_tg failed tg_id=%s: HTTP %s %s — %s", tg_id, exc.code, exc.reason, body_text)
+        return False
     except Exception as exc:
-        logger.warning("Failed to send to tg_id=%s: %s", tg_id, exc)
+        logger.warning("_send_tg failed tg_id=%s: %s", tg_id, exc)
         return False
 
 
@@ -885,6 +896,8 @@ class BroadcastRequest(BaseModel):
     message: str = Field(..., min_length=1, max_length=4096)
     # По умолчанию не трогаем тех, кто отписался от маркетинга (как nudge-рассылки).
     include_opted_out: bool = False
+    button_text: str | None = Field(None, max_length=64)
+    button_url: str | None = Field(None, max_length=2048)
 
 
 class BroadcastResponse(BaseModel):
@@ -919,10 +932,13 @@ def admin_broadcast(payload: BroadcastRequest, req: Request, db: Session = Depen
             ids.append(uid)
 
     msg = payload.message.strip()
+    kb: dict | None = None
+    if payload.button_text and payload.button_url:
+        kb = {"inline_keyboard": [[{"text": payload.button_text, "url": payload.button_url}]]}
     sent = 0
     failed = 0
     for uid in ids:
-        if _send_tg(uid, msg):
+        if _send_tg(uid, msg, kb):
             sent += 1
         else:
             failed += 1

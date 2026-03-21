@@ -155,6 +155,9 @@ export default function AdminPage() {
     sent: number
     failed: number
   } | null>(null)
+  const [buttonEnabled, setButtonEnabled] = useState(false)
+  const [buttonText, setButtonText] = useState("")
+  const [buttonUrl, setButtonUrl] = useState("")
   const ADMIN_TG_ID = 231115635
 
   const broadcastRecipientEstimate =
@@ -294,6 +297,9 @@ export default function AdminPage() {
         body: JSON.stringify({
           message: text,
           include_opted_out: includeOptedOut,
+          ...(buttonEnabled && buttonText.trim() && buttonUrl.trim()
+            ? { button_text: buttonText.trim(), button_url: buttonUrl.trim() }
+            : {}),
         }),
         cache: "no-store",
       })
@@ -323,6 +329,9 @@ export default function AdminPage() {
   }, [
     broadcastRecipientEstimate,
     broadcastText,
+    buttonEnabled,
+    buttonText,
+    buttonUrl,
     headers,
     includeOptedOut,
   ])
@@ -576,6 +585,36 @@ export default function AdminPage() {
                 {broadcastText.length} / 4096
               </div>
             </div>
+            <label className="flex items-center gap-2 cursor-pointer select-none">
+              <input
+                type="checkbox"
+                checked={buttonEnabled}
+                onChange={(e) => setButtonEnabled(e.target.checked)}
+                disabled={broadcastBusy}
+                className="w-4 h-4 shrink-0"
+              />
+              <span className="text-sm text-gray-300">Добавить кнопку</span>
+            </label>
+            {buttonEnabled && (
+              <div className="flex flex-col gap-2">
+                <input
+                  type="text"
+                  value={buttonText}
+                  onChange={(e) => setButtonText(e.target.value.slice(0, 64))}
+                  disabled={broadcastBusy}
+                  placeholder='Текст кнопки, напр. "Подключить →"'
+                  className="w-full px-4 py-2 bg-gray-950 border border-gray-700 rounded-xl text-white placeholder:text-gray-600 outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 text-sm disabled:opacity-60"
+                />
+                <input
+                  type="url"
+                  value={buttonUrl}
+                  onChange={(e) => setButtonUrl(e.target.value.slice(0, 2048))}
+                  disabled={broadcastBusy}
+                  placeholder="URL кнопки, напр. https://t.me/FrostyBot"
+                  className="w-full px-4 py-2 bg-gray-950 border border-gray-700 rounded-xl text-white placeholder:text-gray-600 outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 text-sm disabled:opacity-60"
+                />
+              </div>
+            )}
             <div className="flex flex-wrap items-center gap-3">
               <button
                 type="button"
