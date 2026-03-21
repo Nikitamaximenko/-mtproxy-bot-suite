@@ -853,23 +853,43 @@ async def prodamus_webhook(req: Request, db: Session = Depends(get_db)) -> OkRes
     return OkResponse(ok=True)
 
 
+from collections.abc import MutableMapping as _MutableMapping
+
+
+def _deep_int_to_string(dictionary: dict) -> None:
+    """Рекурсивно приводит все значения словаря к строкам (in-place)."""
+    for key, value in dictionary.items():
+        if isinstance(value, _MutableMapping):
+            _deep_int_to_string(value)
+        elif isinstance(value, (list, tuple)):
+            for k, v in enumerate(value):
+                _deep_int_to_string({str(k): v})
+        else:
+            dictionary[key] = str(value)
+
+
+def _http_build_query(dictionary: dict, parent_key: str | bool = False) -> dict:
+    """PHP-совместимый http_build_query — раскрывает вложенные словари и списки."""
+    items: list = []
+    for key, value in dictionary.items():
+        new_key = str(parent_key) + "[" + key + "]" if parent_key else key
+        if isinstance(value, _MutableMapping):
+            items.extend(_http_build_query(value, new_key).items())
+        elif isinstance(value, (list, tuple)):
+            for k, v in enumerate(value):
+                items.extend(_http_build_query({str(k): v}, new_key).items())
+        else:
+            items.append((new_key, value))
+    return dict(items)
+
+
 def _prodamus_sign(data: dict, secret: str) -> str:
-    """HMAC-SHA256 signature for Prodamus API.
-
-    Algorithm:
-    1. Recursively sort all keys alphabetically (including nested dicts).
-    2. Serialize to compact JSON (no spaces, ensure_ascii=False).
-    3. Escape forward slashes: / → \\/
-    4. Sign with HMAC-SHA256 using the secret key.
-    """
-    def _sort(obj: object) -> object:
-        if isinstance(obj, dict):
-            return {k: _sort(v) for k, v in sorted(obj.items())}
-        return obj
-
-    json_str = json.dumps(_sort(data), ensure_ascii=False, separators=(",", ":"))
-    json_str = json_str.replace("/", "\\/")
-    return hmac.new(secret.encode(), json_str.encode(), hashlib.sha256).hexdigest()
+    """HMAC-SHA256 подпись по официальному алгоритму Prodamus."""
+    import copy
+    data_copy = copy.deepcopy(data)
+    _deep_int_to_string(data_copy)
+    json_str = json.dumps(data_copy, sort_keys=True, ensure_ascii=False, separators=(",", ":")).replace("/", "\\/")
+    return hmac.new(secret.encode("utf8"), json_str.encode("utf8"), hashlib.sha256).hexdigest()
 
 
 class ProdamusCheckoutRequest(BaseModel):
@@ -932,22 +952,27 @@ def checkout_create_prodamus(payload: ProdamusCheckoutRequest, db: Session = Dep
 
     from urllib.parse import urlencode as _urlencode
 
-    params: dict[str, str] = {
+    sign_data: dict = {
         "order_id": str(token),
-        "products[0][name]": "Frosty MTProxy",
-        "products[0][price]": "299",
-        "products[0][quantity]": "1",
+        "products": [
+            {
+                "name": "Frosty MTProxy",
+                "price": "299",
+                "quantity": "1",
+            }
+        ],
         "do": "link",
         "sys": "meetingai",
+        "callbackType": "json",
     }
     if PRODAMUS_SECRET_KEY:
-        params["signature"] = _prodamus_sign(params, PRODAMUS_SECRET_KEY)
+        sign_data["signature"] = _prodamus_sign(sign_data, PRODAMUS_SECRET_KEY)
 
-    query = _urlencode(params)
+    query = _urlencode(_http_build_query(sign_data))
     payform_url = f"https://admaster.payform.ru/?{query}"
 
     # Prodamus returns a short link in the response body when do=link
-    short_link = payform_url  # fallback to long URL if request fails
+    short_link = payform_url
     try:
         req = urllib.request.Request(payform_url, headers={"User-Agent": "Mozilla/5.0"})
         with urllib.request.urlopen(req, timeout=10) as resp:
@@ -955,9 +980,9 @@ def checkout_create_prodamus(payload: ProdamusCheckoutRequest, db: Session = Dep
         if body.startswith("http"):
             short_link = body
         else:
-            logger.warning("Prodamus returned unexpected response for tg_id=%s: %s", tg_id, body[:200])
+            logger.warning("Prodamus unexpected response tg_id=%s: %s", tg_id, body[:200])
     except Exception as e:
-        logger.error("Prodamus link request failed for tg_id=%s: %s", tg_id, e)
+        logger.error("Prodamus link request failed tg_id=%s: %s", tg_id, e)
 
     logger.info("Prodamus short_link for tg_id=%s: %s", tg_id, short_link)
     return ProdamusCheckoutResponse(payment_url=short_link, payment_token=token)
