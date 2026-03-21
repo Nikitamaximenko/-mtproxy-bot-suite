@@ -7,6 +7,9 @@ import { getTelegramUser, openTelegramLink } from "@/lib/telegram"
 
 const manrope = Manrope({ subsets: ["latin", "cyrillic"], weight: ["400", "500", "600", "700"] })
 
+/** Второй поток оплаты (Prodamus / СБП). По умолчанию скрыт — см. NEXT_PUBLIC_ENABLE_PRODAMUS_CHECKOUT и backend ENABLE_PRODAMUS_CHECKOUT. */
+const ENABLE_PRODAMUS_SBP = process.env.NEXT_PUBLIC_ENABLE_PRODAMUS_CHECKOUT === "true"
+
 type SubscriptionData = {
   active: boolean
   expires_at?: string | null
@@ -568,8 +571,11 @@ export default function MiniAppPage() {
 
           {/* 6. CTA Button */}
           <button
-            onClick={() => setShowPayModal(true)}
-            disabled={!email || !isEmailValid || paying || payingSBP}
+            onClick={() => {
+              if (ENABLE_PRODAMUS_SBP) setShowPayModal(true)
+              else void handlePay()
+            }}
+            disabled={!email || !isEmailValid || paying || (ENABLE_PRODAMUS_SBP && payingSBP)}
             className="w-full font-bold touch-manipulation active:scale-[0.98] transition-transform disabled:opacity-50 disabled:active:scale-100"
             style={{
               background: "#2AABEE",
@@ -599,8 +605,8 @@ export default function MiniAppPage() {
             Отмена в любой момент — напишите в поддержку
           </p>
 
-          {/* Payment method modal */}
-          {showPayModal && (
+          {/* Payment method modal (Prodamus / СБП — только когда ENABLE_PRODAMUS_SBP) */}
+          {ENABLE_PRODAMUS_SBP && showPayModal && (
             <div
               className="fixed inset-0 z-50 flex items-end justify-center"
               style={{ background: "rgba(0,0,0,0.45)" }}

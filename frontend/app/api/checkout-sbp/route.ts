@@ -1,6 +1,9 @@
 import { NextRequest, NextResponse } from "next/server"
 
 export async function POST(req: NextRequest) {
+  if (process.env.NEXT_PUBLIC_ENABLE_PRODAMUS_CHECKOUT !== "true") {
+    return NextResponse.json({ error: "Prodamus checkout disabled" }, { status: 503 })
+  }
   const { telegram_id, username } = (await req.json()) as {
     telegram_id?: number | string
     username?: string | null

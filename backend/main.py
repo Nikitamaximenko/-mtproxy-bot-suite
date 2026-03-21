@@ -73,6 +73,12 @@ ADMIN_API_KEY = (os.getenv("ADMIN_API_KEY") or "").strip()
 
 PRODAMUS_SECRET_KEY = (os.getenv("PRODAMUS_SECRET_KEY") or "").strip()
 PRODAMUS_PAYMENT_URL = (os.getenv("PRODAMUS_PAYMENT_URL") or "https://admaster.payform.ru/").strip()
+# Второй поток оплаты (Prodamus / СБП). Пока выключен — не создаём чекаут; вебхук остаётся для уже начатых оплат.
+ENABLE_PRODAMUS_CHECKOUT = (os.getenv("ENABLE_PRODAMUS_CHECKOUT") or "").strip().lower() in (
+    "1",
+    "true",
+    "yes",
+)
 
 BOT_TOKEN = (os.getenv("BOT_TOKEN") or "").strip()
 FRONTEND_URL = (os.getenv("FRONTEND_URL") or "").strip().rstrip("/")
@@ -923,6 +929,8 @@ class ProdamusCheckoutResponse(BaseModel):
 
 @app.post("/checkout/create-prodamus", response_model=ProdamusCheckoutResponse)
 def checkout_create_prodamus(payload: ProdamusCheckoutRequest, db: Session = Depends(get_db)) -> ProdamusCheckoutResponse:
+    if not ENABLE_PRODAMUS_CHECKOUT:
+        raise HTTPException(status_code=503, detail="Prodamus checkout is disabled")
     tg_id = int(payload.telegram_id)
     username = payload.username.strip() if payload.username else None
     logger.info("Prodamus checkout create: tg_id=%s", tg_id)
