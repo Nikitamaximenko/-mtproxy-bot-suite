@@ -606,15 +606,15 @@ def _send_tg(tg_id: int, text: str, keyboard: dict | None = None) -> bool:
         urllib.request.urlopen(req, timeout=10)
         return True
     except urllib.error.HTTPError as exc:
-        # 403 = bot blocked by user, 400 = chat not found — expected, skip silently
+        # 403 = bot blocked by user, 400 = chat not found — expected, skip
         if exc.code in (400, 403):
-            logger.debug("_send_tg skipped tg_id=%s: HTTP %s %s", tg_id, exc.code, exc.reason)
+            logger.info("_send_tg skipped tg_id=%s: HTTP %s (bot blocked or chat not found)", tg_id, exc.code)
         else:
             try:
-                body_text = exc.read().decode("utf-8", errors="replace")
+                resp_body = exc.read().decode("utf-8", errors="replace")
             except Exception:
-                body_text = "<unreadable>"
-            logger.warning("_send_tg failed tg_id=%s: HTTP %s %s — %s", tg_id, exc.code, exc.reason, body_text)
+                resp_body = "<unreadable>"
+            logger.warning("_send_tg failed tg_id=%s: HTTP %s %s — %s", tg_id, exc.code, exc.reason, resp_body)
         return False
     except Exception as exc:
         logger.warning("_send_tg failed tg_id=%s: %s", tg_id, exc)
@@ -935,13 +935,22 @@ def admin_broadcast(payload: BroadcastRequest, req: Request, db: Session = Depen
     kb: dict | None = None
     if payload.button_text and payload.button_url:
         kb = {"inline_keyboard": [[{"text": payload.button_text, "url": payload.button_url}]]}
+
+    logger.info(
+        "Broadcast started: total_recipients=%s include_opted_out=%s has_button=%s",
+        len(ids), payload.include_opted_out, kb is not None,
+    )
+
     sent = 0
     failed = 0
     for uid in ids:
-        if _send_tg(uid, msg, kb):
+        ok = _send_tg(uid, msg, kb)
+        if ok:
             sent += 1
+            logger.info("Broadcast sent tg_id=%s (%s/%s)", uid, sent + failed, len(ids))
         else:
             failed += 1
+            logger.info("Broadcast failed tg_id=%s (%s/%s)", uid, sent + failed, len(ids))
         time.sleep(0.05)  # ~20 msg/s, мягче к лимитам Telegram
 
     logger.info("Broadcast finished total=%s sent=%s failed=%s", len(ids), sent, failed)
