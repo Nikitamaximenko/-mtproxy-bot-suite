@@ -268,6 +268,7 @@ export default function MiniAppPage() {
   const [email, setEmail] = useState("")
   const [emailTouched, setEmailTouched] = useState(false)
   const [paying, setPaying] = useState(false)
+  const [payingSBP, setPayingSBP] = useState(false)
   const [paymentUrl, setPaymentUrl] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [errorDetail, setErrorDetail] = useState<string | null>(null)
@@ -334,6 +335,34 @@ export default function MiniAppPage() {
       setError(e instanceof Error ? e.message : "Что-то пошло не так")
     } finally {
       setPaying(false)
+    }
+  }
+
+  const handlePaySBP = async () => {
+    if (!email || !tgId) return
+    setPayingSBP(true)
+    setError(null)
+    setErrorDetail(null)
+    try {
+      const res = await fetch("/api/checkout-sbp", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          telegram_id: String(tgId),
+          username: tgUser?.username,
+        }),
+      })
+      const data = (await res.json()) as { error?: string; payment_url?: string }
+      if (!res.ok || !data?.payment_url) {
+        throw new Error(data?.error || "Не удалось создать оплату")
+      }
+      const payUrl = String(data.payment_url)
+      openTelegramLink(payUrl)
+      setPaymentUrl(payUrl)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Что-то пошло не так")
+    } finally {
+      setPayingSBP(false)
     }
   }
 
@@ -567,6 +596,30 @@ export default function MiniAppPage() {
           </p>
           <p className="text-center text-xs mt-1" style={{ color: "#6B7280" }}>
             Отмена в любой момент — напишите в поддержку
+          </p>
+
+          {/* SBP alternative */}
+          <p className="text-center text-xs mt-3" style={{ color: "#6B7280" }}>
+            — или —
+          </p>
+          <button
+            onClick={handlePaySBP}
+            disabled={!email || !isEmailValid || payingSBP || paying}
+            className="w-full font-medium touch-manipulation active:scale-[0.98] transition-transform disabled:opacity-50 disabled:active:scale-100"
+            style={{
+              background: "#F7F8FA",
+              color: "#374151",
+              height: "48px",
+              borderRadius: "14px",
+              fontSize: "15px",
+              border: "1px solid #E5E7EB",
+              marginTop: "8px",
+            }}
+          >
+            {payingSBP ? "Создаём оплату…" : "Оплатить через СБП →"}
+          </button>
+          <p className="text-center text-xs mt-2" style={{ color: "#6B7280" }}>
+            СБП · Перевод через банк · Без автопродления
           </p>
         </div>
       </div>

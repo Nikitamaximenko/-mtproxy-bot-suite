@@ -70,6 +70,9 @@ LAVA_CHECKOUT_FALLBACK_URL = (os.getenv("LAVA_CHECKOUT_FALLBACK_URL") or "").str
 
 ADMIN_API_KEY = (os.getenv("ADMIN_API_KEY") or "").strip()
 
+PRODAMUS_SECRET_KEY = (os.getenv("PRODAMUS_SECRET_KEY") or "").strip()
+PRODAMUS_PAYMENT_URL = (os.getenv("PRODAMUS_PAYMENT_URL") or "https://admaster.payform.ru/").strip()
+
 BOT_TOKEN = (os.getenv("BOT_TOKEN") or "").strip()
 FRONTEND_URL = (os.getenv("FRONTEND_URL") or "").strip().rstrip("/")
 MINIAPP_PATH = (os.getenv("MINIAPP_PATH") or "/mini").strip() or "/mini"
@@ -801,6 +804,122 @@ async def lava_webhook(req: Request, db: Session = Depends(get_db)) -> OkRespons
     _notify_admin_payment(sub.telegram_id)
 
     return OkResponse(ok=True)
+
+
+@app.post("/webhooks/prodamus", response_model=OkResponse)
+async def prodamus_webhook(req: Request, db: Session = Depends(get_db)) -> OkResponse:
+    raw_body = await req.body()
+    logger.info("Prodamus webhook received: body=%s", raw_body[:500])
+
+    if not PRODAMUS_SECRET_KEY:
+        logger.warning("PRODAMUS_SECRET_KEY not set — rejecting webhook")
+        raise HTTPException(status_code=401, detail="Webhook authentication not configured")
+
+    got_sign = (req.headers.get("sign") or "").strip()
+    import hashlib as _hashlib  # already imported at top via hmac dependency
+    expected = hmac.new(PRODAMUS_SECRET_KEY.encode(), raw_body, _hashlib.sha256).hexdigest()
+    if not hmac.compare_digest(expected, got_sign):
+        logger.warning("Prodamus webhook rejected: invalid sign")
+        raise HTTPException(status_code=401, detail="Unauthorized")
+
+    from urllib.parse import parse_qs
+    fields = parse_qs(raw_body.decode("utf-8", errors="replace"))
+    order_id = (fields.get("order_id") or [""])[0].strip()
+    status = (fields.get("status") or [""])[0].strip()
+    logger.info("Prodamus webhook order_id=%s status=%s", order_id or None, status)
+
+    if status != "paid" or not order_id:
+        return OkResponse(ok=True)
+
+    sub = db.execute(select(Subscription).where(Subscription.payment_token == order_id)).scalar_one_or_none()
+    if sub is None:
+        logger.warning("Prodamus: no subscription for order_id=%s", order_id)
+        return OkResponse(ok=True)
+
+    try:
+        activate_subscription(sub)
+    except RuntimeError as e:
+        logger.error("Prodamus activate_subscription failed order_id=%s: %s", order_id, e)
+        raise HTTPException(status_code=503, detail=str(e))
+
+    db.commit()
+    logger.info("Prodamus subscription activated tg_id=%s order_id=%s", sub.telegram_id, order_id)
+
+    proxy_link = f"tg://proxy?server={sub.proxy_server}&port={sub.proxy_port}&secret={sub.proxy_secret}"
+    _notify_payment_success(sub.telegram_id, proxy_link)
+    _notify_admin_payment(sub.telegram_id)
+
+    return OkResponse(ok=True)
+
+
+class ProdamusCheckoutRequest(BaseModel):
+    telegram_id: int = Field(..., ge=1)
+    username: str | None = Field(default=None, max_length=64)
+
+    @field_validator("telegram_id", mode="before")
+    @classmethod
+    def _tg_id_from_str(cls, v: object) -> int:
+        if isinstance(v, str):
+            return int(v.strip())
+        if isinstance(v, int):
+            return v
+        raise ValueError("telegram_id must be a positive integer")
+
+
+class ProdamusCheckoutResponse(BaseModel):
+    payment_url: str
+    payment_token: UUID
+
+
+@app.post("/checkout/create-prodamus", response_model=ProdamusCheckoutResponse)
+def checkout_create_prodamus(payload: ProdamusCheckoutRequest, db: Session = Depends(get_db)) -> ProdamusCheckoutResponse:
+    tg_id = int(payload.telegram_id)
+    username = payload.username.strip() if payload.username else None
+    logger.info("Prodamus checkout create: tg_id=%s", tg_id)
+
+    existing_user = db.execute(select(User).where(User.telegram_id == tg_id)).scalar_one_or_none()
+    is_new_user = existing_user is None
+    if is_new_user:
+        db.add(User(telegram_id=tg_id, username=username))
+    else:
+        if username and existing_user.username != username:
+            existing_user.username = username
+
+    token = uuid4()
+    sub = Subscription(
+        telegram_id=tg_id,
+        payment_token=str(token),
+        payment_status="pending",
+    )
+    db.add(sub)
+
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        token = uuid4()
+        sub = Subscription(
+            telegram_id=tg_id,
+            payment_token=str(token),
+            payment_status="pending",
+        )
+        db.add(sub)
+        if is_new_user:
+            still_missing = db.execute(select(User).where(User.telegram_id == tg_id)).scalar_one_or_none()
+            if still_missing is None:
+                db.add(User(telegram_id=tg_id, username=username))
+        db.commit()
+
+    base = PRODAMUS_PAYMENT_URL.rstrip("/") + "/"
+    payment_url = (
+        f"{base}?order_id={token}"
+        f"&do=link"
+        f"&products[0][name]=Frosty+MTProxy"
+        f"&products[0][price]=299"
+        f"&products[0][quantity]=1"
+    )
+    logger.info("Prodamus payment_url created for tg_id=%s token=%s", tg_id, token)
+    return ProdamusCheckoutResponse(payment_url=payment_url, payment_token=token)
 
 
 class SubscriptionResponse(BaseModel):
