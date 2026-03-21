@@ -565,6 +565,9 @@ export default function MiniAppPage() {
           <p className="text-center text-xs mt-3" style={{ color: "#6B7280" }}>
             Оплата картой или СБП через Lava
           </p>
+          <p className="text-center text-xs mt-1" style={{ color: "#6B7280" }}>
+            Отмена в любой момент — напишите в поддержку
+          </p>
         </div>
       </div>
     </>
