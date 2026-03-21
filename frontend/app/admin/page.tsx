@@ -32,6 +32,7 @@ type SubInfo = {
   expires_at: string | null
   created_at: string
   has_proxy: boolean
+  access_suspended?: boolean
 }
 
 type RegistryUser = {
@@ -76,8 +77,9 @@ function StatusBadge({ status }: { status: string }) {
   )
 }
 
-/** Доступ как в API: paid и срок в будущем */
+/** Доступ как в API: paid, срок в будущем, не снят доступ вручную (access_suspended). */
 function isSubAccessActive(s: SubInfo): boolean {
+  if (s.access_suspended) return false
   if (s.payment_status !== "paid") return false
   if (!s.expires_at) return false
   return new Date(s.expires_at).getTime() > Date.now()
@@ -676,7 +678,8 @@ export default function AdminPage() {
             истёкшей подписки (только pending или без подписок). <strong>Платные</strong> — когда-либо оплатили
             (paid/expired); показана последняя запись подписки.
             <span className="block mt-1">
-              Тумблер <strong>Доступ</strong>: вкл — ручная активация (+30 дней), выкл — отзыв (как /admin/deactivate).
+              Тумблер <strong>Доступ</strong>: выкл — только снять прокси (оплаченные даты не меняются); вкл — вернуть
+              доступ по текущему сроку или +30 дней, если период уже истёк.
             </span>
           </p>
 

@@ -135,6 +135,8 @@ class Subscription(Base):
 
     notified_expiring: Mapped[bool] = mapped_column(Boolean, default=False, server_default=sa_false(), nullable=False)
     notified_expired: Mapped[bool] = mapped_column(Boolean, default=False, server_default=sa_false(), nullable=False)
+    # Ручное отключение в админке: не меняет оплаченный период (expires_at), только снимает доступ к прокси.
+    access_suspended: Mapped[bool] = mapped_column(Boolean, default=False, server_default=sa_false(), nullable=False)
 
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
 
@@ -164,6 +166,13 @@ def _migrate() -> None:
                 conn.execute(text("ALTER TABLE subscriptions ADD COLUMN notified_expiring BOOLEAN NOT NULL DEFAULT FALSE"))
             if "notified_expired" not in existing:
                 conn.execute(text("ALTER TABLE subscriptions ADD COLUMN notified_expired BOOLEAN NOT NULL DEFAULT FALSE"))
+            if "access_suspended" not in existing:
+                if engine.dialect.name == "postgresql":
+                    conn.execute(
+                        text("ALTER TABLE subscriptions ADD COLUMN access_suspended BOOLEAN NOT NULL DEFAULT FALSE")
+                    )
+                else:
+                    conn.execute(text("ALTER TABLE subscriptions ADD COLUMN access_suspended BOOLEAN NOT NULL DEFAULT 0"))
     if "users" in tables:
         existing = {c["name"] for c in inspector.get_columns("users")}
         with engine.begin() as conn:
@@ -478,18 +487,26 @@ def checkout_create(payload: CheckoutCreateRequest, db: Session = Depends(get_db
     return CheckoutCreateResponse(payment_url=payment_url, payment_token=token)
 
 
-def activate_subscription(sub: Subscription) -> None:
-    # FIX: Removed hardcoded fallback credentials. Missing config now raises immediately
-    # instead of silently using secrets embedded in source code.
+def _apply_proxy_credentials(sub: Subscription) -> None:
+    """Выдать MTProxy-учётные данные без смены оплаченного периода."""
     if not MT_PROXY_SERVER:
         raise RuntimeError("MT_PROXY_SERVER is not configured")
     if not MT_PROXY_SECRET:
         raise RuntimeError("MT_PROXY_SECRET is not configured")
-    sub.payment_status = "paid"
-    sub.expires_at = utcnow() + timedelta(days=30)
     sub.proxy_server = MT_PROXY_SERVER
     sub.proxy_port = MT_PROXY_PORT
     sub.proxy_secret = MT_PROXY_SECRET
+
+
+def activate_subscription(sub: Subscription) -> None:
+    """
+    Активация после оплаты (или тестового гранта): 30 дней с момента вызова, статус paid, прокси включён.
+    Для восстановления доступа по уже оплаченному окну без сдвига дат — см. admin_activate + access_suspended.
+    """
+    _apply_proxy_credentials(sub)
+    sub.payment_status = "paid"
+    sub.expires_at = utcnow() + timedelta(days=30)
+    sub.access_suspended = False
 
 
 def _miniapp_public_url(tg_id: int) -> str:
@@ -1010,6 +1027,7 @@ class SubscriptionResponse(BaseModel):
     active: bool
     expires_at: datetime | None = None
     proxy_link: str | None = None
+    suspended: bool = False
 
 
 @app.get("/subscription/{telegram_id}", response_model=SubscriptionResponse)
@@ -1032,13 +1050,16 @@ def get_subscription(telegram_id: int, db: Session = Depends(get_db)) -> Subscri
     )
 
     if not sub:
-        return SubscriptionResponse(active=False, expires_at=None, proxy_link=None)
+        return SubscriptionResponse(active=False, expires_at=None, proxy_link=None, suspended=False)
+
+    if sub.access_suspended:
+        return SubscriptionResponse(active=False, expires_at=sub.expires_at, proxy_link=None, suspended=True)
 
     if not (sub.proxy_server and sub.proxy_port and sub.proxy_secret):
-        return SubscriptionResponse(active=True, expires_at=sub.expires_at, proxy_link=None)
+        return SubscriptionResponse(active=True, expires_at=sub.expires_at, proxy_link=None, suspended=False)
 
     proxy_link = f"tg://proxy?server={sub.proxy_server}&port={sub.proxy_port}&secret={sub.proxy_secret}"
-    return SubscriptionResponse(active=True, expires_at=sub.expires_at, proxy_link=proxy_link)
+    return SubscriptionResponse(active=True, expires_at=sub.expires_at, proxy_link=proxy_link, suspended=False)
 
 
 class CheckTokenResponse(BaseModel):
@@ -1182,15 +1203,14 @@ def admin_deactivate(telegram_id: int, req: Request, db: Session = Depends(get_d
             Subscription.payment_status == "paid",
         )
     ).scalars().all()
-    now = utcnow()
     for sub in subs:
-        sub.payment_status = "expired"
-        sub.expires_at = now
+        # Не трогаем expires_at и payment_status — только снимаем доступ (оплаченный период сохраняется).
+        sub.access_suspended = True
         sub.proxy_server = None
         sub.proxy_port = None
         sub.proxy_secret = None
     db.commit()
-    logger.info("Admin deactivated subscriptions for tg_id=%s (%d row(s))", telegram_id, len(subs))
+    logger.info("Admin suspended access for tg_id=%s (%d row(s))", telegram_id, len(subs))
     return OkResponse(ok=True)
 
 
@@ -1220,6 +1240,7 @@ def admin_user_debug(telegram_id: int, req: Request, db: Session = Depends(get_d
                 "expires_at": s.expires_at.isoformat() if s.expires_at else None,
                 "lava_contract_id": s.lava_contract_id,
                 "created_at": s.created_at.isoformat() if s.created_at else None,
+                "access_suspended": bool(s.access_suspended),
             }
             for s in subs
         ],
@@ -1229,11 +1250,12 @@ def admin_user_debug(telegram_id: int, req: Request, db: Session = Depends(get_d
 @app.post("/admin/activate/{telegram_id}", response_model=OkResponse)
 def admin_activate(telegram_id: int, req: Request, db: Session = Depends(get_db)) -> OkResponse:
     """
-    Admin helper: force-activate subscription for MVP testing.
-    Extends an existing subscription (latest by created_at) by 30 days,
-    or creates a new paid subscription record if none exists.
+    Восстановить доступ к прокси. Если подписка уже оплачена и срок ещё не вышел — только снимаем
+    access_suspended и выдаём прокси, без сдвига expires_at (даты привязаны к оплате).
+    Иначе — полная активация на 30 дней (тестовый грант / истёкший период).
     """
     _require_admin(req)
+    now = utcnow()
 
     sub = (
         db.execute(
@@ -1251,11 +1273,21 @@ def admin_activate(telegram_id: int, req: Request, db: Session = Depends(get_db)
         sub = Subscription(
             telegram_id=telegram_id,
             payment_token=str(token),
-            payment_status="paid",
+            payment_status="pending",
         )
         db.add(sub)
         db.commit()
         db.refresh(sub)
+
+    if sub.payment_status == "paid" and sub.expires_at is not None and sub.expires_at > now:
+        try:
+            _apply_proxy_credentials(sub)
+        except RuntimeError as e:
+            raise HTTPException(status_code=503, detail=str(e))
+        sub.access_suspended = False
+        db.commit()
+        logger.info("Admin restored proxy for paid tg_id=%s (expires_at unchanged)", telegram_id)
+        return OkResponse(ok=True)
 
     try:
         activate_subscription(sub)
@@ -1263,6 +1295,7 @@ def admin_activate(telegram_id: int, req: Request, db: Session = Depends(get_db)
         raise HTTPException(status_code=503, detail=str(e))
 
     db.commit()
+    logger.info("Admin granted full activation for tg_id=%s", telegram_id)
     return OkResponse(ok=True)
 
 
@@ -1302,6 +1335,7 @@ def admin_stats(req: Request, db: Session = Depends(get_db)) -> AdminStatsRespon
             Subscription.payment_status == "paid",
             Subscription.expires_at.is_not(None),
             Subscription.expires_at > now,
+            Subscription.access_suspended == False,  # noqa: E712
         )
     ).scalar() or 0
 
@@ -1352,6 +1386,7 @@ class SubInfo(BaseModel):
     expires_at: datetime | None
     created_at: datetime
     has_proxy: bool
+    access_suspended: bool = False
 
 
 class AdminSubsResponse(BaseModel):
@@ -1383,6 +1418,7 @@ def admin_subscriptions(
             expires_at=s.expires_at,
             created_at=s.created_at,
             has_proxy=bool(s.proxy_server and s.proxy_port and s.proxy_secret),
+            access_suspended=bool(s.access_suspended),
         )
         for s in subs
     ]
@@ -1429,6 +1465,7 @@ def admin_users(req: Request, db: Session = Depends(get_db)) -> AdminSubsRespons
             expires_at=s.expires_at,
             created_at=s.created_at,
             has_proxy=bool(s.proxy_server and s.proxy_port and s.proxy_secret),
+            access_suspended=bool(s.access_suspended),
         )
         for s, uname in rows
     ]
@@ -1513,6 +1550,7 @@ def admin_users_overview(
             expires_at=s.expires_at,
             created_at=s.created_at,
             has_proxy=bool(s.proxy_server and s.proxy_port and s.proxy_secret),
+            access_suspended=bool(s.access_suspended),
         )
         for s, uname in sub_rows
     ]

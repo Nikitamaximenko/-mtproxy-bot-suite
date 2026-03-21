@@ -14,6 +14,7 @@ type SubscriptionData = {
   active: boolean
   expires_at?: string | null
   proxy_link?: string | null
+  suspended?: boolean
 }
 
 function FrostIcon({ className }: { className?: string }) {
@@ -311,6 +312,7 @@ export default function MiniAppPage() {
   const isPaid = !!sub?.active
   const proxyLink = sub?.proxy_link ?? null
   const expiresAt = sub?.expires_at ?? null
+  const suspendedButPaid = !!sub?.suspended && !!sub?.expires_at && !sub?.active
 
   const handlePay = async () => {
     if (!email || !tgId) return
@@ -511,6 +513,16 @@ export default function MiniAppPage() {
             <FrostIcon className="w-6 h-6" style={{ color: "#2AABEE" } as React.CSSProperties} />
             <span className="text-base font-bold" style={{ color: "#111827" }}>Frosty</span>
           </div>
+
+          {suspendedButPaid && expiresAt && (
+            <div
+              className="mb-5 px-4 py-3 text-center text-sm rounded-2xl"
+              style={{ background: "#FEF3C7", color: "#92400E" }}
+            >
+              Доступ к прокси приостановлен вручную. Оплаченный период до{" "}
+              <strong>{new Date(expiresAt).toLocaleDateString("ru-RU")}</strong>.
+            </div>
+          )}
 
           {/* 2. Heading */}
           <h1 className="text-center font-bold leading-tight mb-3" style={{ fontSize: "32px", color: "#111827" }}>
