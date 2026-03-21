@@ -816,20 +816,30 @@ async def prodamus_webhook(req: Request, db: Session = Depends(get_db)) -> OkRes
         logger.warning("PRODAMUS_SECRET_KEY not set — rejecting webhook")
         raise HTTPException(status_code=401, detail="Webhook authentication not configured")
 
-    got_sign = (req.headers.get("sign") or "").strip()
-    import hashlib as _hashlib  # already imported at top via hmac dependency
-    expected = hmac.new(PRODAMUS_SECRET_KEY.encode(), raw_body, _hashlib.sha256).hexdigest()
+    # Парсим JSON
+    try:
+        payload_data = json.loads(raw_body.decode("utf-8"))
+    except Exception as e:
+        logger.warning("Prodamus webhook: failed to parse JSON: %s", e)
+        raise HTTPException(status_code=400, detail="Invalid JSON")
+
+    # Извлекаем подпись из тела (не из заголовка)
+    got_sign = str(payload_data.get("signature") or "").strip()
+
+    # Считаем ожидаемую подпись по данным без поля signature
+    data_for_sign = {k: v for k, v in payload_data.items() if k != "signature"}
+    expected = _prodamus_sign(data_for_sign, PRODAMUS_SECRET_KEY)
+
     if not hmac.compare_digest(expected, got_sign):
-        logger.warning("Prodamus webhook rejected: invalid sign")
+        logger.warning("Prodamus webhook rejected: invalid sign. expected=%s got=%s", expected[:16], got_sign[:16])
         raise HTTPException(status_code=401, detail="Unauthorized")
 
-    from urllib.parse import parse_qs
-    fields = parse_qs(raw_body.decode("utf-8", errors="replace"))
-    order_id = (fields.get("order_id") or [""])[0].strip()
-    status = (fields.get("status") or [""])[0].strip()
+    # Извлекаем поля из JSON
+    order_id = str(payload_data.get("order_num") or "").strip()
+    status = str(payload_data.get("payment_status") or "").strip()
     logger.info("Prodamus webhook order_id=%s status=%s", order_id or None, status)
 
-    if status != "paid" or not order_id:
+    if status != "success" or not order_id:
         return OkResponse(ok=True)
 
     sub = db.execute(select(Subscription).where(Subscription.payment_token == order_id)).scalar_one_or_none()
