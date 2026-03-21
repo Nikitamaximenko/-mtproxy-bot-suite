@@ -589,14 +589,19 @@ def _process_sales_nudges() -> None:
 def _send_tg(tg_id: int, text: str, keyboard: dict | None = None) -> bool:
     """Send message via Telegram Bot API. Returns True if request completed without error."""
     if not BOT_TOKEN:
+        logger.error("_send_tg: BOT_TOKEN is empty!")
         return False
+    logger.info("_send_tg: BOT_TOKEN present, len=%s", len(BOT_TOKEN))
     try:
         body: dict[str, object] = {"chat_id": tg_id, "text": text, "parse_mode": "HTML"}
         if keyboard:
             body["reply_markup"] = keyboard
-        data = json.dumps(body).encode()
-        # FIX: URL constructed separately so the token never appears in log output
+        body_str = json.dumps(body)
+        data = body_str.encode()
+        # Token redacted in log — never expose it in plaintext
         url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
+        url_safe = f"https://api.telegram.org/bot***{BOT_TOKEN[-4:]}/sendMessage"
+        logger.info("_send_tg request: tg_id=%s url=%s body=%s", tg_id, url_safe, body_str[:200])
         req = urllib.request.Request(
             url,
             data=data,
@@ -918,6 +923,12 @@ def admin_broadcast(payload: BroadcastRequest, req: Request, db: Session = Depen
     if not BOT_TOKEN:
         raise HTTPException(status_code=503, detail="BOT_TOKEN is not configured on backend")
 
+    total_count = db.execute(select(func.count()).select_from(User)).scalar() or 0
+    opted_out_count = (
+        db.execute(select(func.count()).select_from(User).where(User.marketing_opt_out == True)).scalar() or 0  # noqa: E712
+    )
+    logger.info("All users count=%s, opted_out_excluded=%s", total_count, opted_out_count)
+
     q = select(User.telegram_id)
     if not payload.include_opted_out:
         q = q.where(User.marketing_opt_out == False)  # noqa: E712
@@ -930,6 +941,8 @@ def admin_broadcast(payload: BroadcastRequest, req: Request, db: Session = Depen
         if uid not in seen:
             seen.add(uid)
             ids.append(uid)
+
+    logger.info("Broadcast ids (first 10): %s", ids[:10])
 
     msg = payload.message.strip()
     kb: dict | None = None
