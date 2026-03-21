@@ -86,10 +86,22 @@ def format_dt(dt_str: str | None) -> str:
 
 
 HELP_GENERAL = (
-    "<b>Как это работает</b>\n"
-    "Frosty — персональный MTProxy только для Telegram: работает внутри приложения, VPN не нужен.\n"
-    "После оплаты нажми «🔌 Подключить прокси» — Telegram добавит его за 10 секунд.\n"
-    "Лимит: до 10 устройств на аккаунт. Трафик не ограничен, логи не хранятся."
+    "<b>Как подключить прокси</b>\n"
+    "\n"
+    "1. Нажми «Оформить подписку» и оплати\n"
+    "2. Вернись в бот — появится кнопка «🔌 Подключить прокси»\n"
+    "3. Нажми её — Telegram добавит прокси за 10 секунд\n"
+    "\n"
+    "<b>Часто задают:</b>\n"
+    "\n"
+    "<b>Сколько устройств?</b>\n"
+    "До 10 — телефон, ПК, планшет на одном аккаунте\n"
+    "\n"
+    "<b>Лимиты по трафику?</b>\n"
+    "Нет. Скорость и трафик не ограничены\n"
+    "\n"
+    "<b>Нужен VPN?</b>\n"
+    "Нет. Frosty работает прямо в Telegram, не мешает другим приложениям"
 )
 
 
@@ -230,10 +242,16 @@ async def cmd_start(message: Message, session: aiohttp.ClientSession, state: FSM
                 return
 
     await message.answer(
-        "Привет! Это <b>Frosty</b> — персональный MTProxy прямо в Telegram.\n"
-        "Бесплатные прокси переполнены: сотни чужих пользователей, обрывы и неизвестный владелец.\n"
-        "Твой Frosty — только для тебя: стабильная скорость, без VPN и без логов.\n"
-        f"<b>10 ₽/день</b> ({PRICE_RUB} ₽/мес) — подключение за 10 секунд:",
+        "🧊 <b>Frosty</b> — личный прокси для Telegram\n"
+        "\n"
+        "Бесплатные прокси — общие. Твой Frosty — только твой.\n"
+        "\n"
+        "<b>Чем отличается:</b>\n"
+        "- Только ты на сервере — без чужих пользователей\n"
+        "- Работает внутри Telegram — VPN не нужен\n"
+        "- Стабильно 24/7 — мы следим, ты пользуешься\n"
+        "\n"
+        f"<b>10 ₽/день</b> · {PRICE_RUB} ₽/мес · Отмена в любой момент",
         parse_mode="HTML",
         reply_markup=main_menu_kb(tg_id),
     )
@@ -259,10 +277,11 @@ async def cmd_status(message: Message, session: aiohttp.ClientSession, tg_id: in
 
     if not data.get("active"):
         await message.answer(
-            "Подписка не активна.\n"
-            "Бесплатные прокси переполнены — обрывы, медленная загрузка, неизвестный владелец.\n"
-            f"Frosty — персональный прокси только для тебя, <b>10 ₽/день</b> ({PRICE_RUB} ₽/мес).\n"
-            "Подключение прямо в Telegram за 10 секунд — без VPN:",
+            "📡 <b>Подписка не активна</b>\n"
+            "\n"
+            "Без прокси Telegram работает через заблокированные маршруты — медленно и нестабильно.\n"
+            "\n"
+            f"Frosty решает это за <b>10 ₽/день</b>:",
             parse_mode="HTML",
             reply_markup=InlineKeyboardMarkup(
                 inline_keyboard=[
@@ -276,8 +295,11 @@ async def cmd_status(message: Message, session: aiohttp.ClientSession, tg_id: in
     expires_at = format_dt(data.get("expires_at"))
     proxy_link = data.get("proxy_link")
     status_text = (
-        f"✅ <b>Подписка активна</b> до {expires_at}\n"
-        f"Персональный прокси только для тебя — {PRICE_RUB} ₽/мес."
+        f"✅ <b>Подписка активна</b>\n"
+        f"\n"
+        f"📅 Действует до: {expires_at}\n"
+        f"💳 Тариф: {PRICE_RUB} ₽/мес · 10 ₽/день\n"
+        f"🖥 Устройств: до 10 на аккаунте"
     )
 
     if proxy_link:
