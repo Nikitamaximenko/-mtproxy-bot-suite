@@ -605,11 +605,10 @@ export default function MiniAppPage() {
           {/* 6. CTA Button */}
           <button
             onClick={() => {
-              if (isWeb) void handlePaySBP()
-              else if (ENABLE_PRODAMUS_SBP) setShowPayModal(true)
+              if (isWeb === true) void handlePaySBP()
               else void handlePay()
             }}
-            disabled={!email || !isEmailValid || paying || (ENABLE_PRODAMUS_SBP && payingSBP)}
+            disabled={!email || !isEmailValid || paying || (isWeb === true && payingSBP)}
             className="w-full font-bold touch-manipulation active:scale-[0.98] transition-transform disabled:opacity-50 disabled:active:scale-100"
             style={{
               background: "#2AABEE",
@@ -669,12 +668,7 @@ export default function MiniAppPage() {
                 >
                   {paying ? "Создаём оплату…" : "Картой / СБП →"}
                 </button>
-                {isWeb && (
-                  <p className="text-xs text-center mb-2" style={{ color: "#6B7280" }}>
-                    Оплата картой, СБП или переводом
-                  </p>
-                )}
-                {!isWeb && (
+                {!isWeb && ENABLE_PRODAMUS_SBP && (
                   <button
                     onClick={() => { setShowPayModal(false); void handlePaySBP() }}
                     disabled={payingSBP}
