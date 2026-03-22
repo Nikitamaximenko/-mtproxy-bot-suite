@@ -278,6 +278,7 @@ export default function MiniAppPage() {
   const [payingSBP, setPayingSBP] = useState(false)
   const [showPayModal, setShowPayModal] = useState(false)
   const [paymentUrl, setPaymentUrl] = useState<string | null>(null)
+  const [waitingPayment, setWaitingPayment] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [errorDetail, setErrorDetail] = useState<string | null>(null)
   const [copied, setCopied] = useState(false)
@@ -315,6 +316,21 @@ export default function MiniAppPage() {
 
   useEffect(() => { refresh() }, [refresh])
 
+  useEffect(() => {
+    if (!waitingPayment || !email) return
+    const check = async () => {
+      try {
+        const res = await fetch(`/api/subscription-status?email=${encodeURIComponent(email)}`)
+        const data = await res.json()
+        if (data.active && data.proxy_link) {
+          window.location.href = "/success"
+        }
+      } catch {}
+    }
+    const interval = setInterval(check, 3000)
+    return () => clearInterval(interval)
+  }, [waitingPayment, email])
+
   const isPaid = !!sub?.active
   const proxyLink = sub?.proxy_link ?? null
   const expiresAt = sub?.expires_at ?? null
@@ -343,7 +359,9 @@ export default function MiniAppPage() {
       const payUrl = String(data.payment_url)
       if (isWeb) {
         localStorage.setItem("frosty_email", email)
-        window.location.href = payUrl
+        setPaymentUrl(payUrl)
+        setWaitingPayment(true)
+        window.open(payUrl, "_blank")
         return
       }
       openTelegramLink(payUrl)
@@ -406,6 +424,38 @@ export default function MiniAppPage() {
     return (
       <div className={`${manrope.className} min-h-screen flex items-center justify-center`} style={{ background: "#FFFFFF" }}>
         <FrostIcon className="w-10 h-10 animate-float" style={{ color: "#2AABEE" } as React.CSSProperties} />
+      </div>
+    )
+  }
+
+  /* ── Web payment waiting screen ── */
+  if (isWeb && waitingPayment) {
+    return (
+      <div className={manrope.className} style={{minHeight:"100vh",background:"#FFFFFF",display:"flex",alignItems:"center",justifyContent:"center",padding:"24px"}}>
+        <div style={{maxWidth:"400px",width:"100%",textAlign:"center"}}>
+          <div style={{fontSize:"48px",marginBottom:"16px"}}>⏳</div>
+          <h2 style={{fontSize:"22px",fontWeight:700,color:"#111827",marginBottom:"8px"}}>
+            Ожидаем оплату
+          </h2>
+          <p style={{color:"#6B7280",fontSize:"15px",marginBottom:"32px",lineHeight:"1.5"}}>
+            Оплатите в открывшейся вкладке.<br/>
+            Страница обновится автоматически.
+          </p>
+          <button
+            onClick={() => { window.location.href = "/success" }}
+            style={{width:"100%",background:"#2AABEE",color:"#FFFFFF",height:"56px",borderRadius:"14px",fontSize:"17px",fontWeight:700,border:"none",cursor:"pointer",marginBottom:"12px"}}
+          >
+            Я оплатил →
+          </button>
+          <a
+            href={paymentUrl!}
+            target="_blank"
+            style={{display:"block",color:"#6B7280",fontSize:"13px",textDecoration:"underline",cursor:"pointer"}}
+            onClick={(e) => { e.preventDefault(); window.open(paymentUrl!, "_blank") }}
+          >
+            Открыть страницу оплаты снова
+          </a>
+        </div>
       </div>
     )
   }
