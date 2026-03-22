@@ -104,6 +104,7 @@ class User(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     telegram_id: Mapped[int] = mapped_column(BigInteger, unique=True, index=True, nullable=False)
     username: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    email: Mapped[str | None] = mapped_column(String(255), nullable=True, default=None)
     first_name: Mapped[str | None] = mapped_column(String(64), nullable=True)
     ref_source: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
@@ -208,6 +209,8 @@ def _migrate() -> None:
                     )
                 else:
                     conn.execute(text("ALTER TABLE users ADD COLUMN nudge_3_sent_at DATETIME"))
+            if "email" not in existing:
+                conn.execute(text("ALTER TABLE users ADD COLUMN email VARCHAR(255)"))
 
     # PostgreSQL: принудительно BIGINT для telegram_id (уже BIGINT — будет ошибка, игнорируем).
     if engine.dialect.name == "postgresql":
@@ -443,10 +446,13 @@ def checkout_create(payload: CheckoutCreateRequest, db: Session = Depends(get_db
     existing_user = db.execute(select(User).where(User.telegram_id == tg_id)).scalar_one_or_none()
     is_new_user = existing_user is None
     if is_new_user:
-        db.add(User(telegram_id=tg_id, username=username))
+        web_username = username or customer_email
+        db.add(User(telegram_id=tg_id, username=web_username, email=effective_email))
     else:
         if username and existing_user.username != username:
             existing_user.username = username
+        if effective_email and not existing_user.email:
+            existing_user.email = effective_email
 
     token = uuid4()
     sub = Subscription(
@@ -474,7 +480,8 @@ def checkout_create(payload: CheckoutCreateRequest, db: Session = Depends(get_db
                 select(User).where(User.telegram_id == tg_id)
             ).scalar_one_or_none()
             if still_missing is None:
-                db.add(User(telegram_id=tg_id, username=username))
+                web_username = username or customer_email
+                db.add(User(telegram_id=tg_id, username=web_username, email=effective_email))
         db.commit()
 
     lava_contract_id: str | None = None
@@ -1103,7 +1110,9 @@ def check_token(token: UUID, db: Session = Depends(get_db)) -> CheckTokenRespons
 @app.get("/subscription/by-email/{email}")
 def subscription_by_email(email: str, db: Session = Depends(get_db)):
     user = db.execute(
-        select(User).where(User.username == email)
+        select(User).where(
+            (User.username == email) | (User.email == email)
+        )
     ).scalar_one_or_none()
     if not user:
         return {"active": False}
