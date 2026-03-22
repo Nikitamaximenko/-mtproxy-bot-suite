@@ -279,7 +279,7 @@ export default function MiniAppPage() {
   const [errorDetail, setErrorDetail] = useState<string | null>(null)
   const [copied, setCopied] = useState(false)
   const [justPaid, setJustPaid] = useState(false)
-  const [isWeb, setIsWeb] = useState(false)
+  const [isWeb, setIsWeb] = useState<boolean | null>(null)
 
   useEffect(() => {
     const tgData = window?.Telegram?.WebApp?.initData
@@ -407,12 +407,12 @@ export default function MiniAppPage() {
   }, [])
 
   /* ── No tg_id (браузер без WebApp) ── */
-  if (!isWeb && !tgId) {
+  if (isWeb === false && !tgId) {
     return <TgIdFallbackScreen onContinue={setTgId} />
   }
 
   /* ── Loading ── */
-  if (!isWeb && loading) {
+  if (isWeb === false && loading) {
     return (
       <div className={`${manrope.className} min-h-screen flex items-center justify-center`} style={{ background: "#FFFFFF" }}>
         <FrostIcon className="w-10 h-10 animate-float" style={{ color: "#2AABEE" } as React.CSSProperties} />
