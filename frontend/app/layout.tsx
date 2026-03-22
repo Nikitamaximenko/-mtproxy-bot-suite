@@ -34,6 +34,10 @@ export const metadata: Metadata = {
   alternates: {
     canonical: "https://frostybot.ru",
   },
+  verification: {
+    google: "Wl2octBZAHk4YmGmnFgdZ0k2vjtLLuc8ZIxei_HAVss",
+    yandex: "46ef654743bdfe9b",
+  },
   icons: {
     icon: [
       {
