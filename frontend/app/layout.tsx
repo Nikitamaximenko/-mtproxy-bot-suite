@@ -16,9 +16,24 @@ export const viewport: Viewport = {
 }
 
 export const metadata: Metadata = {
-  title: 'Frosty — Заморозьте ограничения Telegram',
-  description: 'Telegram без ограничений в один клик. Безопасно, анонимно, не мешает VPN. Мгновенное подключение прямо в приложении.',
-  generator: 'v0.app',
+  title: "Frosty — личный прокси для Telegram",
+  description: "Персональный MTProxy только для вас. Telegram работает даже когда заблокирован. 299 ₽/мес, подключение за 10 секунд.",
+  keywords: "telegram прокси, mtproxy, телеграм прокси россия, обход блокировки telegram, frosty proxy",
+  openGraph: {
+    title: "Frosty — личный прокси для Telegram",
+    description: "Персональный MTProxy только для вас. 299 ₽/мес.",
+    url: "https://frostybot.ru",
+    siteName: "Frosty",
+    locale: "ru_RU",
+    type: "website",
+  },
+  robots: {
+    index: true,
+    follow: true,
+  },
+  alternates: {
+    canonical: "https://frostybot.ru",
+  },
   icons: {
     icon: [
       {
