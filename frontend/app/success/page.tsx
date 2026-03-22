@@ -182,7 +182,7 @@ export default function SuccessPage() {
             </div>
             <p style={{ fontSize: "12px", color: "#9CA3AF", marginTop: "16px" }}>
               Если оплата прошла, но подписки нет — напишите в{" "}
-              <a href="https://t.me/FrostyBot" style={{ color: "#2AABEE" }}>@FrostyBot</a>
+              <a href="https://t.me/frostytg_bot" style={{ color: "#2AABEE" }}>@FrostyBot</a>
             </p>
           </>
         )}
@@ -225,7 +225,7 @@ export default function SuccessPage() {
               </p>
             </div>
             <a
-              href="https://t.me/FrostyBot"
+              href="https://t.me/frostytg_bot"
               style={{
                 display: "block", background: "#F7F8FA", color: "#374151",
                 height: "48px", borderRadius: "14px", fontSize: "15px",

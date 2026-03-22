@@ -612,7 +612,7 @@ export default function AdminPage() {
                   value={buttonUrl}
                   onChange={(e) => setButtonUrl(e.target.value.slice(0, 2048))}
                   disabled={broadcastBusy}
-                  placeholder="URL кнопки, напр. https://t.me/FrostyBot"
+                  placeholder="URL кнопки, напр. https://t.me/frostytg_bot"
                   className="w-full px-4 py-2 bg-gray-950 border border-gray-700 rounded-xl text-white placeholder:text-gray-600 outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 text-sm disabled:opacity-60"
                 />
               </div>
@@ -815,7 +815,7 @@ export default function AdminPage() {
                       >
                         <td className="px-4 py-3 font-medium">{r.source}</td>
                         <td className="px-4 py-3 font-mono text-xs text-gray-400">
-                          t.me/FrostyBot?start={r.source}
+                          t.me/frostytg_bot?start={r.source}
                         </td>
                         <td className="px-4 py-3 text-right">
                           <span className="text-blue-400 font-bold">{r.count}</span>
