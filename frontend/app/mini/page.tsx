@@ -10,9 +10,6 @@ const manrope = Manrope({ subsets: ["latin", "cyrillic"], weight: ["400", "500",
 /** Второй поток оплаты (Prodamus / СБП). По умолчанию скрыт — см. NEXT_PUBLIC_ENABLE_PRODAMUS_CHECKOUT и backend ENABLE_PRODAMUS_CHECKOUT. */
 const ENABLE_PRODAMUS_SBP = process.env.NEXT_PUBLIC_ENABLE_PRODAMUS_CHECKOUT === "true"
 
-/** Веб-режим: открыто в обычном браузере, не в Telegram WebApp */
-const isWeb = typeof window !== "undefined" && !window?.Telegram?.WebApp?.initData
-
 type SubscriptionData = {
   active: boolean
   expires_at?: string | null
@@ -282,6 +279,13 @@ export default function MiniAppPage() {
   const [errorDetail, setErrorDetail] = useState<string | null>(null)
   const [copied, setCopied] = useState(false)
   const [justPaid, setJustPaid] = useState(false)
+  const [isWeb, setIsWeb] = useState(false)
+
+  useEffect(() => {
+    const tgData = window?.Telegram?.WebApp?.initData
+    const inTelegram = typeof tgData === "string" && tgData.length > 0
+    setIsWeb(!inTelegram)
+  }, [])
 
   const isEmailValid = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())
   const showEmailError = emailTouched && email.length > 0 && !isEmailValid
