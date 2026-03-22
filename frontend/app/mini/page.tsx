@@ -342,6 +342,7 @@ export default function MiniAppPage() {
       }
       const payUrl = String(data.payment_url)
       if (isWeb) {
+        localStorage.setItem("frosty_email", email)
         window.location.href = payUrl
         return
       }

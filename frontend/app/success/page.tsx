@@ -10,11 +10,16 @@ export default function SuccessPage() {
   const [copied, setCopied] = useState(false)
 
   useEffect(() => {
-    const token = new URLSearchParams(window.location.search).get("token")
-    if (!token) { setLoading(false); return }
+    const params = new URLSearchParams(window.location.search)
+    const token = params.get("token")
+    const email = params.get("email") || localStorage.getItem("frosty_email")
+
+    if (!token && !email) { setLoading(false); return }
+
     const check = async () => {
       try {
-        const res = await fetch(`/api/subscription-status?token=${token}`)
+        const query = token ? `token=${token}` : `email=${encodeURIComponent(email!)}`
+        const res = await fetch(`/api/subscription-status?${query}`)
         const data = await res.json()
         if (data.active && data.proxy_link) {
           setProxyLink(data.proxy_link)

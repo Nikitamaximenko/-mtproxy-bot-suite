@@ -1100,6 +1100,25 @@ def check_token(token: UUID, db: Session = Depends(get_db)) -> CheckTokenRespons
     return CheckTokenResponse(found=True, expires_at=sub.expires_at, proxy_link=proxy_link)
 
 
+@app.get("/subscription/by-email/{email}")
+def subscription_by_email(email: str, db: Session = Depends(get_db)):
+    user = db.execute(
+        select(User).where(User.username == email)
+    ).scalar_one_or_none()
+    if not user:
+        return {"active": False}
+    sub = db.execute(
+        select(Subscription)
+        .where(Subscription.telegram_id == user.telegram_id)
+        .where(Subscription.payment_status == "paid")
+        .order_by(Subscription.created_at.desc())
+    ).scalar_one_or_none()
+    if not sub:
+        return {"active": False}
+    proxy_link = f"tg://proxy?server={sub.proxy_server}&port={sub.proxy_port}&secret={sub.proxy_secret}"
+    return {"active": True, "proxy_link": proxy_link, "expires_at": sub.expires_at}
+
+
 def _require_admin(req: Request) -> None:
     if not ADMIN_API_KEY:
         raise HTTPException(status_code=403, detail="Admin API not configured")
