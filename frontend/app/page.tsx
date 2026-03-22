@@ -1,5 +1,5 @@
-import { FrostyLanding } from "@/components/FrostyLanding"
+import { redirect } from "next/navigation"
 
-export default function Page() {
-  return <FrostyLanding />
+export default function Home() {
+  redirect("/mini")
 }
