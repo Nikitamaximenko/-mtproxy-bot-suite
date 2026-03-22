@@ -378,7 +378,7 @@ def _create_lava_top_invoice(
     if buyer_email:
         payload["buyer_email"] = buyer_email
     if success_url:
-        payload["success_url"] = success_url
+        payload["successUrl"] = success_url
 
     req = urllib.request.Request(
         f"{LAVA_TOP_API_BASE_URL}/api/v3/invoice",
