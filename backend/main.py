@@ -306,9 +306,10 @@ def marketing_opt_out(payload: MarketingOptOutRequest, db: Session = Depends(get
 
 
 class CheckoutCreateRequest(BaseModel):
-    telegram_id: int = Field(..., ge=1)
+    telegram_id: int = Field(..., ge=0)
     username: str | None = Field(default=None, max_length=64)
     email: str | None = Field(default=None, max_length=255)
+    customer_email: str | None = Field(default=None)
 
     @field_validator("telegram_id", mode="before")
     @classmethod
@@ -344,7 +345,11 @@ def _normalize_payment_url(url: str) -> str:
     return urljoin(base, u)
 
 
-def _create_lava_top_invoice(email: str) -> tuple[str, str | None]:
+def _create_lava_top_invoice(
+    email: str,
+    buyer_email: str | None = None,
+    success_url: str | None = None,
+) -> tuple[str, str | None]:
     """
     lava.top Public API: POST /api/v3/invoice with X-Api-Key.
     Returns (paymentUrl, contractId).
@@ -367,6 +372,10 @@ def _create_lava_top_invoice(email: str) -> tuple[str, str | None]:
     payload.setdefault("periodicity", "MONTHLY")
     payload.setdefault("paymentProvider", "SMART_GLOCAL")
     payload.setdefault("paymentMethod", "CARD")
+    if buyer_email:
+        payload["buyer_email"] = buyer_email
+    if success_url:
+        payload["success_url"] = success_url
 
     req = urllib.request.Request(
         f"{LAVA_TOP_API_BASE_URL}/api/v3/invoice",
@@ -421,10 +430,15 @@ def _checkout_fallback_payment_url(payment_token: str) -> str:
 
 @app.post("/checkout/create", response_model=CheckoutCreateResponse)
 def checkout_create(payload: CheckoutCreateRequest, db: Session = Depends(get_db)) -> CheckoutCreateResponse:
+    import random
     tg_id = int(payload.telegram_id)
+    if tg_id == 0:
+        tg_id = -random.randint(100000, 999999999)
     username = payload.username.strip() if payload.username else None
     email = payload.email.strip().lower() if payload.email else None
-    logger.info("Checkout create: tg_id=%s email=%s", tg_id, email or "(none)")
+    customer_email = payload.customer_email.strip().lower() if payload.customer_email else None
+    effective_email = email or customer_email
+    logger.info("Checkout create: tg_id=%s email=%s", tg_id, effective_email or "(none)")
 
     existing_user = db.execute(select(User).where(User.telegram_id == tg_id)).scalar_one_or_none()
     is_new_user = existing_user is None
@@ -465,9 +479,14 @@ def checkout_create(payload: CheckoutCreateRequest, db: Session = Depends(get_db
 
     lava_contract_id: str | None = None
     lava_top_configured = bool(LAVA_TOP_API_KEY and LAVA_TOP_OFFER_ID)
-    if email and lava_top_configured:
+    if effective_email and lava_top_configured:
         try:
-            payment_url, lava_contract_id = _create_lava_top_invoice(email)
+            success_url = f"{FRONTEND_URL}/success" if FRONTEND_URL else None
+            payment_url, lava_contract_id = _create_lava_top_invoice(
+                effective_email,
+                buyer_email=customer_email,
+                success_url=success_url,
+            )
         except Exception as e:
             logger.error("lava.top invoice failed tg_id=%s, using fallback URL: %s", tg_id, e)
             payment_url = _checkout_fallback_payment_url(str(token))

@@ -26,7 +26,7 @@ function badBackendConfig(): string | null {
 }
 
 export async function POST(req: NextRequest) {
-  const { telegram_id, username, email } = await req.json()
+  const { telegram_id, username, email, customer_email } = await req.json()
 
   const configErr = badBackendConfig()
   if (configErr) {
@@ -39,7 +39,7 @@ export async function POST(req: NextRequest) {
 
   const backendUrl = (process.env.BACKEND_URL || "http://localhost:8000").replace(/\/+$/, "")
   const tgIdNum = Number(telegram_id)
-  if (!Number.isFinite(tgIdNum) || tgIdNum < 1) {
+  if (!Number.isFinite(tgIdNum) || tgIdNum < 0) {
     return NextResponse.json(
       { error: "Missing or invalid telegram_id. Open this page from Telegram with ?tg_id=123" },
       { status: 400 },
@@ -57,6 +57,7 @@ export async function POST(req: NextRequest) {
         telegram_id: tgIdNum,
         username: typeof username === "string" && username.trim() ? username.trim() : null,
         email: typeof email === "string" && email.trim() ? email.trim() : null,
+        customer_email: typeof customer_email === "string" && customer_email.trim() ? customer_email.trim() : null,
       }),
       signal: controller.signal,
     })

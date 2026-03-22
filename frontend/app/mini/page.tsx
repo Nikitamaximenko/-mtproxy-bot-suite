@@ -10,6 +10,9 @@ const manrope = Manrope({ subsets: ["latin", "cyrillic"], weight: ["400", "500",
 /** Второй поток оплаты (Prodamus / СБП). По умолчанию скрыт — см. NEXT_PUBLIC_ENABLE_PRODAMUS_CHECKOUT и backend ENABLE_PRODAMUS_CHECKOUT. */
 const ENABLE_PRODAMUS_SBP = process.env.NEXT_PUBLIC_ENABLE_PRODAMUS_CHECKOUT === "true"
 
+/** Веб-режим: открыто в обычном браузере, не в Telegram WebApp */
+const isWeb = typeof window !== "undefined" && !window?.Telegram?.WebApp?.initData
+
 type SubscriptionData = {
   active: boolean
   expires_at?: string | null
@@ -296,7 +299,10 @@ export default function MiniAppPage() {
   }, [])
 
   const refresh = useCallback(async () => {
-    if (!tgId) return
+    if (!tgId) {
+      setLoading(false)
+      return
+    }
     setLoading(true)
     try {
       const res = await fetch(`/api/subscription?tg_id=${tgId}`, { cache: "no-store" })
@@ -315,7 +321,7 @@ export default function MiniAppPage() {
   const suspendedButPaid = !!sub?.suspended && !!sub?.expires_at && !sub?.active
 
   const handlePay = async () => {
-    if (!email || !tgId) return
+    if (!email || (!isWeb && !tgId)) return
     setPaying(true)
     setError(null)
     setErrorDetail(null)
@@ -324,9 +330,9 @@ export default function MiniAppPage() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          telegram_id: String(tgId),
-          username: tgUser?.username,
-          email,
+          telegram_id: tgId ? String(tgId) : "0",
+          username: tgUser?.username || null,
+          customer_email: email,
         }),
       })
       const data = (await res.json()) as { error?: string; payment_url?: string; details?: string }
@@ -335,6 +341,10 @@ export default function MiniAppPage() {
         throw new Error(data?.error || "Не удалось создать оплату")
       }
       const payUrl = String(data.payment_url)
+      if (isWeb) {
+        window.location.href = payUrl
+        return
+      }
       openTelegramLink(payUrl)
       setPaymentUrl(payUrl)
     } catch (e) {
@@ -386,12 +396,12 @@ export default function MiniAppPage() {
   }, [])
 
   /* ── No tg_id (браузер без WebApp) ── */
-  if (!tgId) {
+  if (!isWeb && !tgId) {
     return <TgIdFallbackScreen onContinue={setTgId} />
   }
 
   /* ── Loading ── */
-  if (loading) {
+  if (!isWeb && loading) {
     return (
       <div className={`${manrope.className} min-h-screen flex items-center justify-center`} style={{ background: "#FFFFFF" }}>
         <FrostIcon className="w-10 h-10 animate-float" style={{ color: "#2AABEE" } as React.CSSProperties} />
@@ -584,7 +594,7 @@ export default function MiniAppPage() {
           {/* 6. CTA Button */}
           <button
             onClick={() => {
-              if (ENABLE_PRODAMUS_SBP) setShowPayModal(true)
+              if (!isWeb && ENABLE_PRODAMUS_SBP) setShowPayModal(true)
               else void handlePay()
             }}
             disabled={!email || !isEmailValid || paying || (ENABLE_PRODAMUS_SBP && payingSBP)}
@@ -645,24 +655,31 @@ export default function MiniAppPage() {
                     marginBottom: "10px",
                   }}
                 >
-                  {paying ? "Создаём оплату…" : "Картой / СБП с автопродлением"}
+                  {paying ? "Создаём оплату…" : "Картой / СБП →"}
                 </button>
-                <button
-                  onClick={() => { setShowPayModal(false); void handlePaySBP() }}
-                  disabled={payingSBP}
-                  className="w-full font-medium touch-manipulation active:scale-[0.98] transition-transform disabled:opacity-50"
-                  style={{
-                    background: "#F7F8FA",
-                    color: "#374151",
-                    height: "52px",
-                    borderRadius: "14px",
-                    fontSize: "16px",
-                    border: "1px solid #E5E7EB",
-                    marginBottom: "12px",
-                  }}
-                >
-                  {payingSBP ? "Создаём оплату…" : "СБП / Перевод через банк"}
-                </button>
+                {isWeb && (
+                  <p className="text-xs text-center mb-2" style={{ color: "#6B7280" }}>
+                    Оплата картой, СБП или переводом
+                  </p>
+                )}
+                {!isWeb && (
+                  <button
+                    onClick={() => { setShowPayModal(false); void handlePaySBP() }}
+                    disabled={payingSBP}
+                    className="w-full font-medium touch-manipulation active:scale-[0.98] transition-transform disabled:opacity-50"
+                    style={{
+                      background: "#F7F8FA",
+                      color: "#374151",
+                      height: "52px",
+                      borderRadius: "14px",
+                      fontSize: "16px",
+                      border: "1px solid #E5E7EB",
+                      marginBottom: "12px",
+                    }}
+                  >
+                    {payingSBP ? "Создаём оплату…" : "СБП / Перевод через банк"}
+                  </button>
+                )}
                 <button
                   onClick={() => setShowPayModal(false)}
                   className="w-full text-sm touch-manipulation"
