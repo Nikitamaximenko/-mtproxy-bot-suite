@@ -488,7 +488,7 @@ def checkout_create(payload: CheckoutCreateRequest, db: Session = Depends(get_db
     lava_top_configured = bool(LAVA_TOP_API_KEY and LAVA_TOP_OFFER_ID)
     if effective_email and lava_top_configured:
         try:
-            success_url = f"{FRONTEND_URL}/success" if FRONTEND_URL else None
+            success_url = f"{FRONTEND_URL}/success?token={token}" if FRONTEND_URL else None
             payment_url, lava_contract_id = _create_lava_top_invoice(
                 effective_email,
                 buyer_email=customer_email,
