@@ -356,7 +356,7 @@ export default function MiniAppPage() {
   }
 
   const handlePaySBP = async () => {
-    if (!email || !tgId) return
+    if (!email || (!isWeb && !tgId)) return
     setPayingSBP(true)
     setError(null)
     setErrorDetail(null)
@@ -365,8 +365,9 @@ export default function MiniAppPage() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          telegram_id: String(tgId),
-          username: tgUser?.username,
+          telegram_id: tgId ? String(tgId) : "0",
+          username: tgUser?.username || null,
+          customer_email: email,
         }),
       })
       const data = (await res.json()) as { error?: string; payment_url?: string }
@@ -374,6 +375,11 @@ export default function MiniAppPage() {
         throw new Error(data?.error || "Не удалось создать оплату")
       }
       const payUrl = String(data.payment_url)
+      if (isWeb) {
+        localStorage.setItem("frosty_email", email)
+        window.location.href = payUrl
+        return
+      }
       openTelegramLink(payUrl)
       setPaymentUrl(payUrl)
     } catch (e) {
@@ -595,7 +601,8 @@ export default function MiniAppPage() {
           {/* 6. CTA Button */}
           <button
             onClick={() => {
-              if (!isWeb && ENABLE_PRODAMUS_SBP) setShowPayModal(true)
+              if (isWeb) void handlePaySBP()
+              else if (ENABLE_PRODAMUS_SBP) setShowPayModal(true)
               else void handlePay()
             }}
             disabled={!email || !isEmailValid || paying || (ENABLE_PRODAMUS_SBP && payingSBP)}

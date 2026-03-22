@@ -952,8 +952,9 @@ def _prodamus_sign(data: dict, secret: str) -> str:
 
 
 class ProdamusCheckoutRequest(BaseModel):
-    telegram_id: int = Field(..., ge=1)
+    telegram_id: int = Field(..., ge=0)
     username: str | None = Field(default=None, max_length=64)
+    customer_email: str | None = Field(default=None, max_length=255)
 
     @field_validator("telegram_id", mode="before")
     @classmethod
@@ -962,7 +963,7 @@ class ProdamusCheckoutRequest(BaseModel):
             return int(v.strip())
         if isinstance(v, int):
             return v
-        raise ValueError("telegram_id must be a positive integer")
+        raise ValueError("telegram_id must be a non-negative integer")
 
 
 class ProdamusCheckoutResponse(BaseModel):
@@ -972,19 +973,26 @@ class ProdamusCheckoutResponse(BaseModel):
 
 @app.post("/checkout/create-prodamus", response_model=ProdamusCheckoutResponse)
 def checkout_create_prodamus(payload: ProdamusCheckoutRequest, db: Session = Depends(get_db)) -> ProdamusCheckoutResponse:
+    import random
     if not ENABLE_PRODAMUS_CHECKOUT:
         raise HTTPException(status_code=503, detail="Prodamus checkout is disabled")
     tg_id = int(payload.telegram_id)
+    if tg_id == 0:
+        tg_id = -random.randint(100000, 999999999)
     username = payload.username.strip() if payload.username else None
-    logger.info("Prodamus checkout create: tg_id=%s", tg_id)
+    customer_email = payload.customer_email.strip().lower() if payload.customer_email else None
+    logger.info("Prodamus checkout create: tg_id=%s email=%s", tg_id, customer_email or "(none)")
 
     existing_user = db.execute(select(User).where(User.telegram_id == tg_id)).scalar_one_or_none()
     is_new_user = existing_user is None
     if is_new_user:
-        db.add(User(telegram_id=tg_id, username=username))
+        web_username = username or customer_email
+        db.add(User(telegram_id=tg_id, username=web_username, email=customer_email))
     else:
         if username and existing_user.username != username:
             existing_user.username = username
+        if customer_email and not existing_user.email:
+            existing_user.email = customer_email
 
     token = uuid4()
     sub = Subscription(
@@ -1008,7 +1016,8 @@ def checkout_create_prodamus(payload: ProdamusCheckoutRequest, db: Session = Dep
         if is_new_user:
             still_missing = db.execute(select(User).where(User.telegram_id == tg_id)).scalar_one_or_none()
             if still_missing is None:
-                db.add(User(telegram_id=tg_id, username=username))
+                web_username = username or customer_email
+                db.add(User(telegram_id=tg_id, username=web_username, email=customer_email))
         db.commit()
 
     from urllib.parse import urlencode as _urlencode
@@ -1025,7 +1034,10 @@ def checkout_create_prodamus(payload: ProdamusCheckoutRequest, db: Session = Dep
         "do": "link",
         "sys": "meetingai",
         "callbackType": "json",
+        "urlSuccess": f"{FRONTEND_URL}/success?token={token}" if FRONTEND_URL else "",
     }
+    if customer_email:
+        sign_data["customer_email"] = customer_email
     if PRODAMUS_SECRET_KEY:
         sign_data["signature"] = _prodamus_sign(sign_data, PRODAMUS_SECRET_KEY)
 
