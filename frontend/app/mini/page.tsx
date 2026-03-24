@@ -281,8 +281,11 @@ export default function MiniAppPage() {
   const [isWeb, setIsWeb] = useState<boolean | null>(null)
 
   useEffect(() => {
-    const tgData = window?.Telegram?.WebApp?.initData
-    const inTelegram = typeof tgData === "string" && tgData.length > 0
+    // Проверяем несколько признаков Telegram WebApp
+    const tg = window?.Telegram?.WebApp
+    const hasTgData = typeof tg?.initData === "string" && tg.initData.length > 0
+    const hasTgVersion = typeof tg?.version === "string"
+    const inTelegram = hasTgData || hasTgVersion
     setIsWeb(!inTelegram)
   }, [])
 
