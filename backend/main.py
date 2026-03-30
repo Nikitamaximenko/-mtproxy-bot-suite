@@ -1119,6 +1119,76 @@ def check_token(token: UUID, db: Session = Depends(get_db)) -> CheckTokenRespons
     return CheckTokenResponse(found=True, expires_at=sub.expires_at, proxy_link=proxy_link)
 
 
+class ClaimWebSubscriptionRequest(BaseModel):
+    payment_token: str
+    telegram_id: int
+    username: str | None = None
+    first_name: str | None = None
+
+
+class ClaimWebSubscriptionResponse(BaseModel):
+    ok: bool
+    proxy_link: str | None = None
+    error: str | None = None
+
+
+@app.post("/subscription/claim-by-token", response_model=ClaimWebSubscriptionResponse)
+def claim_web_subscription(
+    body: ClaimWebSubscriptionRequest, db: Session = Depends(get_db)
+) -> ClaimWebSubscriptionResponse:
+    sub = db.execute(
+        select(Subscription).where(
+            Subscription.payment_token == body.payment_token,
+            Subscription.payment_status == "paid",
+        )
+    ).scalar_one_or_none()
+
+    if not sub:
+        return ClaimWebSubscriptionResponse(ok=False, error="not_found")
+
+    proxy_link: str | None = None
+    if sub.proxy_server and sub.proxy_port and sub.proxy_secret:
+        proxy_link = f"tg://proxy?server={sub.proxy_server}&port={sub.proxy_port}&secret={sub.proxy_secret}"
+
+    # Already belongs to this user
+    if sub.telegram_id == body.telegram_id:
+        return ClaimWebSubscriptionResponse(ok=True, proxy_link=proxy_link)
+
+    # Web user (negative tg_id) — transfer subscription to real Telegram user
+    if sub.telegram_id < 0:
+        old_tg_id = sub.telegram_id
+        new_tg_id = body.telegram_id
+
+        existing_user = db.execute(
+            select(User).where(User.telegram_id == new_tg_id)
+        ).scalar_one_or_none()
+
+        old_user = db.execute(
+            select(User).where(User.telegram_id == old_tg_id)
+        ).scalar_one_or_none()
+
+        sub.telegram_id = new_tg_id
+
+        if existing_user:
+            if old_user:
+                db.delete(old_user)
+        else:
+            if old_user:
+                old_user.telegram_id = new_tg_id
+                if body.username:
+                    old_user.username = body.username
+                if body.first_name:
+                    old_user.first_name = body.first_name
+            else:
+                db.add(User(telegram_id=new_tg_id, username=body.username, first_name=body.first_name))
+
+        db.commit()
+        return ClaimWebSubscriptionResponse(ok=True, proxy_link=proxy_link)
+
+    # Belongs to a different Telegram user
+    return ClaimWebSubscriptionResponse(ok=False, error="belongs_to_other")
+
+
 @app.get("/subscription/by-email/{email}")
 def subscription_by_email(email: str, db: Session = Depends(get_db)):
     user = db.execute(
@@ -1434,6 +1504,102 @@ def admin_stats(req: Request, db: Session = Depends(get_db)) -> AdminStatsRespon
         pending_payments=pending,
         revenue_estimate=total_paid * PAYMENT_AMOUNT_RUB,
         referrals=referrals,
+    )
+
+
+class FunnelStatsResponse(BaseModel):
+    # All-time counts per CJM step
+    users_total: int
+    checkout_started: int        # subscription rows created (email submitted)
+    payment_link_generated: int  # lava_contract_id assigned
+    payments_completed: int      # payment_status = 'paid' (ever)
+    active_now: int              # paid + not expired + not suspended
+    # Last 7 days cohort
+    users_7d: int
+    checkout_started_7d: int
+    payment_link_generated_7d: int
+    payments_completed_7d: int
+    # Engagement / opt-out
+    nudge_1_sent: int
+    nudge_2_sent: int
+    nudge_3_sent: int
+    opted_out: int
+
+
+@app.get("/admin/funnel", response_model=FunnelStatsResponse)
+def admin_funnel(req: Request, db: Session = Depends(get_db)) -> FunnelStatsResponse:
+    _require_admin(req)
+    now = utcnow()
+    week_ago = now - timedelta(days=7)
+
+    users_total = db.execute(select(func.count()).select_from(User)).scalar() or 0
+    users_7d = db.execute(
+        select(func.count()).select_from(User).where(User.created_at >= week_ago)
+    ).scalar() or 0
+
+    checkout_started = db.execute(select(func.count()).select_from(Subscription)).scalar() or 0
+    checkout_started_7d = db.execute(
+        select(func.count()).select_from(Subscription).where(Subscription.created_at >= week_ago)
+    ).scalar() or 0
+
+    payment_link_generated = db.execute(
+        select(func.count()).select_from(Subscription).where(Subscription.lava_contract_id.is_not(None))
+    ).scalar() or 0
+    payment_link_generated_7d = db.execute(
+        select(func.count()).select_from(Subscription).where(
+            Subscription.lava_contract_id.is_not(None),
+            Subscription.created_at >= week_ago,
+        )
+    ).scalar() or 0
+
+    payments_completed = db.execute(
+        select(func.count()).select_from(Subscription).where(
+            Subscription.payment_status.in_(["paid", "expired"])
+        )
+    ).scalar() or 0
+    payments_completed_7d = db.execute(
+        select(func.count()).select_from(Subscription).where(
+            Subscription.payment_status.in_(["paid", "expired"]),
+            Subscription.created_at >= week_ago,
+        )
+    ).scalar() or 0
+
+    active_now = db.execute(
+        select(func.count()).select_from(Subscription).where(
+            Subscription.payment_status == "paid",
+            Subscription.expires_at.is_not(None),
+            Subscription.expires_at > now,
+            Subscription.access_suspended == False,  # noqa: E712
+        )
+    ).scalar() or 0
+
+    nudge_1_sent = db.execute(
+        select(func.count()).select_from(User).where(User.nudge_1_sent_at.is_not(None))
+    ).scalar() or 0
+    nudge_2_sent = db.execute(
+        select(func.count()).select_from(User).where(User.nudge_2_sent_at.is_not(None))
+    ).scalar() or 0
+    nudge_3_sent = db.execute(
+        select(func.count()).select_from(User).where(User.nudge_3_sent_at.is_not(None))
+    ).scalar() or 0
+    opted_out = db.execute(
+        select(func.count()).select_from(User).where(User.marketing_opt_out == True)  # noqa: E712
+    ).scalar() or 0
+
+    return FunnelStatsResponse(
+        users_total=users_total,
+        checkout_started=checkout_started,
+        payment_link_generated=payment_link_generated,
+        payments_completed=payments_completed,
+        active_now=active_now,
+        users_7d=users_7d,
+        checkout_started_7d=checkout_started_7d,
+        payment_link_generated_7d=payment_link_generated_7d,
+        payments_completed_7d=payments_completed_7d,
+        nudge_1_sent=nudge_1_sent,
+        nudge_2_sent=nudge_2_sent,
+        nudge_3_sent=nudge_3_sent,
+        opted_out=opted_out,
     )
 
 

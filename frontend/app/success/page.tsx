@@ -18,6 +18,7 @@ async function fetchStatus(query: string): Promise<{ active: boolean; proxy_link
 
 export default function SuccessPage() {
   const [phase, setPhase] = useState<Phase>("polling")
+  const [token, setToken] = useState<string | null>(null)
   const [proxyLink, setProxyLink] = useState<string | null>(null)
   const [emailInput, setEmailInput] = useState("")
   const [emailError, setEmailError] = useState<string | null>(null)
@@ -40,6 +41,7 @@ export default function SuccessPage() {
   useEffect(() => {
     const params = new URLSearchParams(window.location.search)
     const token = params.get("token")
+    setToken(token)
     const urlEmail = params.get("email")
     const lsEmail = typeof window !== "undefined" ? localStorage.getItem("frosty_email") : null
     const email = urlEmail || lsEmail
@@ -225,7 +227,7 @@ export default function SuccessPage() {
               </p>
             </div>
             <a
-              href="https://t.me/frostytg_bot"
+              href={`https://t.me/frostytg_bot?start=sub_${token || ""}`}
               style={{
                 display: "block", background: "#F7F8FA", color: "#374151",
                 height: "48px", borderRadius: "14px", fontSize: "15px",

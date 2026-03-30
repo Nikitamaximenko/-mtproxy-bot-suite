@@ -5,6 +5,7 @@ import logging
 import os
 from datetime import datetime, timezone
 from typing import Any
+from uuid import UUID
 
 import aiohttp
 from aiogram import Bot, Dispatcher
@@ -129,6 +130,15 @@ async def backend_post(session: aiohttp.ClientSession, path: str, payload: dict[
         _log.warning("backend_post %s failed: %s", path, exc)
 
 
+async def backend_post_json(session: aiohttp.ClientSession, path: str, payload: dict[str, Any]) -> dict[str, Any]:
+    url = f"{BACKEND_BASE_URL}{path}"
+    async with session.post(url, json=payload, timeout=aiohttp.ClientTimeout(total=10)) as resp:
+        data = await resp.json(content_type=None)
+        if not isinstance(data, dict):
+            raise RuntimeError("Unexpected backend response")
+        return data
+
+
 def _parse_proxy_link(link: str) -> tuple[str, str, str]:
     from urllib.parse import parse_qs, urlparse
     parsed = urlparse(link)
@@ -198,8 +208,10 @@ async def cmd_start(message: Message, session: aiohttp.ClientSession, state: FSM
     token: str = ""
 
     if param:
-        # Deep link: either a payment token (UUID) or a referral source
-        if len(param) == 36 and "-" in param:
+        if param.startswith("sub_"):
+            pass  # handled below
+        elif len(param) == 36 and "-" in param:
+            # Deep link: payment token (UUID)
             token = param
         else:
             ref_source = param[:64]
@@ -217,6 +229,49 @@ async def cmd_start(message: Message, session: aiohttp.ClientSession, state: FSM
             },
         )
     )
+
+    # Web-to-bot deep link: пользователь оплатил на сайте, теперь активирует в боте
+    if param.startswith("sub_"):
+        token_str = param[4:]
+        valid = False
+        try:
+            UUID(token_str)
+            valid = True
+        except ValueError:
+            pass
+
+        if valid:
+            try:
+                data = await backend_post_json(
+                    session,
+                    "/subscription/claim-by-token",
+                    {
+                        "payment_token": token_str,
+                        "telegram_id": tg_id,
+                        "username": username,
+                        "first_name": first_name,
+                    },
+                )
+            except Exception:
+                data = {}
+
+            if data.get("ok") and data.get("proxy_link"):
+                await message.answer(
+                    "🧊 <b>Frosty — личный прокси для Telegram</b>\n\n"
+                    "✅ Подписка активна! Нажми кнопку ниже чтобы подключить прокси:",
+                    parse_mode="HTML",
+                    reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
+                        InlineKeyboardButton(text="🔗 Подключить прокси", url=data["proxy_link"])
+                    ]]),
+                )
+                return
+            elif data.get("ok"):
+                await message.answer(
+                    "✅ Подписка найдена, прокси активируется.\n"
+                    "Нажми /status через несколько секунд."
+                )
+                return
+        # Некорректный или чужой токен — показываем обычный стартовый экран
 
     if token:
         try:
