@@ -51,6 +51,22 @@ type UsersOverview = {
   users_table_total: number
 }
 
+type FunnelStats = {
+  users_total: number
+  checkout_started: number
+  payment_link_generated: number
+  payments_completed: number
+  active_now: number
+  users_7d: number
+  checkout_started_7d: number
+  payment_link_generated_7d: number
+  payments_completed_7d: number
+  nudge_1_sent: number
+  nudge_2_sent: number
+  nudge_3_sent: number
+  opted_out: number
+}
+
 function formatDate(iso: string | null) {
   if (!iso) return "—"
   return new Date(iso).toLocaleDateString("ru-RU", {
@@ -143,6 +159,7 @@ export default function AdminPage() {
   const [stats, setStats] = useState<Stats | null>(null)
   const [proxy, setProxy] = useState<ProxyStatus | null>(null)
   const [overview, setOverview] = useState<UsersOverview | null>(null)
+  const [funnel, setFunnel] = useState<FunnelStats | null>(null)
   const [userTab, setUserTab] = useState<"new" | "subscribers">("new")
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState("")
@@ -199,15 +216,17 @@ export default function AdminPage() {
       setLoading(true)
       setError("")
       try {
-        const [sRes, pRes, ovRes] = await Promise.all([
+        const [sRes, pRes, ovRes, fRes] = await Promise.all([
           fetch("/api/admin/stats", { headers: headers(activeKey), cache: "no-store" }),
           fetch("/api/admin/proxy-status", { headers: headers(activeKey), cache: "no-store" }),
           fetch("/api/admin/users-overview", { headers: headers(activeKey), cache: "no-store" }),
+          fetch("/api/admin/funnel", { headers: headers(activeKey), cache: "no-store" }),
         ])
 
         if (sRes.status === 403 || ovRes.status === 403) {
           setAuthed(false)
           setOverview(null)
+          setFunnel(null)
           setError("Неверный ключ")
           try {
             localStorage.removeItem(STORAGE_KEY)
@@ -217,7 +236,12 @@ export default function AdminPage() {
           return
         }
 
-        const [sData, pData, ovData] = await Promise.all([sRes.json(), pRes.json(), ovRes.json()])
+        const [sData, pData, ovData, fData] = await Promise.all([
+          sRes.json(),
+          pRes.json(),
+          ovRes.json(),
+          fRes.ok ? fRes.json() : Promise.resolve(null),
+        ])
         const rawStats = sData as Stats & { marketing_opt_out_users?: number }
         setStats({
           ...rawStats,
@@ -225,6 +249,7 @@ export default function AdminPage() {
         })
         setProxy(pData)
         setOverview(ovData as UsersOverview)
+        setFunnel(fData as FunnelStats | null)
         setAuthed(true)
         persistKey(activeKey)
       } catch {
@@ -533,6 +558,75 @@ export default function AdminPage() {
             ))}
           </div>
         </section>
+
+        {funnel && (
+          <section>
+            <h2 className="text-lg font-semibold mb-1 text-gray-300">Воронка CJM</h2>
+            <p className="text-xs text-gray-500 mb-4">
+              Конверсия по шагам Customer Journey Map. В скобках — за последние 7 дней.
+            </p>
+            <div className="bg-gray-900 border border-gray-800 rounded-2xl p-6 space-y-3">
+              {(() => {
+                type Step = { label: string; total: number; week: number | null }
+                const steps: Step[] = [
+                  { label: "Запустили бота", total: funnel.users_total, week: funnel.users_7d },
+                  { label: "Открыли оплату (email)", total: funnel.checkout_started, week: funnel.checkout_started_7d },
+                  { label: "Получили ссылку Lava", total: funnel.payment_link_generated, week: funnel.payment_link_generated_7d },
+                  { label: "Оплатили", total: funnel.payments_completed, week: funnel.payments_completed_7d },
+                  { label: "Активны сейчас", total: funnel.active_now, week: null },
+                ]
+                return steps.map((step, i) => {
+                  const prev = i > 0 ? steps[i - 1].total : null
+                  const pct = prev && prev > 0 ? Math.round((step.total / prev) * 100) : null
+                  const barWidth = steps[0].total > 0 ? Math.round((step.total / steps[0].total) * 100) : 0
+                  const pctColor =
+                    pct === null ? "" : pct >= 60 ? "text-emerald-400" : pct >= 30 ? "text-yellow-400" : "text-red-400"
+                  return (
+                    <div key={step.label}>
+                      <div className="flex items-center justify-between text-sm mb-1">
+                        <span className="text-gray-300 font-medium">{step.label}</span>
+                        <div className="flex items-center gap-3">
+                          {step.week !== null && (
+                            <span className="text-gray-500 text-xs">(7д: {step.week})</span>
+                          )}
+                          <span className="text-white font-bold font-mono w-12 text-right">{step.total}</span>
+                          {pct !== null && (
+                            <span className={`text-xs font-semibold w-12 text-right ${pctColor}`}>
+                              {pct}%
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                      <div className="h-2 bg-gray-800 rounded-full overflow-hidden">
+                        <div
+                          className="h-full rounded-full bg-blue-500 transition-all"
+                          style={{ width: `${barWidth}%` }}
+                        />
+                      </div>
+                      {i < steps.length - 1 && (
+                        <div className="text-gray-700 text-xs text-center mt-1 mb-1 select-none">↓</div>
+                      )}
+                    </div>
+                  )
+                })
+              })()}
+            </div>
+
+            <div className="mt-3 grid grid-cols-2 md:grid-cols-4 gap-3">
+              {[
+                { label: "Nudge 1 отправлен (2ч)", value: funnel.nudge_1_sent, color: "text-cyan-400" },
+                { label: "Nudge 2 отправлен (24ч)", value: funnel.nudge_2_sent, color: "text-cyan-400" },
+                { label: "Nudge 3 отправлен (72ч)", value: funnel.nudge_3_sent, color: "text-cyan-400" },
+                { label: "Отписались от рассылки", value: funnel.opted_out, color: "text-red-400" },
+              ].map(({ label, value, color }) => (
+                <div key={label} className="bg-gray-900 border border-gray-800 rounded-xl p-4">
+                  <div className="text-xs text-gray-400 mb-1">{label}</div>
+                  <div className={`text-xl font-bold font-mono ${color}`}>{value}</div>
+                </div>
+              ))}
+            </div>
+          </section>
+        )}
 
         <section>
           <h2 className="text-lg font-semibold mb-2 text-gray-300">Рассылка в боте</h2>
