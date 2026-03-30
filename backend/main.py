@@ -929,27 +929,6 @@ def _prodamus_signature_ok(req: Request, payload: dict[str, Any], secret: str) -
 
 @app.post("/webhooks/prodamus", response_model=OkResponse)
 async def prodamus_webhook(req: Request, db: Session = Depends(get_db)) -> OkResponse:
-    # #region agent log
-    _AGENT_LOG = "/Users/nikitamaximenko/mtproxy-bot-suite/.cursor/debug-5f0ad3.log"
-
-    def _agent_debug(hypothesis_id: str, location: str, message: str, data: dict[str, Any]) -> None:
-        line_obj = {
-            "sessionId": "5f0ad3",
-            "hypothesisId": hypothesis_id,
-            "location": location,
-            "message": message,
-            "data": data,
-            "timestamp": int(time.time() * 1000),
-        }
-        try:
-            with open(_AGENT_LOG, "a", encoding="utf-8") as _df:
-                _df.write(json.dumps(line_obj, ensure_ascii=False) + "\n")
-        except Exception:
-            pass
-        logger.info("AGENT_DEBUG %s", json.dumps(line_obj, ensure_ascii=False)[:1800])
-
-    # #endregion
-
     if not PRODAMUS_SECRET_KEY:
         logger.warning("PRODAMUS_SECRET_KEY not set — rejecting webhook")
         raise HTTPException(status_code=401, detail="Webhook authentication not configured")
@@ -957,25 +936,12 @@ async def prodamus_webhook(req: Request, db: Session = Depends(get_db)) -> OkRes
     try:
         payload_raw = await _parse_prodamus_webhook_payload(req)
     except json.JSONDecodeError as e:
-        _agent_debug("H2", "prodamus_webhook:parse", "json_error", {"err": str(e)})
+        logger.warning("Prodamus webhook: invalid JSON: %s", e)
         raise HTTPException(status_code=400, detail="Invalid JSON") from e
 
     payload_data = _flatten_prodamus_submit(payload_raw)
-    keys_preview = list(payload_data.keys())[:35]
-    _agent_debug(
-        "H1",
-        "prodamus_webhook:parsed",
-        "keys",
-        {
-            "keys": keys_preview,
-            "has_submit_key": "submit" in payload_raw,
-            "header_sign": bool((req.headers.get("Sign") or req.headers.get("sign") or "").strip()),
-            "body_sig": bool(str(payload_data.get("signature") or "").strip()),
-        },
-    )
 
     if not _prodamus_signature_ok(req, payload_data, PRODAMUS_SECRET_KEY):
-        _agent_debug("H2", "prodamus_webhook:sign", "reject", {})
         logger.warning("Prodamus webhook rejected: invalid sign")
         raise HTTPException(status_code=401, detail="Unauthorized")
 
@@ -985,7 +951,7 @@ async def prodamus_webhook(req: Request, db: Session = Depends(get_db)) -> OkRes
         if val and val not in order_candidates:
             order_candidates.append(val)
     status_raw = str(payload_data.get("payment_status") or "").strip().lower()
-    _agent_debug("H1", "prodamus_webhook:order", "fields", {"candidates": order_candidates, "status": status_raw})
+    logger.info("Prodamus webhook status=%s order_candidates=%s", status_raw, order_candidates)
 
     if status_raw != "success":
         return OkResponse(ok=True)
@@ -996,11 +962,8 @@ async def prodamus_webhook(req: Request, db: Session = Depends(get_db)) -> OkRes
         if sub is not None:
             break
     if sub is None:
-        _agent_debug("H1", "prodamus_webhook:lookup", "miss", {"tried": order_candidates})
         logger.warning("Prodamus: no subscription for tokens=%s", order_candidates)
         return OkResponse(ok=True)
-
-    _agent_debug("H3", "prodamus_webhook:activate", "before", {"subscription_id": sub.id, "tg_id": sub.telegram_id})
 
     try:
         activate_subscription(sub)
