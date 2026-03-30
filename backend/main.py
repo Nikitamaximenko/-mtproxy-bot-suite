@@ -11,7 +11,7 @@ import socket
 import time
 import urllib.error
 import urllib.request
-from urllib.parse import urljoin
+from urllib.parse import quote, urljoin
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
 from typing import Any, AsyncGenerator, Generator, Literal
@@ -856,54 +856,160 @@ async def lava_webhook(req: Request, db: Session = Depends(get_db)) -> OkRespons
     return OkResponse(ok=True)
 
 
+async def _parse_prodamus_webhook_payload(req: Request) -> dict[str, Any]:
+    """Prodamus шлёт JSON или form (urlencoded / multipart)."""
+    ct = (req.headers.get("content-type") or "").lower()
+    if "application/x-www-form-urlencoded" in ct or "multipart/form-data" in ct:
+        try:
+            form = await req.form()
+        except Exception:
+            return {}
+        out: dict[str, Any] = {}
+        for k, v in form.multi_items():
+            if hasattr(v, "read"):
+                try:
+                    raw = await v.read()
+                    out[str(k)] = raw.decode("utf-8", errors="replace")
+                except Exception:
+                    out[str(k)] = str(v)
+            else:
+                out[str(k)] = str(v)
+        return out
+    raw = await req.body()
+    logger.info("Prodamus webhook raw len=%s prefix=%s", len(raw), raw[:120])
+    if not raw or not raw.strip():
+        return {}
+    if raw.strip()[:1] in (b"{", b"["):
+        parsed = json.loads(raw.decode("utf-8"))
+        return parsed if isinstance(parsed, dict) else {}
+    from urllib.parse import parse_qs
+
+    qs = parse_qs(raw.decode("utf-8"), keep_blank_values=True)
+    return {k: (v[0] if v else "") for k, v in qs.items()}
+
+
+def _flatten_prodamus_submit(payload: dict[str, Any]) -> dict[str, Any]:
+    """В JSON-колбэке часто есть вложенный submit — сливаем поля для order_id / payment_status."""
+    out: dict[str, Any] = dict(payload)
+    sub = out.get("submit")
+    if isinstance(sub, str) and sub.strip().startswith("{"):
+        try:
+            sub = json.loads(sub)
+        except json.JSONDecodeError:
+            sub = None
+    if isinstance(sub, dict):
+        for k, v in sub.items():
+            if k not in out or out[k] in ("", None):
+                out[k] = v
+    return out
+
+
+def _prodamus_signature_ok(req: Request, payload: dict[str, Any], secret: str) -> bool:
+    """Подпись: поле signature в теле (весь объект) или заголовок Sign для объекта submit (SDK Prodamus)."""
+    submit = payload.get("submit")
+    if isinstance(submit, str) and submit.strip().startswith("{"):
+        try:
+            submit = json.loads(submit)
+        except json.JSONDecodeError:
+            submit = None
+    header_sign = (req.headers.get("Sign") or req.headers.get("sign") or "").strip()
+    if isinstance(submit, dict) and header_sign:
+        cand = {k: v for k, v in submit.items() if k != "signature"}
+        expected = _prodamus_sign(cand, secret)
+        if hmac.compare_digest(expected, header_sign):
+            return True
+    got = str(payload.get("signature") or "").strip()
+    if got:
+        data_for_sign = {k: v for k, v in payload.items() if k != "signature"}
+        expected = _prodamus_sign(data_for_sign, secret)
+        if hmac.compare_digest(expected, got):
+            return True
+    return False
+
+
 @app.post("/webhooks/prodamus", response_model=OkResponse)
 async def prodamus_webhook(req: Request, db: Session = Depends(get_db)) -> OkResponse:
-    raw_body = await req.body()
-    logger.info("Prodamus webhook received: body=%s", raw_body[:500])
+    # #region agent log
+    _AGENT_LOG = "/Users/nikitamaximenko/mtproxy-bot-suite/.cursor/debug-5f0ad3.log"
+
+    def _agent_debug(hypothesis_id: str, location: str, message: str, data: dict[str, Any]) -> None:
+        line_obj = {
+            "sessionId": "5f0ad3",
+            "hypothesisId": hypothesis_id,
+            "location": location,
+            "message": message,
+            "data": data,
+            "timestamp": int(time.time() * 1000),
+        }
+        try:
+            with open(_AGENT_LOG, "a", encoding="utf-8") as _df:
+                _df.write(json.dumps(line_obj, ensure_ascii=False) + "\n")
+        except Exception:
+            pass
+        logger.info("AGENT_DEBUG %s", json.dumps(line_obj, ensure_ascii=False)[:1800])
+
+    # #endregion
 
     if not PRODAMUS_SECRET_KEY:
         logger.warning("PRODAMUS_SECRET_KEY not set — rejecting webhook")
         raise HTTPException(status_code=401, detail="Webhook authentication not configured")
 
-    # Парсим JSON
     try:
-        payload_data = json.loads(raw_body.decode("utf-8"))
-    except Exception as e:
-        logger.warning("Prodamus webhook: failed to parse JSON: %s", e)
-        raise HTTPException(status_code=400, detail="Invalid JSON")
+        payload_raw = await _parse_prodamus_webhook_payload(req)
+    except json.JSONDecodeError as e:
+        _agent_debug("H2", "prodamus_webhook:parse", "json_error", {"err": str(e)})
+        raise HTTPException(status_code=400, detail="Invalid JSON") from e
 
-    # Извлекаем подпись из тела (не из заголовка)
-    got_sign = str(payload_data.get("signature") or "").strip()
+    payload_data = _flatten_prodamus_submit(payload_raw)
+    keys_preview = list(payload_data.keys())[:35]
+    _agent_debug(
+        "H1",
+        "prodamus_webhook:parsed",
+        "keys",
+        {
+            "keys": keys_preview,
+            "has_submit_key": "submit" in payload_raw,
+            "header_sign": bool((req.headers.get("Sign") or req.headers.get("sign") or "").strip()),
+            "body_sig": bool(str(payload_data.get("signature") or "").strip()),
+        },
+    )
 
-    # Считаем ожидаемую подпись по данным без поля signature
-    data_for_sign = {k: v for k, v in payload_data.items() if k != "signature"}
-    expected = _prodamus_sign(data_for_sign, PRODAMUS_SECRET_KEY)
-
-    if not hmac.compare_digest(expected, got_sign):
-        logger.warning("Prodamus webhook rejected: invalid sign. expected=%s got=%s", expected[:16], got_sign[:16])
+    if not _prodamus_signature_ok(req, payload_data, PRODAMUS_SECRET_KEY):
+        _agent_debug("H2", "prodamus_webhook:sign", "reject", {})
+        logger.warning("Prodamus webhook rejected: invalid sign")
         raise HTTPException(status_code=401, detail="Unauthorized")
 
-    # Извлекаем поля из JSON
-    order_id = str(payload_data.get("order_num") or "").strip()
-    status = str(payload_data.get("payment_status") or "").strip()
-    logger.info("Prodamus webhook order_id=%s status=%s", order_id or None, status)
+    order_candidates: list[str] = []
+    for key in ("order_num", "order_id"):
+        val = str(payload_data.get(key) or "").strip()
+        if val and val not in order_candidates:
+            order_candidates.append(val)
+    status_raw = str(payload_data.get("payment_status") or "").strip().lower()
+    _agent_debug("H1", "prodamus_webhook:order", "fields", {"candidates": order_candidates, "status": status_raw})
 
-    if status != "success" or not order_id:
+    if status_raw != "success":
         return OkResponse(ok=True)
 
-    sub = db.execute(select(Subscription).where(Subscription.payment_token == order_id)).scalar_one_or_none()
+    sub: Subscription | None = None
+    for ref in order_candidates:
+        sub = db.execute(select(Subscription).where(Subscription.payment_token == ref)).scalar_one_or_none()
+        if sub is not None:
+            break
     if sub is None:
-        logger.warning("Prodamus: no subscription for order_id=%s", order_id)
+        _agent_debug("H1", "prodamus_webhook:lookup", "miss", {"tried": order_candidates})
+        logger.warning("Prodamus: no subscription for tokens=%s", order_candidates)
         return OkResponse(ok=True)
+
+    _agent_debug("H3", "prodamus_webhook:activate", "before", {"subscription_id": sub.id, "tg_id": sub.telegram_id})
 
     try:
         activate_subscription(sub)
     except RuntimeError as e:
-        logger.error("Prodamus activate_subscription failed order_id=%s: %s", order_id, e)
-        raise HTTPException(status_code=503, detail=str(e))
+        logger.error("Prodamus activate_subscription failed: %s", e)
+        raise HTTPException(status_code=503, detail=str(e)) from e
 
     db.commit()
-    logger.info("Prodamus subscription activated tg_id=%s order_id=%s", sub.telegram_id, order_id)
+    logger.info("Prodamus subscription activated tg_id=%s token=%s", sub.telegram_id, sub.payment_token)
 
     proxy_link = f"tg://proxy?server={sub.proxy_server}&port={sub.proxy_port}&secret={sub.proxy_secret}"
     _notify_payment_success(sub.telegram_id, proxy_link)
@@ -1034,7 +1140,12 @@ def checkout_create_prodamus(payload: ProdamusCheckoutRequest, db: Session = Dep
         "do": "link",
         "sys": "meetingai",
         "callbackType": "json",
-        "urlSuccess": f"{FRONTEND_URL}/success?token={token}" if FRONTEND_URL else "",
+        "urlSuccess": (
+            f"{FRONTEND_URL}/success?token={token}"
+            + (f"&email={quote(customer_email)}" if (FRONTEND_URL and customer_email) else "")
+            if FRONTEND_URL
+            else ""
+        ),
     }
     if customer_email:
         sign_data["customer_email"] = customer_email

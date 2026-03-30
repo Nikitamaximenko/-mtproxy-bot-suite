@@ -63,13 +63,30 @@ export default function SuccessPage() {
       attempts++
       try {
         const data = await fetchStatus(query)
-        if (data.active && data.proxy_link) {
-          handleFound(data.proxy_link)
-          return
+        // Оплата подтверждена в БД; прокси может появиться на следующем опросе (гонка с вебхуком).
+        if (data.active) {
+          if (data.proxy_link) {
+            handleFound(data.proxy_link)
+            return
+          }
         }
       } catch {}
       if (attempts >= MAX) {
         stopPolling()
+        try {
+          const last = await fetchStatus(query)
+          if (last.active && last.proxy_link) {
+            handleFound(last.proxy_link)
+            return
+          }
+          if (last.active && !last.proxy_link) {
+            setPhase("done")
+            setProxyLink(null)
+            return
+          }
+        } catch {
+          /* fallthrough */
+        }
         setPhase("not_found")
       }
     }
@@ -90,9 +107,14 @@ export default function SuccessPage() {
     setPhase("checking")
     try {
       const data = await fetchStatus(`email=${encodeURIComponent(trimmed)}`)
-      if (data.active && data.proxy_link) {
+      if (data.active) {
         localStorage.setItem("frosty_email", trimmed)
-        handleFound(data.proxy_link)
+        if (data.proxy_link) {
+          handleFound(data.proxy_link)
+        } else {
+          setPhase("done")
+          setProxyLink(null)
+        }
       } else {
         setPhase("not_found")
         setEmailError("Подписка не найдена. Проверьте email или подождите пару минут.")
@@ -190,42 +212,50 @@ export default function SuccessPage() {
         )}
 
         {/* ── DONE ── */}
-        {phase === "done" && proxyLink && (
+        {phase === "done" && (
           <>
             <div style={{ fontSize: "48px", marginBottom: "16px" }}>✅</div>
             <h1 style={{ fontSize: "24px", fontWeight: 700, color: "#111827", marginBottom: "8px" }}>Прокси готов!</h1>
-            <p style={{ color: "#6B7280", fontSize: "14px", marginBottom: "24px", lineHeight: "1.5" }}>
-              Нажмите кнопку — Telegram откроется и предложит добавить прокси
-            </p>
-            <a
-              href={proxyLink}
-              style={{
-                display: "block", background: "#2AABEE", color: "#FFFFFF",
-                height: "56px", borderRadius: "14px", fontSize: "17px", fontWeight: 700,
-                textDecoration: "none", lineHeight: "56px", marginBottom: "12px",
-              }}
-            >
-              Подключить прокси в Telegram →
-            </a>
-            <button
-              onClick={copy}
-              style={{
-                width: "100%", background: "#F7F8FA", color: "#374151",
-                height: "48px", borderRadius: "14px", fontSize: "15px",
-                border: "1px solid #E5E7EB", cursor: "pointer", marginBottom: "24px",
-              }}
-            >
-              {copied ? "✅ Скопировано!" : "Скопировать ссылку"}
-            </button>
-            <div style={{ background: "#F7F8FA", borderRadius: "16px", padding: "16px", marginBottom: "24px", textAlign: "left" }}>
-              <p style={{ fontSize: "13px", fontWeight: 600, color: "#111827", marginBottom: "8px" }}>Инструкция:</p>
-              <p style={{ fontSize: "13px", color: "#6B7280", lineHeight: "1.7" }}>
-                1. Нажмите «Подключить прокси в Telegram»<br />
-                2. Telegram откроется автоматически<br />
-                3. Нажмите «Добавить» в появившемся окне<br />
-                4. Готово — Telegram работает без ограничений
+            {proxyLink ? (
+              <>
+                <p style={{ color: "#6B7280", fontSize: "14px", marginBottom: "24px", lineHeight: "1.5" }}>
+                  Нажмите кнопку — Telegram откроется и предложит добавить прокси
+                </p>
+                <a
+                  href={proxyLink}
+                  style={{
+                    display: "block", background: "#2AABEE", color: "#FFFFFF",
+                    height: "56px", borderRadius: "14px", fontSize: "17px", fontWeight: 700,
+                    textDecoration: "none", lineHeight: "56px", marginBottom: "12px",
+                  }}
+                >
+                  Подключить прокси в Telegram →
+                </a>
+                <button
+                  onClick={copy}
+                  style={{
+                    width: "100%", background: "#F7F8FA", color: "#374151",
+                    height: "48px", borderRadius: "14px", fontSize: "15px",
+                    border: "1px solid #E5E7EB", cursor: "pointer", marginBottom: "24px",
+                  }}
+                >
+                  {copied ? "✅ Скопировано!" : "Скопировать ссылку"}
+                </button>
+                <div style={{ background: "#F7F8FA", borderRadius: "16px", padding: "16px", marginBottom: "24px", textAlign: "left" }}>
+                  <p style={{ fontSize: "13px", fontWeight: 600, color: "#111827", marginBottom: "8px" }}>Инструкция:</p>
+                  <p style={{ fontSize: "13px", color: "#6B7280", lineHeight: "1.7" }}>
+                    1. Нажмите «Подключить прокси в Telegram»<br />
+                    2. Telegram откроется автоматически<br />
+                    3. Нажмите «Добавить» в появившемся окне<br />
+                    4. Готово — Telegram работает без ограничений
+                  </p>
+                </div>
+              </>
+            ) : (
+              <p style={{ color: "#6B7280", fontSize: "14px", marginBottom: "24px", lineHeight: "1.5" }}>
+                Подписка активирована. Откройте бота и нажмите /start — там появится ссылка на прокси, или обновите эту страницу через минуту.
               </p>
-            </div>
+            )}
             <a
               href={`https://t.me/frostytg_bot?start=sub_${token || ""}`}
               style={{
