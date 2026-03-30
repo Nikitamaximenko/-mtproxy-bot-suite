@@ -57,7 +57,7 @@ export default function SuccessPage() {
       : `email=${encodeURIComponent(email!)}`
 
     let attempts = 0
-    const MAX = 20 // ~60 сек
+    const MAX = 45 // ~2 мин — вебхук Prodamus иногда с задержкой
 
     const check = async () => {
       attempts++
@@ -145,7 +145,9 @@ export default function SuccessPage() {
             <div style={{ fontSize: "48px", marginBottom: "16px" }}>❄️</div>
             <h1 style={{ fontSize: "24px", fontWeight: 700, color: "#111827", marginBottom: "8px" }}>Проверяем оплату…</h1>
             <p style={{ color: "#6B7280", fontSize: "15px", lineHeight: "1.5" }}>
-              Обычно занимает несколько секунд.<br />Не закрывайте страницу.
+              Обычно несколько секунд, иногда до 1–2 минут (пока банк подтвердит оплату и дойдёт уведомление).
+              <br />
+              Не закрывайте страницу — можно ввести email ниже, если таймер истёк.
             </p>
             <div style={{ marginTop: "32px", display: "flex", justifyContent: "center", gap: "6px" }}>
               {[0, 1, 2].map(i => (

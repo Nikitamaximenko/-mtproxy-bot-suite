@@ -7,6 +7,7 @@ import html
 import json
 import logging
 import os
+import re
 import socket
 import time
 import urllib.error
@@ -19,6 +20,7 @@ from uuid import UUID, uuid4
 
 from dotenv import load_dotenv
 from fastapi import Depends, FastAPI, HTTPException, Query, Request
+from fastapi.responses import PlainTextResponse
 from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import (
     BigInteger,
@@ -75,6 +77,12 @@ PRODAMUS_SECRET_KEY = (os.getenv("PRODAMUS_SECRET_KEY") or "").strip()
 PRODAMUS_PAYMENT_URL = (os.getenv("PRODAMUS_PAYMENT_URL") or "https://admaster.payform.ru/").strip()
 # Второй поток оплаты (Prodamus / СБП). Пока выключен — не создаём чекаут; вебхук остаётся для уже начатых оплат.
 ENABLE_PRODAMUS_CHECKOUT = (os.getenv("ENABLE_PRODAMUS_CHECKOUT") or "").strip().lower() in (
+    "1",
+    "true",
+    "yes",
+)
+# Короткая ссылка с do=link иногда приходит отдельным URL без контекста urlSuccess; по умолчанию отдаём полную ссылку.
+PRODAMUS_USE_SHORT_LINK = (os.getenv("PRODAMUS_USE_SHORT_LINK") or "false").strip().lower() in (
     "1",
     "true",
     "yes",
@@ -905,7 +913,7 @@ def _flatten_prodamus_submit(payload: dict[str, Any]) -> dict[str, Any]:
 
 
 def _prodamus_signature_ok(req: Request, payload: dict[str, Any], secret: str) -> bool:
-    """Подпись: поле signature в теле (весь объект) или заголовок Sign для объекта submit (SDK Prodamus)."""
+    """Подпись: поле signature в теле, заголовок Sign + submit, или Sign + плоский POST (как в PHP Hmac::verify)."""
     submit = payload.get("submit")
     if isinstance(submit, str) and submit.strip().startswith("{"):
         try:
@@ -924,11 +932,47 @@ def _prodamus_signature_ok(req: Request, payload: dict[str, Any], secret: str) -
         expected = _prodamus_sign(data_for_sign, secret)
         if hmac.compare_digest(expected, got):
             return True
+    if header_sign:
+        flat = {k: v for k, v in payload.items() if str(k).lower() not in ("signature", "sign")}
+        if flat:
+            expected = _prodamus_sign(flat, secret)
+            if hmac.compare_digest(expected, header_sign):
+                return True
     return False
 
 
-@app.post("/webhooks/prodamus", response_model=OkResponse)
-async def prodamus_webhook(req: Request, db: Session = Depends(get_db)) -> OkResponse:
+_UUID_TOKEN = re.compile(
+    r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}",
+    re.IGNORECASE,
+)
+
+
+def _prodamus_order_refs(payload: dict[str, Any]) -> list[str]:
+    """Идентификаторы заказа для поиска Subscription.payment_token (UUID в БД)."""
+    out: list[str] = []
+    for key in ("order_num", "order_id", "OrderId", "orderNum", "merchant_order_id"):
+        val = str(payload.get(key) or "").strip()
+        if val and val not in out:
+            out.append(val)
+    for val in payload.values():
+        if isinstance(val, str):
+            for m in _UUID_TOKEN.findall(val):
+                if m not in out:
+                    out.append(m)
+    return out
+
+
+def _prodamus_payment_is_success(payload: dict[str, Any]) -> bool:
+    st = str(payload.get("payment_status") or "").strip().lower()
+    if st == "success":
+        return True
+    desc = str(payload.get("payment_status_description") or "").strip().lower()
+    return "успеш" in desc or "успеш" in st
+
+
+@app.post("/webhooks/prodamus")
+async def prodamus_webhook(req: Request, db: Session = Depends(get_db)) -> PlainTextResponse:
+    """Ответ с телом success и кодом 200 — ожидание Prodamus (см. официальный приём вебхука)."""
     if not PRODAMUS_SECRET_KEY:
         logger.warning("PRODAMUS_SECRET_KEY not set — rejecting webhook")
         raise HTTPException(status_code=401, detail="Webhook authentication not configured")
@@ -945,16 +989,11 @@ async def prodamus_webhook(req: Request, db: Session = Depends(get_db)) -> OkRes
         logger.warning("Prodamus webhook rejected: invalid sign")
         raise HTTPException(status_code=401, detail="Unauthorized")
 
-    order_candidates: list[str] = []
-    for key in ("order_num", "order_id"):
-        val = str(payload_data.get(key) or "").strip()
-        if val and val not in order_candidates:
-            order_candidates.append(val)
-    status_raw = str(payload_data.get("payment_status") or "").strip().lower()
-    logger.info("Prodamus webhook status=%s order_candidates=%s", status_raw, order_candidates)
+    order_candidates = _prodamus_order_refs(payload_data)
+    logger.info("Prodamus webhook pay_ok=%s order_candidates=%s", _prodamus_payment_is_success(payload_data), order_candidates)
 
-    if status_raw != "success":
-        return OkResponse(ok=True)
+    if not _prodamus_payment_is_success(payload_data):
+        return PlainTextResponse("success", status_code=200)
 
     sub: Subscription | None = None
     for ref in order_candidates:
@@ -963,7 +1002,7 @@ async def prodamus_webhook(req: Request, db: Session = Depends(get_db)) -> OkRes
             break
     if sub is None:
         logger.warning("Prodamus: no subscription for tokens=%s", order_candidates)
-        return OkResponse(ok=True)
+        return PlainTextResponse("success", status_code=200)
 
     try:
         activate_subscription(sub)
@@ -978,7 +1017,7 @@ async def prodamus_webhook(req: Request, db: Session = Depends(get_db)) -> OkRes
     _notify_payment_success(sub.telegram_id, proxy_link)
     _notify_admin_payment(sub.telegram_id)
 
-    return OkResponse(ok=True)
+    return PlainTextResponse("success", status_code=200)
 
 
 from collections.abc import MutableMapping as _MutableMapping
@@ -1110,6 +1149,11 @@ def checkout_create_prodamus(payload: ProdamusCheckoutRequest, db: Session = Dep
             else ""
         ),
     }
+    # Явный URL уведомлений в запросе (доп. к настройке в кабинете Payform).
+    if PUBLIC_BASE_URL:
+        sign_data["urlNotification"] = f"{PUBLIC_BASE_URL}/webhooks/prodamus"
+    if FRONTEND_URL:
+        sign_data["urlReturn"] = f"{FRONTEND_URL}/mini"
     if customer_email:
         sign_data["customer_email"] = customer_email
     if PRODAMUS_SECRET_KEY:
@@ -1118,18 +1162,19 @@ def checkout_create_prodamus(payload: ProdamusCheckoutRequest, db: Session = Dep
     query = _urlencode(_http_build_query(sign_data))
     payform_url = f"https://admaster.payform.ru/?{query}"
 
-    # Prodamus returns a short link in the response body when do=link
+    # Ответ do=link может быть короткой ссылкой; она иногда теряет контекст редиректа urlSuccess — по умолчанию полная ссылка.
     short_link = payform_url
-    try:
-        req = urllib.request.Request(payform_url, headers={"User-Agent": "Mozilla/5.0"})
-        with urllib.request.urlopen(req, timeout=10) as resp:
-            body = resp.read().decode("utf-8").strip()
-        if body.startswith("http"):
-            short_link = body
-        else:
-            logger.warning("Prodamus unexpected response tg_id=%s: %s", tg_id, body[:200])
-    except Exception as e:
-        logger.error("Prodamus link request failed tg_id=%s: %s", tg_id, e)
+    if PRODAMUS_USE_SHORT_LINK:
+        try:
+            req = urllib.request.Request(payform_url, headers={"User-Agent": "Mozilla/5.0"})
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                body = resp.read().decode("utf-8").strip()
+            if body.startswith("http"):
+                short_link = body
+            else:
+                logger.warning("Prodamus unexpected response tg_id=%s: %s", tg_id, body[:200])
+        except Exception as e:
+            logger.error("Prodamus link request failed tg_id=%s: %s", tg_id, e)
 
     logger.info("Prodamus short_link for tg_id=%s: %s", tg_id, short_link)
     return ProdamusCheckoutResponse(payment_url=short_link, payment_token=token)
