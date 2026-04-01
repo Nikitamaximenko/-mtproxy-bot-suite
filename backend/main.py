@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import threading
 import hmac
 import html
 import json
@@ -1409,35 +1410,76 @@ class BroadcastRequest(BaseModel):
     button_url: str | None = Field(None, max_length=2048)
 
 
-class BroadcastResponse(BaseModel):
+class BroadcastQueuedResponse(BaseModel):
     ok: bool
+    queued: bool
+    total: int   # сколько получателей поставлено в очередь
+
+
+class BroadcastStatusResponse(BaseModel):
+    running: bool
+    done: bool
     total: int
     sent: int
     failed: int
+    error: str | None
+    started_at: str | None
 
 
-@app.post("/admin/broadcast", response_model=BroadcastResponse)
-def admin_broadcast(payload: BroadcastRequest, req: Request, db: Session = Depends(get_db)) -> BroadcastResponse:
+# --- Глобальное состояние фоновой рассылки (один процесс Railway) ---
+_bcast_lock = threading.Lock()
+_bcast_state: dict = {
+    "running": False, "done": False,
+    "total": 0, "sent": 0, "failed": 0,
+    "error": None, "started_at": None,
+}
+
+
+def _broadcast_worker(ids: list[int], msg: str, kb: dict | None) -> None:
+    with _bcast_lock:
+        _bcast_state.update(running=True, done=False, total=len(ids),
+                            sent=0, failed=0, error=None,
+                            started_at=utcnow().isoformat())
+    logger.info("Broadcast worker started: %s recipients", len(ids))
+    try:
+        for uid in ids:
+            ok = _send_tg(uid, msg, kb)
+            with _bcast_lock:
+                if ok:
+                    _bcast_state["sent"] += 1
+                else:
+                    _bcast_state["failed"] += 1
+            time.sleep(0.05)  # ~20 msg/s, мягче к лимитам Telegram
+    except Exception as exc:
+        with _bcast_lock:
+            _bcast_state["error"] = str(exc)
+        logger.exception("Broadcast worker error: %s", exc)
+    finally:
+        with _bcast_lock:
+            _bcast_state["running"] = False
+            _bcast_state["done"] = True
+        logger.info("Broadcast worker done: sent=%s failed=%s",
+                    _bcast_state["sent"], _bcast_state["failed"])
+
+
+@app.post("/admin/broadcast", response_model=BroadcastQueuedResponse)
+def admin_broadcast(payload: BroadcastRequest, req: Request, db: Session = Depends(get_db)) -> BroadcastQueuedResponse:
     """
-    Рассылка HTML-текста всем пользователям из таблицы users (по telegram_id).
-    Заголовок: x-admin-key. Лимит Telegram на сообщение — 4096 символов.
-    По умолчанию исключаются пользователи с marketing_opt_out (см. include_opted_out).
+    Ставит рассылку в очередь (фоновый поток) и сразу возвращает ответ.
+    Статус отслеживать через GET /admin/broadcast-status.
     """
     _require_admin(req)
     if not BOT_TOKEN:
         raise HTTPException(status_code=503, detail="BOT_TOKEN is not configured on backend")
 
-    total_count = db.execute(select(func.count()).select_from(User)).scalar() or 0
-    opted_out_count = (
-        db.execute(select(func.count()).select_from(User).where(User.marketing_opt_out == True)).scalar() or 0  # noqa: E712
-    )
-    logger.info("All users count=%s, opted_out_excluded=%s", total_count, opted_out_count)
+    with _bcast_lock:
+        if _bcast_state["running"]:
+            raise HTTPException(status_code=409, detail="Рассылка уже выполняется — дождитесь завершения")
 
-    q = select(User.telegram_id).where(User.telegram_id > 0)  # skip web users (negative ids)
+    q = select(User.telegram_id).where(User.telegram_id > 0)
     if not payload.include_opted_out:
         q = q.where(User.marketing_opt_out == False)  # noqa: E712
     rows = db.execute(q).scalars().all()
-    # Уникальные id, стабильный порядок
     seen: set[int] = set()
     ids: list[int] = []
     for raw in rows:
@@ -1446,32 +1488,26 @@ def admin_broadcast(payload: BroadcastRequest, req: Request, db: Session = Depen
             seen.add(uid)
             ids.append(uid)
 
-    logger.info("Broadcast ids (first 10): %s", ids[:10])
+    logger.info("Broadcast queued: %s recipients", len(ids))
 
     msg = payload.message.strip()
     kb: dict | None = None
     if payload.button_text and payload.button_url:
         kb = {"inline_keyboard": [[{"text": payload.button_text, "url": payload.button_url}]]}
 
-    logger.info(
-        "Broadcast started: total_recipients=%s include_opted_out=%s has_button=%s",
-        len(ids), payload.include_opted_out, kb is not None,
-    )
+    t = threading.Thread(target=_broadcast_worker, args=(ids, msg, kb), daemon=True)
+    t.start()
 
-    sent = 0
-    failed = 0
-    for uid in ids:
-        ok = _send_tg(uid, msg, kb)
-        if ok:
-            sent += 1
-            logger.info("Broadcast sent tg_id=%s (%s/%s)", uid, sent + failed, len(ids))
-        else:
-            failed += 1
-            logger.info("Broadcast failed tg_id=%s (%s/%s)", uid, sent + failed, len(ids))
-        time.sleep(0.05)  # ~20 msg/s, мягче к лимитам Telegram
+    return BroadcastQueuedResponse(ok=True, queued=True, total=len(ids))
 
-    logger.info("Broadcast finished total=%s sent=%s failed=%s", len(ids), sent, failed)
-    return BroadcastResponse(ok=True, total=len(ids), sent=sent, failed=failed)
+
+@app.get("/admin/broadcast-status", response_model=BroadcastStatusResponse)
+def admin_broadcast_status(req: Request) -> BroadcastStatusResponse:
+    """Текущий статус фоновой рассылки."""
+    _require_admin(req)
+    with _bcast_lock:
+        s = dict(_bcast_state)
+    return BroadcastStatusResponse(**s)
 
 
 @app.post("/admin/deactivate/{telegram_id}", response_model=OkResponse)

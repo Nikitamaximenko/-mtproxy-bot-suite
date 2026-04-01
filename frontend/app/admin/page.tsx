@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useEffect, useState } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
 
 type RefStat = {
   source: string
@@ -187,7 +187,10 @@ export default function AdminPage() {
     total: number
     sent: number
     failed: number
+    done: boolean
+    error: string | null
   } | null>(null)
+  const broadcastPollRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const [buttonEnabled, setButtonEnabled] = useState(false)
   const [buttonText, setButtonText] = useState("")
   const [buttonUrl, setButtonUrl] = useState("")
@@ -315,6 +318,32 @@ export default function AdminPage() {
     [fetchAll, headers],
   )
 
+  const stopBroadcastPolling = useCallback(() => {
+    if (broadcastPollRef.current) {
+      clearInterval(broadcastPollRef.current)
+      broadcastPollRef.current = null
+    }
+  }, [])
+
+  const pollBroadcastStatus = useCallback(async () => {
+    try {
+      const res = await fetch("/api/admin/broadcast-status", {
+        headers: headers(),
+        cache: "no-store",
+      })
+      if (!res.ok) return
+      const s = (await res.json()) as {
+        running: boolean; done: boolean; total: number
+        sent: number; failed: number; error: string | null
+      }
+      setBroadcastResult({ total: s.total, sent: s.sent, failed: s.failed, done: s.done, error: s.error })
+      if (s.done || !s.running) {
+        stopBroadcastPolling()
+        setBroadcastBusy(false)
+      }
+    } catch { /* ignore poll errors */ }
+  }, [headers, stopBroadcastPolling])
+
   const sendBroadcast = useCallback(async () => {
     const text = broadcastText.trim()
     if (!text || broadcastRecipientEstimate === null || broadcastRecipientEstimate === 0) return
@@ -327,16 +356,14 @@ export default function AdminPage() {
     )
     if (!ok) return
 
+    stopBroadcastPolling()
     setBroadcastBusy(true)
     setBroadcastResult(null)
     setError("")
     try {
       const res = await fetch("/api/admin/broadcast", {
         method: "POST",
-        headers: {
-          ...headers(),
-          "Content-Type": "application/json",
-        },
+        headers: { ...headers(), "Content-Type": "application/json" },
         body: JSON.stringify({
           message: text,
           include_opted_out: includeOptedOut,
@@ -347,36 +374,23 @@ export default function AdminPage() {
         cache: "no-store",
       })
       const data = (await res.json().catch(() => ({}))) as {
-        detail?: string
-        total?: number
-        sent?: number
-        failed?: number
+        detail?: string; ok?: boolean; queued?: boolean; total?: number
       }
       if (!res.ok) {
         throw new Error(typeof data.detail === "string" ? data.detail : `Ошибка ${res.status}`)
       }
-      if (
-        typeof data.total !== "number" ||
-        typeof data.sent !== "number" ||
-        typeof data.failed !== "number"
-      ) {
-        throw new Error("Некорректный ответ сервера")
-      }
-      setBroadcastResult({ total: data.total, sent: data.sent, failed: data.failed })
+      // Рассылка поставлена в очередь — поллинг статуса каждые 2 сек
+      setBroadcastResult({ total: data.total ?? 0, sent: 0, failed: 0, done: false, error: null })
       setBroadcastText("")
+      broadcastPollRef.current = setInterval(() => void pollBroadcastStatus(), 2000)
+      void pollBroadcastStatus()
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Не удалось отправить рассылку")
-    } finally {
+      setError(e instanceof Error ? e.message : "Не удалось запустить рассылку")
       setBroadcastBusy(false)
     }
   }, [
-    broadcastRecipientEstimate,
-    broadcastText,
-    buttonEnabled,
-    buttonText,
-    buttonUrl,
-    headers,
-    includeOptedOut,
+    broadcastRecipientEstimate, broadcastText, buttonEnabled, buttonText, buttonUrl,
+    headers, includeOptedOut, pollBroadcastStatus, stopBroadcastPolling,
   ])
 
   const cleanupWebUsers = useCallback(async () => {
@@ -848,7 +862,7 @@ export default function AdminPage() {
                 />
               </div>
             )}
-            <div className="flex flex-wrap items-center gap-3">
+            <div className="space-y-3">
               <button
                 type="button"
                 onClick={() => void sendBroadcast()}
@@ -860,20 +874,44 @@ export default function AdminPage() {
                 }
                 className="px-5 py-2.5 text-sm font-semibold rounded-xl bg-violet-600 text-white hover:bg-violet-500 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
               >
-                {broadcastBusy ? "Отправка…" : "Отправить рассылку"}
+                {broadcastBusy ? "Отправляем…" : "Отправить рассылку"}
               </button>
-              {broadcastResult ? (
-                <span className="text-sm text-gray-400">
-                  Готово: отправлено <strong className="text-emerald-400">{broadcastResult.sent}</strong> из{" "}
-                  <strong className="text-white">{broadcastResult.total}</strong>
-                  {broadcastResult.failed > 0 ? (
-                    <>
-                      , ошибок:{" "}
-                      <strong className="text-red-400">{broadcastResult.failed}</strong>
-                    </>
-                  ) : null}
-                </span>
-              ) : null}
+
+              {broadcastResult && (
+                <div className="space-y-2">
+                  {/* Progress bar */}
+                  {broadcastResult.total > 0 && (
+                    <div className="space-y-1">
+                      <div className="flex justify-between text-xs text-gray-400">
+                        <span>
+                          {broadcastResult.done ? "Готово" : "Отправляем…"}{" "}
+                          <span className="text-emerald-400 font-mono">{broadcastResult.sent}</span>
+                          {" / "}
+                          <span className="font-mono">{broadcastResult.total}</span>
+                        </span>
+                        {broadcastResult.failed > 0 && (
+                          <span className="text-red-400">ошибок: {broadcastResult.failed}</span>
+                        )}
+                      </div>
+                      <div className="h-2 bg-gray-800 rounded-full overflow-hidden">
+                        <div
+                          className={`h-full rounded-full transition-all duration-500 ${broadcastResult.done ? "bg-emerald-500" : "bg-violet-500"}`}
+                          style={{ width: `${Math.round(((broadcastResult.sent + broadcastResult.failed) / broadcastResult.total) * 100)}%` }}
+                        />
+                      </div>
+                    </div>
+                  )}
+                  {broadcastResult.error && (
+                    <p className="text-xs text-red-400">Ошибка: {broadcastResult.error}</p>
+                  )}
+                  {broadcastResult.done && !broadcastResult.error && (
+                    <p className="text-xs text-emerald-400">
+                      Рассылка завершена: {broadcastResult.sent} доставлено
+                      {broadcastResult.failed > 0 ? `, ${broadcastResult.failed} не доставлено (бот заблокирован)` : ""}
+                    </p>
+                  )}
+                </div>
+              )}
             </div>
           </div>
         </section>
