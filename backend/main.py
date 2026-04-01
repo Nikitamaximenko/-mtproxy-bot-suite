@@ -1163,7 +1163,8 @@ def checkout_create_prodamus(payload: ProdamusCheckoutRequest, db: Session = Dep
 
     from urllib.parse import urlencode as _urlencode
 
-    sign_data: dict = {
+    # Base params shared between both URL variants
+    base_params: dict = {
         "order_id": str(token),
         "products": [
             {
@@ -1172,7 +1173,6 @@ def checkout_create_prodamus(payload: ProdamusCheckoutRequest, db: Session = Dep
                 "quantity": "1",
             }
         ],
-        "do": "link",
         "sys": "meetingai",
         "callbackType": "json",
         "urlSuccess": (
@@ -1182,35 +1182,46 @@ def checkout_create_prodamus(payload: ProdamusCheckoutRequest, db: Session = Dep
             else ""
         ),
     }
-    # Явный URL уведомлений в запросе (доп. к настройке в кабинете Payform).
     if PUBLIC_BASE_URL:
-        sign_data["urlNotification"] = f"{PUBLIC_BASE_URL}/webhooks/prodamus"
+        base_params["urlNotification"] = f"{PUBLIC_BASE_URL}/webhooks/prodamus"
     if FRONTEND_URL:
-        sign_data["urlReturn"] = f"{FRONTEND_URL}/mini"
+        base_params["urlReturn"] = f"{FRONTEND_URL}/mini"
     if customer_email:
-        sign_data["customer_email"] = customer_email
+        base_params["customer_email"] = customer_email
+
+    # ── Step 1: get short link via server-side do=link call ──────────────────
+    # do=link tells Prodamus to return a plain-text shortlink instead of rendering
+    # the payment form — ONLY correct for server-to-server calls, not browser navigation.
+    link_params = {**base_params, "do": "link"}
     if PRODAMUS_SECRET_KEY:
-        sign_data["signature"] = _prodamus_sign(sign_data, PRODAMUS_SECRET_KEY)
+        link_params["signature"] = _prodamus_sign(link_params, PRODAMUS_SECRET_KEY)
+    link_query = _urlencode(_http_build_query(link_params))
+    link_api_url = f"https://admaster.payform.ru/?{link_query}"
 
-    query = _urlencode(_http_build_query(sign_data))
-    payform_url = f"https://admaster.payform.ru/?{query}"
+    payment_url: str | None = None
+    try:
+        req_obj = urllib.request.Request(link_api_url, headers={"User-Agent": "Mozilla/5.0"})
+        with urllib.request.urlopen(req_obj, timeout=10) as resp:
+            body = resp.read().decode("utf-8").strip()
+        if body.startswith("http"):
+            payment_url = body
+            logger.info("Prodamus short link ok tg_id=%s url=%s", tg_id, payment_url)
+        else:
+            logger.warning("Prodamus unexpected do=link response tg_id=%s: %s", tg_id, body[:300])
+    except Exception as e:
+        logger.error("Prodamus do=link request failed tg_id=%s: %s", tg_id, e)
 
-    # Ответ do=link может быть короткой ссылкой; она иногда теряет контекст редиректа urlSuccess — по умолчанию полная ссылка.
-    short_link = payform_url
-    if PRODAMUS_USE_SHORT_LINK:
-        try:
-            req = urllib.request.Request(payform_url, headers={"User-Agent": "Mozilla/5.0"})
-            with urllib.request.urlopen(req, timeout=10) as resp:
-                body = resp.read().decode("utf-8").strip()
-            if body.startswith("http"):
-                short_link = body
-            else:
-                logger.warning("Prodamus unexpected response tg_id=%s: %s", tg_id, body[:200])
-        except Exception as e:
-            logger.error("Prodamus link request failed tg_id=%s: %s", tg_id, e)
+    # ── Step 2: fallback — direct payment URL without do=link ────────────────
+    # Without do=link the URL opens the payment form directly in a browser — safe to navigate to.
+    if not payment_url:
+        direct_params = dict(base_params)  # no "do" key
+        if PRODAMUS_SECRET_KEY:
+            direct_params["signature"] = _prodamus_sign(direct_params, PRODAMUS_SECRET_KEY)
+        direct_query = _urlencode(_http_build_query(direct_params))
+        payment_url = f"https://admaster.payform.ru/?{direct_query}"
+        logger.info("Prodamus using direct URL fallback tg_id=%s", tg_id)
 
-    logger.info("Prodamus short_link for tg_id=%s: %s", tg_id, short_link)
-    return ProdamusCheckoutResponse(payment_url=short_link, payment_token=token)
+    return ProdamusCheckoutResponse(payment_url=payment_url, payment_token=token)
 
 
 class SubscriptionResponse(BaseModel):
