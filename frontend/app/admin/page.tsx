@@ -52,19 +52,32 @@ type UsersOverview = {
   users_table_total: number
 }
 
+type SourceStat = {
+  source: string | null
+  users: number
+  paid: number
+}
+
 type FunnelStats = {
-  users_total: number
-  checkout_started: number
-  payment_link_generated: number
-  payments_completed: number
+  // TG funnel (unique users, tg_id > 0)
+  tg_users: number
+  tg_checkout: number
+  tg_payment_link: number
+  tg_paid: number
   active_now: number
-  users_7d: number
-  checkout_started_7d: number
-  payment_link_generated_7d: number
-  payments_completed_7d: number
+  tg_users_7d: number
+  tg_checkout_7d: number
+  tg_paid_7d: number
+  // Web users
+  web_users: number
+  web_paid: number
+  // Source breakdown
+  source_stats: SourceStat[]
+  // Engagement
   nudge_1_sent: number
   nudge_2_sent: number
   nudge_3_sent: number
+  nudge_converted: number
   opted_out: number
 }
 
@@ -178,6 +191,8 @@ export default function AdminPage() {
   const [buttonEnabled, setButtonEnabled] = useState(false)
   const [buttonText, setButtonText] = useState("")
   const [buttonUrl, setButtonUrl] = useState("")
+  const [cleanupBusy, setCleanupBusy] = useState(false)
+  const [cleanupResult, setCleanupResult] = useState<{ deleted_users: number; deleted_pending_subscriptions: number; kept_paid_subscriptions: number } | null>(null)
   const ADMIN_TG_ID = 231115635
 
   const broadcastRecipientEstimate =
@@ -364,6 +379,43 @@ export default function AdminPage() {
     includeOptedOut,
   ])
 
+  const cleanupWebUsers = useCallback(async () => {
+    const ok = window.confirm(
+      "Удалить всех веб-пользователей (telegram_id < 0) и их pending-подписки?\n" +
+        "Paid/expired подписки сохранятся. Это необратимо."
+    )
+    if (!ok) return
+    setCleanupBusy(true)
+    setCleanupResult(null)
+    setError("")
+    try {
+      const res = await fetch("/api/admin/cleanup-web-users", {
+        method: "DELETE",
+        headers: headers(),
+        cache: "no-store",
+      })
+      const data = (await res.json().catch(() => ({}))) as {
+        detail?: string
+        deleted_users?: number
+        deleted_pending_subscriptions?: number
+        kept_paid_subscriptions?: number
+      }
+      if (!res.ok) {
+        throw new Error(typeof data.detail === "string" ? data.detail : `Ошибка ${res.status}`)
+      }
+      setCleanupResult({
+        deleted_users: data.deleted_users ?? 0,
+        deleted_pending_subscriptions: data.deleted_pending_subscriptions ?? 0,
+        kept_paid_subscriptions: data.kept_paid_subscriptions ?? 0,
+      })
+      await fetchAll()
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Не удалось выполнить очистку")
+    } finally {
+      setCleanupBusy(false)
+    }
+  }, [fetchAll, headers])
+
   /** Один раз при монтировании: пробуем ключ из localStorage и не показываем форму входа до проверки */
   useEffect(() => {
     let cancelled = false
@@ -534,14 +586,14 @@ export default function AdminPage() {
         </section>
 
         <section>
-          <h2 className="text-lg font-semibold mb-4 text-gray-300">Аналитика</h2>
-          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
+          <h2 className="text-lg font-semibold mb-4 text-gray-300">Сводка</h2>
+          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4">
             {[
-              { label: "Пользователей", value: stats?.total_users ?? "—", color: "text-blue-400" },
               {
-                label: "В таблице users",
-                value: overview?.users_table_total ?? "—",
-                color: "text-cyan-400",
+                label: "Пользователей бота",
+                value: stats?.tg_users ?? "—",
+                sub: stats ? `+ ${stats.total_users - stats.tg_users} веб` : undefined,
+                color: "text-blue-400",
               },
               { label: "Активных подписок", value: stats?.active_subscriptions ?? "—", color: "text-emerald-400" },
               { label: "Истекших", value: stats?.expired_subscriptions ?? "—", color: "text-orange-400" },
@@ -551,10 +603,11 @@ export default function AdminPage() {
                 value: stats ? `${stats.revenue_estimate.toLocaleString("ru-RU")} ₽` : "—",
                 color: "text-green-400",
               },
-            ].map(({ label, value, color }) => (
+            ].map(({ label, value, sub, color }) => (
               <div key={label} className="bg-gray-900 border border-gray-800 rounded-2xl p-5">
                 <div className="text-xs text-gray-400 mb-1">{label}</div>
                 <div className={`text-2xl font-bold ${color}`}>{value}</div>
+                {sub && <div className="text-xs text-gray-600 mt-1">{sub}</div>}
               </div>
             ))}
           </div>
@@ -562,45 +615,59 @@ export default function AdminPage() {
 
         {funnel && (
           <section>
-            <h2 className="text-lg font-semibold mb-1 text-gray-300">Воронка CJM</h2>
+            <h2 className="text-lg font-semibold mb-1 text-gray-300">Воронка (уникальные пользователи)</h2>
             <p className="text-xs text-gray-500 mb-4">
-              Конверсия по шагам Customer Journey Map. В скобках — за последние 7 дней.
+              Только реальные Telegram-пользователи (tg_id &gt; 0), дедуплицированы по telegram_id. % — конверсия к предыдущему шагу.
             </p>
             <div className="bg-gray-900 border border-gray-800 rounded-2xl p-6 space-y-3">
               {(() => {
-                type Step = { label: string; total: number; week: number | null }
+                type Step = { label: string; hint: string; total: number; week: number | null }
                 const steps: Step[] = [
-                  { label: "Запустили бота", total: funnel.users_total, week: funnel.users_7d },
-                  { label: "Открыли оплату (email)", total: funnel.checkout_started, week: funnel.checkout_started_7d },
-                  { label: "Получили ссылку Lava", total: funnel.payment_link_generated, week: funnel.payment_link_generated_7d },
-                  { label: "Оплатили", total: funnel.payments_completed, week: funnel.payments_completed_7d },
-                  { label: "Активны сейчас", total: funnel.active_now, week: null },
+                  { label: "Запустили бота", hint: "уникальных /start", total: funnel.tg_users, week: funnel.tg_users_7d },
+                  { label: "Открыли оформление", hint: "дошли до checkout", total: funnel.tg_checkout, week: funnel.tg_checkout_7d },
+                  { label: "Получили ссылку оплаты", hint: "перешли к Lava", total: funnel.tg_payment_link, week: null },
+                  { label: "Оплатили", hint: "подтверждённых платежей", total: funnel.tg_paid, week: funnel.tg_paid_7d },
+                  { label: "Активны сейчас", hint: "paid + срок не истёк", total: funnel.active_now, week: null },
                 ]
+                // Find the step with the biggest absolute drop (worst conversion)
+                let worstDropIdx = -1
+                let worstDrop = 0
+                for (let i = 1; i < steps.length; i++) {
+                  const drop = steps[i - 1].total - steps[i].total
+                  if (drop > worstDrop) { worstDrop = drop; worstDropIdx = i }
+                }
                 return steps.map((step, i) => {
                   const prev = i > 0 ? steps[i - 1].total : null
                   const pct = prev && prev > 0 ? Math.round((step.total / prev) * 100) : null
                   const barWidth = steps[0].total > 0 ? Math.round((step.total / steps[0].total) * 100) : 0
+                  const isWorstDrop = i === worstDropIdx && worstDrop > 0
                   const pctColor =
                     pct === null ? "" : pct >= 60 ? "text-emerald-400" : pct >= 30 ? "text-yellow-400" : "text-red-400"
                   return (
                     <div key={step.label}>
-                      <div className="flex items-center justify-between text-sm mb-1">
-                        <span className="text-gray-300 font-medium">{step.label}</span>
+                      <div className={`flex items-center justify-between text-sm mb-1 ${isWorstDrop ? "relative" : ""}`}>
+                        <div className="flex items-center gap-2">
+                          <span className="text-gray-300 font-medium">{step.label}</span>
+                          <span className="text-gray-600 text-xs hidden sm:inline">({step.hint})</span>
+                          {isWorstDrop && (
+                            <span className="text-xs bg-red-900/50 text-red-400 px-2 py-0.5 rounded-full font-medium">
+                              ⚠ узкое место
+                            </span>
+                          )}
+                        </div>
                         <div className="flex items-center gap-3">
                           {step.week !== null && (
-                            <span className="text-gray-500 text-xs">(7д: {step.week})</span>
+                            <span className="text-gray-500 text-xs">7д: {step.week}</span>
                           )}
                           <span className="text-white font-bold font-mono w-12 text-right">{step.total}</span>
                           {pct !== null && (
-                            <span className={`text-xs font-semibold w-12 text-right ${pctColor}`}>
-                              {pct}%
-                            </span>
+                            <span className={`text-xs font-semibold w-12 text-right ${pctColor}`}>{pct}%</span>
                           )}
                         </div>
                       </div>
                       <div className="h-2 bg-gray-800 rounded-full overflow-hidden">
                         <div
-                          className="h-full rounded-full bg-blue-500 transition-all"
+                          className={`h-full rounded-full transition-all ${isWorstDrop ? "bg-red-500" : "bg-blue-500"}`}
                           style={{ width: `${barWidth}%` }}
                         />
                       </div>
@@ -613,18 +680,87 @@ export default function AdminPage() {
               })()}
             </div>
 
+            {/* Web users + nudge stats */}
             <div className="mt-3 grid grid-cols-2 md:grid-cols-4 gap-3">
-              {[
-                { label: "Nudge 1 отправлен (2ч)", value: funnel.nudge_1_sent, color: "text-cyan-400" },
-                { label: "Nudge 2 отправлен (24ч)", value: funnel.nudge_2_sent, color: "text-cyan-400" },
-                { label: "Nudge 3 отправлен (72ч)", value: funnel.nudge_3_sent, color: "text-cyan-400" },
-                { label: "Отписались от рассылки", value: funnel.opted_out, color: "text-red-400" },
-              ].map(({ label, value, color }) => (
-                <div key={label} className="bg-gray-900 border border-gray-800 rounded-xl p-4">
-                  <div className="text-xs text-gray-400 mb-1">{label}</div>
-                  <div className={`text-xl font-bold font-mono ${color}`}>{value}</div>
+              <div className="bg-gray-900 border border-gray-800 rounded-xl p-4">
+                <div className="text-xs text-gray-400 mb-1">Веб-пользователи</div>
+                <div className="text-xl font-bold font-mono text-blue-400">{funnel.web_users}</div>
+                <div className="text-xs text-gray-600 mt-1">из них оплатили: {funnel.web_paid}</div>
+              </div>
+              <div className="bg-gray-900 border border-gray-800 rounded-xl p-4">
+                <div className="text-xs text-gray-400 mb-1">Нуджи отправлены</div>
+                <div className="text-xl font-bold font-mono text-cyan-400">{funnel.nudge_1_sent}</div>
+                <div className="text-xs text-gray-600 mt-1">
+                  после — купили: <span className={funnel.nudge_converted > 0 ? "text-emerald-400" : "text-gray-500"}>
+                    {funnel.nudge_converted}
+                  </span>
+                  {funnel.nudge_1_sent > 0 && (
+                    <span className="ml-1">({Math.round(funnel.nudge_converted / funnel.nudge_1_sent * 100)}%)</span>
+                  )}
                 </div>
-              ))}
+              </div>
+              <div className="bg-gray-900 border border-gray-800 rounded-xl p-4">
+                <div className="text-xs text-gray-400 mb-1">2-й и 3-й нудж</div>
+                <div className="text-xl font-bold font-mono text-cyan-400">{funnel.nudge_2_sent} / {funnel.nudge_3_sent}</div>
+                <div className="text-xs text-gray-600 mt-1">через 24ч / 72ч</div>
+              </div>
+              <div className="bg-gray-900 border border-gray-800 rounded-xl p-4">
+                <div className="text-xs text-gray-400 mb-1">Отписались от рассылки</div>
+                <div className="text-xl font-bold font-mono text-red-400">{funnel.opted_out}</div>
+                <div className="text-xs text-gray-600 mt-1">команда /stop</div>
+              </div>
+            </div>
+
+            {/* Source conversion table */}
+            {funnel.source_stats.length > 0 && (
+              <div className="mt-3 bg-gray-900 border border-gray-800 rounded-2xl overflow-hidden">
+                <div className="px-5 py-3 border-b border-gray-800 flex items-center justify-between">
+                  <span className="text-sm font-semibold text-gray-300">Конверсия по источникам</span>
+                  <span className="text-xs text-gray-500">пользователей → оплатили → %</span>
+                </div>
+                <div className="divide-y divide-gray-800">
+                  {funnel.source_stats.map((s) => {
+                    const conv = s.users > 0 ? Math.round(s.paid / s.users * 100) : 0
+                    const convColor = conv >= 10 ? "text-emerald-400" : conv >= 3 ? "text-yellow-400" : "text-red-400"
+                    return (
+                      <div key={s.source ?? "__organic__"} className="flex items-center px-5 py-3 gap-4 text-sm">
+                        <span className="text-gray-300 font-medium w-36 truncate">
+                          {s.source ?? "органик (прямой)"}
+                        </span>
+                        <div className="flex-1 h-1.5 bg-gray-800 rounded-full overflow-hidden">
+                          <div
+                            className="h-full bg-blue-500 rounded-full"
+                            style={{ width: s.users > 0 ? `${Math.min(100, Math.round(s.users / funnel.source_stats[0].users * 100))}%` : "0%" }}
+                          />
+                        </div>
+                        <span className="text-gray-400 font-mono w-10 text-right">{s.users}</span>
+                        <span className="text-emerald-400 font-mono w-8 text-right">{s.paid}</span>
+                        <span className={`font-mono font-semibold w-10 text-right ${convColor}`}>{conv}%</span>
+                      </div>
+                    )
+                  })}
+                </div>
+              </div>
+            )}
+
+            {/* Cleanup test users */}
+            <div className="mt-3 flex items-center gap-4 flex-wrap">
+              {funnel.web_users > 0 && (
+                <button
+                  type="button"
+                  onClick={() => void cleanupWebUsers()}
+                  disabled={cleanupBusy}
+                  className="px-4 py-2 text-sm rounded-xl bg-gray-800 border border-gray-700 text-gray-400 hover:text-white hover:bg-gray-700 disabled:opacity-50 transition-colors"
+                >
+                  {cleanupBusy ? "Удаление…" : `Очистить ${funnel.web_users} веб-пользователей`}
+                </button>
+              )}
+              {cleanupResult && (
+                <span className="text-xs text-gray-500">
+                  Удалено: {cleanupResult.deleted_users} пользователей, {cleanupResult.deleted_pending_subscriptions} pending-подписок
+                  {cleanupResult.kept_paid_subscriptions > 0 && ` · сохранено paid: ${cleanupResult.kept_paid_subscriptions}`}
+                </span>
+              )}
             </div>
           </section>
         )}

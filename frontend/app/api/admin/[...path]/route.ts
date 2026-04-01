@@ -41,3 +41,21 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ pat
     return NextResponse.json({ error: "Backend unavailable" }, { status: 502 })
   }
 }
+
+export async function DELETE(req: NextRequest, { params }: { params: Promise<{ path: string[] }> }) {
+  const { path } = await params
+  const adminKey = req.headers.get("x-admin-key") || ""
+  const backendPath = `/admin/${path.join("/")}`
+
+  try {
+    const res = await fetch(`${BACKEND_URL}${backendPath}`, {
+      method: "DELETE",
+      cache: "no-store",
+      headers: { "x-admin-key": adminKey },
+    })
+    const data = await res.json()
+    return NextResponse.json(data, { status: res.status })
+  } catch {
+    return NextResponse.json({ error: "Backend unavailable" }, { status: 502 })
+  }
+}

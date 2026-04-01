@@ -30,6 +30,7 @@ from sqlalchemy import (
     String,
     and_,
     create_engine,
+    delete,
     false as sa_false,
     func,
     select,
@@ -1660,22 +1661,37 @@ def admin_stats(req: Request, db: Session = Depends(get_db)) -> AdminStatsRespon
     )
 
 
+class SourceStat(BaseModel):
+    source: str | None
+    users: int
+    paid: int
+
+
 class FunnelStatsResponse(BaseModel):
-    # All-time counts per CJM step
-    users_total: int
-    checkout_started: int        # subscription rows created (email submitted)
-    payment_link_generated: int  # lava_contract_id assigned
-    payments_completed: int      # payment_status = 'paid' (ever)
-    active_now: int              # paid + not expired + not suspended
-    # Last 7 days cohort
-    users_7d: int
-    checkout_started_7d: int
-    payment_link_generated_7d: int
-    payments_completed_7d: int
-    # Engagement / opt-out
+    # --- TG funnel: unique users (telegram_id > 0) ---
+    tg_users: int               # bot users total
+    tg_checkout: int            # unique tg users who opened checkout (subscription row created)
+    tg_payment_link: int        # unique tg users who got a payment link (lava_contract_id set)
+    tg_paid: int                # unique tg users who paid (ever, incl expired)
+    active_now: int             # paid + not expired + not suspended
+
+    # 7-day cohort (same deduplicated logic)
+    tg_users_7d: int
+    tg_checkout_7d: int
+    tg_paid_7d: int
+
+    # --- Web users (telegram_id < 0, came via website) ---
+    web_users: int
+    web_paid: int
+
+    # --- Source conversion (which channel brings buyers) ---
+    source_stats: list[SourceStat]
+
+    # --- Engagement ---
     nudge_1_sent: int
     nudge_2_sent: int
     nudge_3_sent: int
+    nudge_converted: int        # users who got nudge_1 and later paid — shows nudge ROI
     opted_out: int
 
 
@@ -1685,38 +1701,48 @@ def admin_funnel(req: Request, db: Session = Depends(get_db)) -> FunnelStatsResp
     now = utcnow()
     week_ago = now - timedelta(days=7)
 
-    users_total = db.execute(select(func.count()).select_from(User)).scalar() or 0
-    users_7d = db.execute(
-        select(func.count()).select_from(User).where(User.created_at >= week_ago)
+    # ── TG users (unique real Telegram users, tg_id > 0) ──────────────────────
+    tg_users = db.execute(
+        select(func.count()).select_from(User).where(User.telegram_id > 0)
+    ).scalar() or 0
+    tg_users_7d = db.execute(
+        select(func.count()).select_from(User).where(User.telegram_id > 0, User.created_at >= week_ago)
     ).scalar() or 0
 
-    checkout_started = db.execute(select(func.count()).select_from(Subscription)).scalar() or 0
-    checkout_started_7d = db.execute(
-        select(func.count()).select_from(Subscription).where(Subscription.created_at >= week_ago)
+    # Checkout = subscription row created; deduped by distinct telegram_id
+    tg_checkout = db.execute(
+        select(func.count(Subscription.telegram_id.distinct())).select_from(Subscription).where(
+            Subscription.telegram_id > 0
+        )
     ).scalar() or 0
-
-    payment_link_generated = db.execute(
-        select(func.count()).select_from(Subscription).where(Subscription.lava_contract_id.is_not(None))
-    ).scalar() or 0
-    payment_link_generated_7d = db.execute(
-        select(func.count()).select_from(Subscription).where(
-            Subscription.lava_contract_id.is_not(None),
-            Subscription.created_at >= week_ago,
+    tg_checkout_7d = db.execute(
+        select(func.count(Subscription.telegram_id.distinct())).select_from(Subscription).where(
+            Subscription.telegram_id > 0, Subscription.created_at >= week_ago
         )
     ).scalar() or 0
 
-    payments_completed = db.execute(
-        select(func.count()).select_from(Subscription).where(
-            Subscription.payment_status.in_(["paid", "expired"])
+    # Payment link = lava_contract_id was assigned; deduped
+    tg_payment_link = db.execute(
+        select(func.count(Subscription.telegram_id.distinct())).select_from(Subscription).where(
+            Subscription.telegram_id > 0, Subscription.lava_contract_id.is_not(None)
         )
     ).scalar() or 0
-    payments_completed_7d = db.execute(
-        select(func.count()).select_from(Subscription).where(
+
+    # Paid (ever) = paid or expired; deduped
+    tg_paid = db.execute(
+        select(func.count(Subscription.telegram_id.distinct())).select_from(Subscription).where(
+            Subscription.telegram_id > 0, Subscription.payment_status.in_(["paid", "expired"])
+        )
+    ).scalar() or 0
+    tg_paid_7d = db.execute(
+        select(func.count(Subscription.telegram_id.distinct())).select_from(Subscription).where(
+            Subscription.telegram_id > 0,
             Subscription.payment_status.in_(["paid", "expired"]),
             Subscription.created_at >= week_ago,
         )
     ).scalar() or 0
 
+    # Active now
     active_now = db.execute(
         select(func.count()).select_from(Subscription).where(
             Subscription.payment_status == "paid",
@@ -1726,6 +1752,39 @@ def admin_funnel(req: Request, db: Session = Depends(get_db)) -> FunnelStatsResp
         )
     ).scalar() or 0
 
+    # ── Web users (telegram_id < 0) ──────────────────────────────────────────
+    web_users = db.execute(
+        select(func.count()).select_from(User).where(User.telegram_id < 0)
+    ).scalar() or 0
+    web_paid = db.execute(
+        select(func.count(Subscription.telegram_id.distinct())).select_from(Subscription).where(
+            Subscription.telegram_id < 0, Subscription.payment_status.in_(["paid", "expired"])
+        )
+    ).scalar() or 0
+
+    # ── Source conversion: users + paid per ref_source ───────────────────────
+    source_user_rows = db.execute(
+        select(User.ref_source, func.count().label("cnt"))
+        .where(User.telegram_id > 0)
+        .group_by(User.ref_source)
+        .order_by(func.count().desc())
+    ).all()
+
+    # Paid by source: join User → Subscription
+    source_paid_rows = db.execute(
+        select(User.ref_source, func.count(User.telegram_id.distinct()).label("cnt"))
+        .join(Subscription, Subscription.telegram_id == User.telegram_id)
+        .where(User.telegram_id > 0, Subscription.payment_status.in_(["paid", "expired"]))
+        .group_by(User.ref_source)
+    ).all()
+    paid_by_source: dict[str | None, int] = {r[0]: r[1] for r in source_paid_rows}
+
+    source_stats = [
+        SourceStat(source=r[0], users=r[1], paid=paid_by_source.get(r[0], 0))
+        for r in source_user_rows
+    ]
+
+    # ── Engagement ───────────────────────────────────────────────────────────
     nudge_1_sent = db.execute(
         select(func.count()).select_from(User).where(User.nudge_1_sent_at.is_not(None))
     ).scalar() or 0
@@ -1735,24 +1794,81 @@ def admin_funnel(req: Request, db: Session = Depends(get_db)) -> FunnelStatsResp
     nudge_3_sent = db.execute(
         select(func.count()).select_from(User).where(User.nudge_3_sent_at.is_not(None))
     ).scalar() or 0
+
+    # Nudge converted: got nudge_1 + eventually paid
+    nudge_converted = db.execute(
+        select(func.count(User.telegram_id.distinct()))
+        .join(Subscription, Subscription.telegram_id == User.telegram_id)
+        .where(
+            User.nudge_1_sent_at.is_not(None),
+            Subscription.payment_status.in_(["paid", "expired"]),
+        )
+    ).scalar() or 0
+
     opted_out = db.execute(
         select(func.count()).select_from(User).where(User.marketing_opt_out == True)  # noqa: E712
     ).scalar() or 0
 
     return FunnelStatsResponse(
-        users_total=users_total,
-        checkout_started=checkout_started,
-        payment_link_generated=payment_link_generated,
-        payments_completed=payments_completed,
+        tg_users=tg_users,
+        tg_checkout=tg_checkout,
+        tg_payment_link=tg_payment_link,
+        tg_paid=tg_paid,
         active_now=active_now,
-        users_7d=users_7d,
-        checkout_started_7d=checkout_started_7d,
-        payment_link_generated_7d=payment_link_generated_7d,
-        payments_completed_7d=payments_completed_7d,
+        tg_users_7d=tg_users_7d,
+        tg_checkout_7d=tg_checkout_7d,
+        tg_paid_7d=tg_paid_7d,
+        web_users=web_users,
+        web_paid=web_paid,
+        source_stats=source_stats,
         nudge_1_sent=nudge_1_sent,
         nudge_2_sent=nudge_2_sent,
         nudge_3_sent=nudge_3_sent,
+        nudge_converted=nudge_converted,
         opted_out=opted_out,
+    )
+
+
+class CleanupWebUsersResponse(BaseModel):
+    deleted_users: int
+    deleted_pending_subscriptions: int
+    kept_paid_subscriptions: int
+
+
+@app.delete("/admin/cleanup-web-users", response_model=CleanupWebUsersResponse)
+def admin_cleanup_web_users(req: Request, db: Session = Depends(get_db)) -> CleanupWebUsersResponse:
+    """
+    Удаляет тестовых/анонимных веб-пользователей (telegram_id < 0).
+    Удаляет только pending-подписки; paid/expired сохраняются (реальные деньги).
+    """
+    _require_admin(req)
+    web_tg_ids = db.execute(select(User.telegram_id).where(User.telegram_id < 0)).scalars().all()
+    if not web_tg_ids:
+        return CleanupWebUsersResponse(deleted_users=0, deleted_pending_subscriptions=0, kept_paid_subscriptions=0)
+
+    # Count paid subs we're keeping
+    kept = db.execute(
+        select(func.count()).select_from(Subscription).where(
+            Subscription.telegram_id.in_(web_tg_ids),
+            Subscription.payment_status.in_(["paid", "expired"]),
+        )
+    ).scalar() or 0
+
+    # Delete pending subscriptions only
+    del_subs = db.execute(
+        delete(Subscription).where(
+            Subscription.telegram_id.in_(web_tg_ids),
+            Subscription.payment_status == "pending",
+        )
+    )
+    # Delete user rows
+    del_users = db.execute(delete(User).where(User.telegram_id < 0))
+    db.commit()
+
+    return CleanupWebUsersResponse(
+        deleted_users=del_users.rowcount,
+        deleted_pending_subscriptions=del_subs.rowcount,
+        kept_paid_subscriptions=kept,
     )
 
 
