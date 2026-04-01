@@ -9,6 +9,7 @@ type RefStat = {
 
 type Stats = {
   total_users: number
+  tg_users: number
   marketing_opt_out_users: number
   active_subscriptions: number
   expired_subscriptions: number
@@ -183,8 +184,8 @@ export default function AdminPage() {
     stats == null
       ? null
       : includeOptedOut
-        ? stats.total_users
-        : Math.max(0, stats.total_users - stats.marketing_opt_out_users)
+        ? stats.tg_users
+        : Math.max(0, stats.tg_users - stats.marketing_opt_out_users)
 
   const headers = useCallback(
     (overrideKey?: string) => ({ "x-admin-key": overrideKey ?? key }),

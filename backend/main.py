@@ -1432,7 +1432,7 @@ def admin_broadcast(payload: BroadcastRequest, req: Request, db: Session = Depen
     )
     logger.info("All users count=%s, opted_out_excluded=%s", total_count, opted_out_count)
 
-    q = select(User.telegram_id)
+    q = select(User.telegram_id).where(User.telegram_id > 0)  # skip web users (negative ids)
     if not payload.include_opted_out:
         q = q.where(User.marketing_opt_out == False)  # noqa: E712
     rows = db.execute(q).scalars().all()
@@ -1588,6 +1588,7 @@ class RefStat(BaseModel):
 
 class AdminStatsResponse(BaseModel):
     total_users: int
+    tg_users: int  # users with real Telegram ids (telegram_id > 0) — used for broadcast targeting
     marketing_opt_out_users: int
     active_subscriptions: int
     expired_subscriptions: int
@@ -1602,6 +1603,7 @@ def admin_stats(req: Request, db: Session = Depends(get_db)) -> AdminStatsRespon
     now = utcnow()
 
     total_users = db.execute(select(func.count()).select_from(User)).scalar() or 0
+    tg_users = db.execute(select(func.count()).select_from(User).where(User.telegram_id > 0)).scalar() or 0
     marketing_opt_out_users = (
         db.execute(
             select(func.count()).select_from(User).where(User.marketing_opt_out == True),  # noqa: E712
@@ -1648,6 +1650,7 @@ def admin_stats(req: Request, db: Session = Depends(get_db)) -> AdminStatsRespon
 
     return AdminStatsResponse(
         total_users=total_users,
+        tg_users=tg_users,
         marketing_opt_out_users=marketing_opt_out_users,
         active_subscriptions=active,
         expired_subscriptions=expired,
