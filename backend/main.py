@@ -913,7 +913,12 @@ def _flatten_prodamus_submit(payload: dict[str, Any]) -> dict[str, Any]:
 
 
 def _prodamus_signature_ok(req: Request, payload: dict[str, Any], secret: str) -> bool:
-    """Подпись: поле signature в теле, заголовок Sign + submit, или Sign + плоский POST (как в PHP Hmac::verify)."""
+    """Подпись: поле signature в теле или заголовок Sign.
+
+    Пробуем оба варианта экранирования слэшей:
+    - True  -> old PHP json_encode (escapes slashes)
+    - False -> PHP JSON_UNESCAPED_SLASHES (leaves slashes as-is)
+    """
     submit = payload.get("submit")
     if isinstance(submit, str) and submit.strip().startswith("{"):
         try:
@@ -921,23 +926,34 @@ def _prodamus_signature_ok(req: Request, payload: dict[str, Any], secret: str) -
         except json.JSONDecodeError:
             submit = None
     header_sign = (req.headers.get("Sign") or req.headers.get("sign") or "").strip()
+
+    def _check(data: dict[str, Any], received: str) -> bool:
+        for esc in (True, False):
+            if hmac.compare_digest(_prodamus_sign(data, secret, escape_slashes=esc), received):
+                return True
+        return False
+
     if isinstance(submit, dict) and header_sign:
         cand = {k: v for k, v in submit.items() if k != "signature"}
-        expected = _prodamus_sign(cand, secret)
-        if hmac.compare_digest(expected, header_sign):
+        if _check(cand, header_sign):
             return True
+
     got = str(payload.get("signature") or "").strip()
     if got:
         data_for_sign = {k: v for k, v in payload.items() if k != "signature"}
-        expected = _prodamus_sign(data_for_sign, secret)
-        if hmac.compare_digest(expected, got):
+        if _check(data_for_sign, got):
             return True
+        logger.warning(
+            "Prodamus sign mismatch: keys=%s received=%s…",
+            sorted(data_for_sign.keys()),
+            got[:16],
+        )
+
     if header_sign:
         flat = {k: v for k, v in payload.items() if str(k).lower() not in ("signature", "sign")}
-        if flat:
-            expected = _prodamus_sign(flat, secret)
-            if hmac.compare_digest(expected, header_sign):
-                return True
+        if flat and _check(flat, header_sign):
+            return True
+
     return False
 
 
@@ -985,8 +1001,17 @@ async def prodamus_webhook(req: Request, db: Session = Depends(get_db)) -> Plain
 
     payload_data = _flatten_prodamus_submit(payload_raw)
 
+    ct = (req.headers.get("content-type") or "").lower()
+    logger.info(
+        "Prodamus webhook: ct=%s keys=%s has_sig=%s has_sign_header=%s",
+        ct.split(";")[0].strip(),
+        sorted(payload_data.keys()),
+        bool(str(payload_data.get("signature") or "").strip()),
+        bool((req.headers.get("Sign") or req.headers.get("sign") or "").strip()),
+    )
+
     if not _prodamus_signature_ok(req, payload_data, PRODAMUS_SECRET_KEY):
-        logger.warning("Prodamus webhook rejected: invalid sign")
+        logger.warning("Prodamus webhook rejected: invalid sign keys=%s", sorted(payload_data.keys()))
         raise HTTPException(status_code=401, detail="Unauthorized")
 
     order_candidates = _prodamus_order_refs(payload_data)
@@ -1050,12 +1075,18 @@ def _http_build_query(dictionary: dict, parent_key: str | bool = False) -> dict:
     return dict(items)
 
 
-def _prodamus_sign(data: dict, secret: str) -> str:
-    """HMAC-SHA256 подпись по официальному алгоритму Prodamus."""
+def _prodamus_sign(data: dict, secret: str, escape_slashes: bool = True) -> str:
+    """HMAC-SHA256 signature matching Prodamus/Payform PHP SDK.
+
+    escape_slashes=True  -> PHP json_encode default (escapes / to backslash-/)
+    escape_slashes=False -> PHP JSON_UNESCAPED_SLASHES (leaves / as-is)
+    """
     import copy
     data_copy = copy.deepcopy(data)
     _deep_int_to_string(data_copy)
-    json_str = json.dumps(data_copy, sort_keys=True, ensure_ascii=False, separators=(",", ":")).replace("/", "\\/")
+    json_str = json.dumps(data_copy, sort_keys=True, ensure_ascii=False, separators=(",", ":"))
+    if escape_slashes:
+        json_str = json_str.replace("/", "\\/")
     return hmac.new(secret.encode("utf8"), json_str.encode("utf8"), hashlib.sha256).hexdigest()
 
 
