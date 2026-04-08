@@ -1,5 +1,7 @@
 import { auth } from "@/auth"
 import { redirect } from "next/navigation"
+import { Composer } from "./composer"
+import { MOCK_ACCOUNTS } from "@/lib/mock-accounts"
 
 export default async function AppHomePage() {
   const session = await auth()
@@ -7,11 +9,5 @@ export default async function AppHomePage() {
     redirect("/login")
   }
 
-  return (
-    <main className="flex min-h-screen flex-col items-center justify-center px-4">
-      <p className="text-center text-lg">
-        Привет, {session.user.email ?? session.user.name ?? "пользователь"}! Composer будет здесь.
-      </p>
-    </main>
-  )
+  return <Composer accounts={MOCK_ACCOUNTS} />
 }
