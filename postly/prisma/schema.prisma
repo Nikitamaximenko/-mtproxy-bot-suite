@@ -7,7 +7,64 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-/// Заглушка: без хотя бы одной модели `prisma generate` не создаёт клиент. Удалите при добавлении реальных моделей.
-model SchemaPlaceholder {
-  id String @id @default(cuid())
+enum SubscriptionStatus {
+  trial
+  active
+  expired
+}
+
+enum SocialNetwork {
+  vk
+  tg
+  ok
+  dzen
+  rutube
+}
+
+enum PublicationStatus {
+  pending
+  published
+  failed
+}
+
+model User {
+  id                    String               @id @default(cuid())
+  telegramId            BigInt               @unique
+  createdAt             DateTime             @default(now())
+  subscriptionStatus    SubscriptionStatus   @default(trial)
+  subscriptionExpiresAt DateTime?
+  postmypostUserId      String?
+  channels              Channel[]
+  publications          Publication[]
+}
+
+model Channel {
+  id                  String        @id @default(cuid())
+  userId              String
+  user                User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  postmypostChannelId String
+  network             SocialNetwork
+  name                String
+  avatarUrl           String?
+  isActive            Boolean       @default(true)
+  connectedAt         DateTime      @default(now())
+
+  @@unique([userId, postmypostChannelId])
+  @@index([userId])
+}
+
+model Publication {
+  id                      String            @id @default(cuid())
+  userId                  String
+  user                    User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  text                    String            @db.Text
+  mediaUrls               String[]
+  channelIds              String[]
+  status                  PublicationStatus @default(pending)
+  postmypostPublicationId String?
+  errorMessage            String?
+  createdAt               DateTime          @default(now())
+  publishedAt             DateTime?
+
+  @@index([userId, createdAt])
 }
