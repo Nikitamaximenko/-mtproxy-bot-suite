@@ -21,8 +21,15 @@ const geistMono = localFont({
 });
 
 export const metadata: Metadata = {
-  title: "Postly",
-  description: "Postly",
+  title: "Postly — постинг во все соцсети за минуту",
+  description: "Кросспостинг ВКонтакте, Telegram, Одноклассники, Rutube с телефона. 299₽/мес.",
+  openGraph: {
+    title: "Postly — постинг во все соцсети за минуту",
+    description: "Кросспостинг с телефона. ВК, ТГ, ОК, Rutube. 299₽/мес.",
+    type: "website",
+    locale: "ru_RU",
+  },
+  robots: { index: true, follow: true },
 };
 
 export default function RootLayout({
@@ -31,7 +38,11 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="ru" suppressHydrationWarning className={cn("font-sans", inter.variable)}>
+    <html
+      lang="ru"
+      suppressHydrationWarning
+      className={cn("font-sans scroll-smooth", inter.variable)}
+    >
       <body className={`${geistSans.variable} ${geistMono.variable} antialiased`}>
         <ThemeProvider attribute="class" defaultTheme="system" enableSystem disableTransitionOnChange>
           <SessionProvider>

@@ -35,9 +35,10 @@ function NetworkIcon({ network }: { network: ConnectedAccount["network"] }) {
 
 type ComposerProps = {
   accounts: ConnectedAccount[]
+  isDemo?: boolean
 }
 
-export function Composer({ accounts }: ComposerProps) {
+export function Composer({ accounts, isDemo = false }: ComposerProps) {
   const ids = useMemo(() => accounts.map((a) => a.id), [accounts])
   const [selectedIds, setSelectedIds] = useState<Set<number>>(() => new Set(ids))
   const [text, setText] = useState("")
@@ -98,6 +99,10 @@ export function Composer({ accounts }: ComposerProps) {
 
   async function onPublish() {
     if (!canPublish) return
+    if (isDemo) {
+      toast("Это демо. Зарегистрируйтесь чтобы публиковать по-настоящему")
+      return
+    }
     setIsPublishing(true)
     try {
       const formData = new FormData()

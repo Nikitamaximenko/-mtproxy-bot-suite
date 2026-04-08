@@ -112,3 +112,10 @@ model Publication {
 
   @@index([userId, createdAt])
 }
+
+model WaitlistEntry {
+  id        String   @id @default(cuid())
+  email     String   @unique
+  source    String?
+  createdAt DateTime @default(now())
+}
