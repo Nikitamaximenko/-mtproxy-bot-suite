@@ -1,0 +1,13 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+/// Заглушка: без хотя бы одной модели `prisma generate` не создаёт клиент. Удалите при добавлении реальных моделей.
+model SchemaPlaceholder {
+  id String @id @default(cuid())
+}
