@@ -4,6 +4,7 @@ import { Inter } from "next/font/google";
 import "./globals.css";
 import { cn } from "@/lib/utils";
 import { ThemeProvider } from "@/components/theme-provider";
+import { SessionProvider } from "@/components/session-provider";
 import { Toaster } from "@/components/ui/sonner";
 
 const inter = Inter({ subsets: ["latin", "cyrillic"], variable: "--font-sans" });
@@ -33,8 +34,10 @@ export default function RootLayout({
     <html lang="ru" suppressHydrationWarning className={cn("font-sans", inter.variable)}>
       <body className={`${geistSans.variable} ${geistMono.variable} antialiased`}>
         <ThemeProvider attribute="class" defaultTheme="system" enableSystem disableTransitionOnChange>
-          {children}
-          <Toaster />
+          <SessionProvider>
+            {children}
+            <Toaster />
+          </SessionProvider>
         </ThemeProvider>
       </body>
     </html>

@@ -16,10 +16,10 @@ Telegram Mini App для быстрого кросспостинга в соцс
 ## Стек
 - Next.js 14.2 App Router, TypeScript, Tailwind, shadcn/ui
 - Sonner для toast
-- @twa-dev/sdk
+- Веб/PWA: вход по magic link на email (Auth.js / next-auth v5, Nodemailer; в DEV ссылка в консоль сервера)
 - Prisma 5.22 + PostgreSQL
 - zod
-- Bot: aiogram 3 (отдельный сервис, позже)
+- Bot: aiogram 3 (отдельный сервис, позже, опционально к web-аккаунту)
 - Hosting: Railway
 - Backend соцсетей: Postmypost API
   (https://help.postmypost.io/docs/api/)
