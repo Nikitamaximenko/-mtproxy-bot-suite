@@ -216,46 +216,51 @@ export default function SuccessPage() {
         {/* ── DONE ── */}
         {phase === "done" && (
           <>
-            <div style={{ fontSize: "48px", marginBottom: "16px" }}>✅</div>
-            <h1 style={{ fontSize: "24px", fontWeight: 700, color: "#111827", marginBottom: "8px" }}>Прокси готов!</h1>
+            <div style={{ fontSize: "48px", marginBottom: "16px" }}>🧊</div>
+            <h1 style={{ fontSize: "24px", fontWeight: 700, color: "#111827", marginBottom: "4px" }}>Подписка 2 в 1 активна!</h1>
+            <p style={{ color: "#6B7280", fontSize: "14px", marginBottom: "20px" }}>📡 Прокси для Telegram + 🛡 VPN для всего остального</p>
             {proxyLink ? (
               <>
-                <p style={{ color: "#6B7280", fontSize: "14px", marginBottom: "24px", lineHeight: "1.5" }}>
-                  Нажмите кнопку — Telegram откроется и предложит добавить прокси
-                </p>
                 <a
                   href={proxyLink}
                   style={{
                     display: "block", background: "#2AABEE", color: "#FFFFFF",
                     height: "56px", borderRadius: "14px", fontSize: "17px", fontWeight: 700,
-                    textDecoration: "none", lineHeight: "56px", marginBottom: "12px",
+                    textDecoration: "none", lineHeight: "56px", marginBottom: "10px",
                   }}
                 >
-                  Подключить прокси в Telegram →
+                  📡 Подключить прокси в Telegram →
                 </a>
                 <button
                   onClick={copy}
                   style={{
                     width: "100%", background: "#F7F8FA", color: "#374151",
-                    height: "48px", borderRadius: "14px", fontSize: "15px",
-                    border: "1px solid #E5E7EB", cursor: "pointer", marginBottom: "24px",
+                    height: "44px", borderRadius: "14px", fontSize: "15px",
+                    border: "1px solid #E5E7EB", cursor: "pointer", marginBottom: "16px",
                   }}
                 >
                   {copied ? "✅ Скопировано!" : "Скопировать ссылку"}
                 </button>
-                <div style={{ background: "#F7F8FA", borderRadius: "16px", padding: "16px", marginBottom: "24px", textAlign: "left" }}>
-                  <p style={{ fontSize: "13px", fontWeight: 600, color: "#111827", marginBottom: "8px" }}>Инструкция:</p>
+                <div style={{ background: "#F7F8FA", borderRadius: "16px", padding: "16px", marginBottom: "12px", textAlign: "left" }}>
+                  <p style={{ fontSize: "13px", fontWeight: 600, color: "#111827", marginBottom: "8px" }}>📡 Шаг 1 — Telegram прокси:</p>
                   <p style={{ fontSize: "13px", color: "#6B7280", lineHeight: "1.7" }}>
                     1. Нажмите «Подключить прокси в Telegram»<br />
                     2. Telegram откроется автоматически<br />
-                    3. Нажмите «Добавить» в появившемся окне<br />
-                    4. Готово — Telegram работает без ограничений
+                    3. Нажмите «Добавить» — готово
+                  </p>
+                </div>
+                <div style={{ background: "#F0FDF4", borderRadius: "16px", padding: "16px", marginBottom: "24px", textAlign: "left" }}>
+                  <p style={{ fontSize: "13px", fontWeight: 600, color: "#16A34A", marginBottom: "8px" }}>🛡 Шаг 2 — VPN (Instagram, TikTok и др.):</p>
+                  <p style={{ fontSize: "13px", color: "#6B7280", lineHeight: "1.7" }}>
+                    1. Откройте бота @FrostyBot<br />
+                    2. Нажмите «Личный кабинет» → вкладка «VPN»<br />
+                    3. Выберите платформу и следуйте инструкции
                   </p>
                 </div>
               </>
             ) : (
               <p style={{ color: "#6B7280", fontSize: "14px", marginBottom: "24px", lineHeight: "1.5" }}>
-                Подписка активирована. Откройте бота и нажмите /start — там появится ссылка на прокси, или обновите эту страницу через минуту.
+                Подписка активирована. Откройте бота @FrostyBot и нажмите /start — появится ссылка на прокси и доступ к VPN.
               </p>
             )}
             <a

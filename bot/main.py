@@ -50,7 +50,7 @@ def main_menu_kb(tg_id: int) -> InlineKeyboardMarkup:
     if SUPPORT_USERNAME:
         row3.append(InlineKeyboardButton(text="🆘 Поддержка", url=f"https://t.me/{SUPPORT_USERNAME}"))
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="💳 Оформить подписку", web_app=WebAppInfo(url=_miniapp_url(tg_id)))],
+        [InlineKeyboardButton(text="🚀 Прокси + VPN за 299 ₽", web_app=WebAppInfo(url=_miniapp_url(tg_id)))],
         [InlineKeyboardButton(text="ℹ️ Как это работает", callback_data="menu:help")],
         row3,
     ])
@@ -58,9 +58,9 @@ def main_menu_kb(tg_id: int) -> InlineKeyboardMarkup:
 
 def proxy_kb(proxy_link: str) -> InlineKeyboardMarkup:
     buttons: list[list[InlineKeyboardButton]] = [
-        [InlineKeyboardButton(text="🔌 Подключить прокси", url=proxy_link)],
+        [InlineKeyboardButton(text="🔌 Подключить прокси в Telegram", url=proxy_link)],
         [InlineKeyboardButton(text="📋 Скопировать ссылку", callback_data="copy_proxy_link")],
-        [InlineKeyboardButton(text="📖 Ручная настройка", callback_data="manual_setup")],
+        [InlineKeyboardButton(text="📖 Ручная настройка прокси", callback_data="manual_setup")],
         [InlineKeyboardButton(text="🏠 Главное меню", callback_data="menu:main")],
     ]
     return InlineKeyboardMarkup(inline_keyboard=buttons)
@@ -87,24 +87,31 @@ def format_dt(dt_str: str | None) -> str:
 
 
 HELP_GENERAL = (
-    "<b>Как подключить прокси</b>\n"
+    "<b>Frosty — 2 в 1: Прокси для Telegram + VPN для всего</b>\n"
     "\n"
+    "<b>📡 MTProxy (Telegram)</b>\n"
     "1. Нажми «Оформить подписку» и оплати\n"
-    "2. Вернись в бот — появится кнопка «🔌 Подключить прокси»\n"
-    "3. Нажми её — Telegram добавит прокси за 10 секунд\n"
+    "2. Вернись в бот — нажми «🔌 Подключить прокси»\n"
+    "3. Telegram добавит его за 10 секунд — больше ничего не нужно\n"
+    "\n"
+    "<b>🛡 VPN (Instagram, TikTok, YouTube и др.)</b>\n"
+    "1. Открой личный кабинет → вкладка «VPN»\n"
+    "2. Скачай WireGuard под свою платформу\n"
+    "3. Отсканируй QR или импортируй .conf файл\n"
+    "4. Нажми «Подключить» — всё готово\n"
     "\n"
     "<b>Часто задают:</b>\n"
     "\n"
     "<b>Сколько устройств?</b>\n"
-    "До 10 — телефон, ПК, планшет на одном аккаунте\n"
+    "До 10 на одном аккаунте — телефон, ПК, планшет\n"
     "\n"
     "<b>Лимиты по трафику?</b>\n"
     "Нет. Скорость и трафик не ограничены\n"
     "\n"
-    "<b>Нужен VPN?</b>\n"
-    "Нет. Frosty работает прямо в Telegram, не мешает другим приложениям\n"
+    "<b>Прокси и VPN работают одновременно?</b>\n"
+    "Да. MTProxy — только для Telegram, не мешает VPN\n"
     "\n"
-    "<b>Как отменить подписку?</b>\n"
+    "<b>Как отменить?</b>\n"
     "Напиши в поддержку — отменим в любой момент."
 )
 
@@ -257,8 +264,10 @@ async def cmd_start(message: Message, session: aiohttp.ClientSession, state: FSM
 
             if data.get("ok") and data.get("proxy_link"):
                 await message.answer(
-                    "🧊 <b>Frosty — личный прокси для Telegram</b>\n\n"
-                    "✅ Подписка активна! Нажми кнопку ниже чтобы подключить прокси:",
+                    "🧊 <b>Frosty — Прокси + VPN активированы!</b>\n\n"
+                    "✅ Подписка 2 в 1 оформлена.\n"
+                    "📡 Нажми кнопку ниже чтобы подключить прокси в Telegram.\n"
+                    "🛡 VPN настраивается в личном кабинете — кнопка «Личный кабинет» в меню.",
                     parse_mode="HTML",
                     reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
                         InlineKeyboardButton(text="🔗 Подключить прокси", url=data["proxy_link"])
@@ -300,16 +309,14 @@ async def cmd_start(message: Message, session: aiohttp.ClientSession, state: FSM
                 return
 
     await message.answer(
-        "🧊 <b>Frosty</b> — личный прокси для Telegram\n"
+        "🧊 <b>Frosty — 2 в 1 за 299 ₽/мес</b>\n"
         "\n"
-        "Бесплатные прокси — общие. Твой Frosty — только твой.\n"
+        "📡 <b>MTProxy</b> — Telegram работает без ограничений, ничего лишнего включать не нужно\n"
+        "🛡 <b>VPN</b> — Instagram, TikTok, YouTube и любые другие сайты\n"
         "\n"
-        "<b>Чем отличается:</b>\n"
-        "- Только ты на сервере — без чужих пользователей\n"
-        "- Работает внутри Telegram — VPN не нужен\n"
-        "- Стабильно 24/7 — мы следим, ты пользуешься\n"
+        "Всё это на <b>персональном сервере</b> — только ты, без чужих пользователей.\n"
         "\n"
-        f"<b>10 ₽/день</b> · {PRICE_RUB} ₽/мес · Отмена в любой момент",
+        f"<b>10 ₽/день · {PRICE_RUB} ₽/мес · Отмена в любой момент</b>",
         parse_mode="HTML",
         reply_markup=main_menu_kb(tg_id),
     )
@@ -337,13 +344,15 @@ async def cmd_status(message: Message, session: aiohttp.ClientSession, tg_id: in
         await message.answer(
             "📡 <b>Подписка не активна</b>\n"
             "\n"
-            "Без прокси Telegram работает через заблокированные маршруты — медленно и нестабильно.\n"
+            "Без Frosty Telegram работает через заблокированные маршруты, а Instagram и TikTok — не работают вовсе.\n"
             "\n"
-            f"Frosty решает это за <b>10 ₽/день</b>:",
+            f"Frosty решает обе проблемы за <b>10 ₽/день</b>:\n"
+            "📡 MTProxy — Telegram без ограничений\n"
+            "🛡 VPN — Instagram, TikTok, YouTube",
             parse_mode="HTML",
             reply_markup=InlineKeyboardMarkup(
                 inline_keyboard=[
-                    [InlineKeyboardButton(text="💳 Оформить подписку", web_app=WebAppInfo(url=_miniapp_url(tg_id)))],
+                    [InlineKeyboardButton(text="🚀 Прокси + VPN за 299 ₽", web_app=WebAppInfo(url=_miniapp_url(tg_id)))],
                     [InlineKeyboardButton(text="🏠 Главное меню", callback_data="menu:main")],
                 ]
             ),
@@ -353,7 +362,10 @@ async def cmd_status(message: Message, session: aiohttp.ClientSession, tg_id: in
     expires_at = format_dt(data.get("expires_at"))
     proxy_link = data.get("proxy_link")
     status_text = (
-        f"✅ <b>Подписка активна</b>\n"
+        f"✅ <b>Подписка 2 в 1 активна</b>\n"
+        f"\n"
+        f"📡 MTProxy для Telegram — подключён\n"
+        f"🛡 VPN для всего остального — в личном кабинете\n"
         f"\n"
         f"📅 Действует до: {expires_at}\n"
         f"💳 Тариф: {PRICE_RUB} ₽/мес · 10 ₽/день\n"
@@ -385,12 +397,14 @@ async def main() -> None:
         try:
             await bot.set_my_description(
                 description=(
-                    "Telegram часто грузит медиа с ошибками и просадками. Frosty подключает MTProxy прямо в Telegram — без VPN и переключений. "
-                    "После подключения всё работает стабильнее. Лимит: до 10 устройств."
+                    "Frosty — подписка 2 в 1 за 299 ₽/мес. "
+                    "📡 MTProxy снимает блокировку Telegram без дополнительных приложений. "
+                    "🛡 WireGuard VPN открывает Instagram, TikTok, YouTube и любые другие сайты. "
+                    "Персональный сервер — только ты, без чужих пользователей. До 10 устройств."
                 )
             )
             await bot.set_my_short_description(
-                short_description="MTProxy внутри Telegram без VPN. Медиа грузятся стабильнее. До 10 устройств."
+                short_description="Прокси для Telegram + VPN для всего остального. 299 ₽/мес."
             )
         except Exception:
             pass
@@ -455,7 +469,9 @@ async def main() -> None:
             tg_id = query.from_user.id
             await query.answer()
             await msg.answer(
-                f"<b>Frosty</b> — персональный MTProxy за <b>10 ₽/день</b> ({PRICE_RUB} ₽/мес).\n"
+                f"<b>Frosty — 2 в 1</b> за <b>10 ₽/день</b> ({PRICE_RUB} ₽/мес).\n\n"
+                "📡 <b>MTProxy</b> — Telegram без блокировок, ничего лишнего включать не нужно\n"
+                "🛡 <b>VPN</b> — Instagram, TikTok, YouTube и любые другие сайты\n\n"
                 "Нажми кнопку — оплата откроется прямо в Telegram.",
                 parse_mode="HTML",
                 reply_markup=InlineKeyboardMarkup(
