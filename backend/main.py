@@ -187,6 +187,12 @@ class VpnClient(Base):
     telegram_id: Mapped[int] = mapped_column(BigInteger, unique=True, index=True, nullable=False)
     uuid: Mapped[str] = mapped_column(String(36), nullable=False)
     vless_link: Mapped[str] = mapped_column(String(1024), nullable=False)
+    active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    max_devices: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
+    devices_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    traffic_limit_gb: Mapped[int] = mapped_column(Integer, default=0, nullable=False)  # 0 = unlimited
+    traffic_used_bytes: Mapped[int] = mapped_column(BigInteger, default=0, nullable=False)
+    last_sync_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
 
 
@@ -262,6 +268,28 @@ def _migrate() -> None:
 
     # vpn_peers: new table, created by create_all on first run; no ALTER needed for existing columns.
 
+    if "vpn_clients" in tables:
+        existing = {c["name"] for c in inspector.get_columns("vpn_clients")}
+        with engine.begin() as conn:
+            if "active" not in existing:
+                if engine.dialect.name == "postgresql":
+                    conn.execute(text("ALTER TABLE vpn_clients ADD COLUMN active BOOLEAN NOT NULL DEFAULT TRUE"))
+                else:
+                    conn.execute(text("ALTER TABLE vpn_clients ADD COLUMN active BOOLEAN NOT NULL DEFAULT 1"))
+            if "max_devices" not in existing:
+                conn.execute(text("ALTER TABLE vpn_clients ADD COLUMN max_devices INTEGER NOT NULL DEFAULT 1"))
+            if "devices_count" not in existing:
+                conn.execute(text("ALTER TABLE vpn_clients ADD COLUMN devices_count INTEGER NOT NULL DEFAULT 0"))
+            if "traffic_limit_gb" not in existing:
+                conn.execute(text("ALTER TABLE vpn_clients ADD COLUMN traffic_limit_gb INTEGER NOT NULL DEFAULT 0"))
+            if "traffic_used_bytes" not in existing:
+                conn.execute(text("ALTER TABLE vpn_clients ADD COLUMN traffic_used_bytes BIGINT NOT NULL DEFAULT 0"))
+            if "last_sync_at" not in existing:
+                if engine.dialect.name == "postgresql":
+                    conn.execute(text("ALTER TABLE vpn_clients ADD COLUMN last_sync_at TIMESTAMP WITH TIME ZONE"))
+                else:
+                    conn.execute(text("ALTER TABLE vpn_clients ADD COLUMN last_sync_at DATETIME"))
+
     # PostgreSQL: принудительно BIGINT для telegram_id (уже BIGINT — будет ошибка, игнорируем).
     if engine.dialect.name == "postgresql":
         try:
@@ -290,8 +318,10 @@ async def lifespan(application: FastAPI) -> AsyncGenerator[None, None]:
     Base.metadata.create_all(bind=engine)
     _migrate()
     task = asyncio.create_task(_expiration_loop())
+    vpn_task = asyncio.create_task(_vpn_maintenance_loop())
     yield
     task.cancel()
+    vpn_task.cancel()
 
 
 app = FastAPI(title="MTProxy Backend", version="0.3.0", lifespan=lifespan)
@@ -809,6 +839,11 @@ def _process_expiration_notifications() -> None:
             logger.info("Sending expired notification to tg_id=%s", sub.telegram_id)
             _notify_expired(sub.telegram_id)
             sub.notified_expired = True
+            # Deactivate VPN client when subscription expires
+            try:
+                _deactivate_vpn_client_no_commit(int(sub.telegram_id), db)
+            except Exception:
+                logger.exception("Failed to deactivate VPN for expired tg_id=%s", sub.telegram_id)
 
         db.commit()
         if expiring or expired:
@@ -839,6 +874,18 @@ async def _expiration_loop() -> None:
         except Exception:
             logger.exception("Sales nudges failed")
         await asyncio.sleep(3600)
+
+
+async def _vpn_maintenance_loop() -> None:
+    """Background loop: VPN traffic sync every 10 minutes."""
+    await asyncio.sleep(30)  # short initial delay, after main loop starts
+    loop = asyncio.get_event_loop()
+    while True:
+        try:
+            await loop.run_in_executor(None, _process_vpn_traffic_sync)
+        except Exception:
+            logger.exception("VPN traffic sync failed")
+        await asyncio.sleep(600)  # 10 minutes
 
 
 @app.post("/webhooks/lava", response_model=OkResponse)
@@ -1639,11 +1686,40 @@ def _xray_get_online_count() -> int:
     return 0
 
 
+def _xray_get_client_traffic(email: str) -> tuple[int, int]:
+    """Returns (up_bytes, down_bytes) for a client email. (0, 0) on error."""
+    result = _xray_req("GET", f"/panel/api/inbounds/clientTraffics/{email}")
+    if isinstance(result, dict) and result.get("success"):
+        obj = result.get("obj") or {}
+        if isinstance(obj, dict):
+            return int(obj.get("up", 0)), int(obj.get("down", 0))
+    return 0, 0
+
+
+def _xray_delete_client(client_uuid: str) -> bool:
+    """Delete a client from 3X-UI inbound. Returns True on success."""
+    result = _xray_req("POST", f"/panel/api/inbounds/{XRAY_INBOUND_ID}/delClient/{client_uuid}")
+    return isinstance(result, dict) and result.get("success", False)
+
+
 def _ensure_xray_client(tg_id: int, db: Session) -> tuple[str, str] | None:
-    """Create Xray VLESS client if not exists. Returns (uuid, vless_link) or None."""
+    """Return existing active client or create a new one. Returns (uuid, vless_link) or None."""
     existing = db.execute(select(VpnClient).where(VpnClient.telegram_id == tg_id)).scalar_one_or_none()
     if existing:
-        return existing.uuid, existing.vless_link
+        if existing.active:
+            return existing.uuid, existing.vless_link
+        # Previously deactivated — recreate in 3X-UI with a fresh UUID
+        result = _xray_add_client(tg_id)
+        if not result:
+            return None
+        client_uuid, vless_link = result
+        existing.uuid = client_uuid
+        existing.vless_link = vless_link
+        existing.active = True
+        existing.traffic_used_bytes = 0
+        db.commit()
+        return client_uuid, vless_link
+    # Brand new client
     result = _xray_add_client(tg_id)
     if not result:
         return None
@@ -1652,6 +1728,68 @@ def _ensure_xray_client(tg_id: int, db: Session) -> tuple[str, str] | None:
     db.add(vpn_client)
     db.commit()
     return client_uuid, vless_link
+
+
+def _deactivate_vpn_client_no_commit(tg_id: int, db: Session) -> None:
+    """Mark VPN client inactive and delete from 3X-UI. Caller must commit the session."""
+    client = db.execute(select(VpnClient).where(VpnClient.telegram_id == tg_id)).scalar_one_or_none()
+    if not client or not client.active:
+        return
+    if XRAY_API_URL:
+        try:
+            ok = _xray_delete_client(client.uuid)
+            if not ok:
+                logger.warning("3X-UI delClient failed for tg_id=%s uuid=%s", tg_id, client.uuid)
+        except Exception:
+            logger.exception("3X-UI delClient error for tg_id=%s", tg_id)
+    client.active = False
+    logger.info("VPN client marked inactive for tg_id=%s", tg_id)
+
+
+def deactivate_vpn_client(tg_id: int, db: Session) -> None:
+    """Deactivate VPN client and commit. Public API for endpoints."""
+    _deactivate_vpn_client_no_commit(tg_id, db)
+    db.commit()
+
+
+def _process_vpn_traffic_sync() -> None:
+    """Sync traffic stats from 3X-UI and deactivate over-limit clients."""
+    if not XRAY_API_URL:
+        return
+    db = SessionLocal()
+    try:
+        now = utcnow()
+        clients = db.execute(
+            select(VpnClient).where(VpnClient.active == True)  # noqa: E712
+        ).scalars().all()
+
+        deactivated = 0
+        synced = 0
+        for client in clients:
+            email = f"frosty_{client.telegram_id}"
+            try:
+                up, down = _xray_get_client_traffic(email)
+                total = up + down
+                client.traffic_used_bytes = total
+                client.last_sync_at = now
+                synced += 1
+                # Enforce traffic limit (0 = unlimited)
+                if client.traffic_limit_gb > 0:
+                    limit_bytes = client.traffic_limit_gb * 1024 * 1024 * 1024
+                    if total >= limit_bytes:
+                        logger.info("Traffic limit exceeded for tg_id=%s (%d GB), deactivating", client.telegram_id, client.traffic_limit_gb)
+                        _deactivate_vpn_client_no_commit(int(client.telegram_id), db)
+                        deactivated += 1
+            except Exception:
+                logger.exception("Failed to sync traffic for tg_id=%s", client.telegram_id)
+
+        db.commit()
+        logger.info("VPN traffic sync: %d clients synced, %d deactivated", synced, deactivated)
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()
 
 
 # ── VPN endpoints ────────────────────────────────────────────────────────────
@@ -1753,6 +1891,7 @@ def vpn_toggle(telegram_id: int, payload: VpnToggleRequest, db: Session = Depend
 
 class VpnConfigResponse(BaseModel):
     available: bool
+    reason: str | None = None  # "no_subscription" | "vpn_not_configured" | "creating"
     vless_link: str | None = None
     uuid: str | None = None
 
@@ -1760,14 +1899,15 @@ class VpnConfigResponse(BaseModel):
 @app.get("/vpn/config/{telegram_id}", response_model=VpnConfigResponse)
 def vpn_config(telegram_id: int, db: Session = Depends(get_db)) -> VpnConfigResponse:
     if not _active_sub_for_vpn(telegram_id, db):
-        raise HTTPException(status_code=403, detail="No active subscription")
+        # Return 200 with reason so frontend can differentiate without catching 403
+        return VpnConfigResponse(available=False, reason="no_subscription")
 
     if not XRAY_API_URL:
-        return VpnConfigResponse(available=False)
+        return VpnConfigResponse(available=False, reason="vpn_not_configured")
 
     result = _ensure_xray_client(telegram_id, db)
     if not result:
-        return VpnConfigResponse(available=True, vless_link=None, uuid=None)
+        return VpnConfigResponse(available=True, reason="creating")
 
     client_uuid, vless_link = result
     return VpnConfigResponse(available=True, vless_link=vless_link, uuid=client_uuid)
@@ -1781,6 +1921,24 @@ class VpnOnlineResponse(BaseModel):
 def vpn_online(req: Request) -> VpnOnlineResponse:
     _require_admin(req)
     return VpnOnlineResponse(online=_xray_get_online_count())
+
+
+# ── Free proxy (no subscription required) ────────────────────────────────────
+
+class FreeProxyResponse(BaseModel):
+    server: str
+    port: int
+    secret: str
+    proxy_link: str
+
+
+@app.get("/proxy/free", response_model=FreeProxyResponse)
+def free_proxy() -> FreeProxyResponse:
+    server = MT_PROXY_SERVER or "176.123.161.97"
+    port = MT_PROXY_PORT if MT_PROXY_PORT else 443
+    secret = MT_PROXY_SECRET or "dd645eba01a59f188b5ba9db2564b44a00"
+    proxy_link = f"tg://proxy?server={server}&port={port}&secret={secret}"
+    return FreeProxyResponse(server=server, port=port, secret=secret, proxy_link=proxy_link)
 
 
 def _require_admin(req: Request) -> None:
@@ -2562,3 +2720,74 @@ def admin_proxy_status(req: Request) -> ProxyStatusResponse:
         pass
 
     return ProxyStatusResponse(server=server, port=port, online=online, latency_ms=latency_ms)
+
+
+# ── VPN management admin endpoints ───────────────────────────────────────────
+
+class VpnClientInfo(BaseModel):
+    id: int
+    telegram_id: int
+    uuid_prefix: str
+    uuid: str
+    active: bool
+    traffic_used_gb: float
+    traffic_limit_gb: int
+    max_devices: int
+    created_at: datetime
+    last_sync_at: datetime | None
+
+
+class VpnClientsResponse(BaseModel):
+    clients: list[VpnClientInfo]
+    total: int
+    active_count: int
+    total_traffic_gb: float
+
+
+@app.get("/admin/vpn-clients", response_model=VpnClientsResponse)
+def admin_vpn_clients(req: Request, db: Session = Depends(get_db)) -> VpnClientsResponse:
+    _require_admin(req)
+    clients = db.execute(
+        select(VpnClient).order_by(VpnClient.created_at.desc())
+    ).scalars().all()
+    items = [
+        VpnClientInfo(
+            id=c.id,
+            telegram_id=c.telegram_id,
+            uuid_prefix=c.uuid[:8],
+            uuid=c.uuid,
+            active=c.active,
+            traffic_used_gb=round(c.traffic_used_bytes / (1024 ** 3), 3),
+            traffic_limit_gb=c.traffic_limit_gb,
+            max_devices=c.max_devices,
+            created_at=c.created_at,
+            last_sync_at=c.last_sync_at,
+        )
+        for c in clients
+    ]
+    active_count = sum(1 for c in clients if c.active)
+    total_traffic_gb = round(sum(c.traffic_used_bytes for c in clients) / (1024 ** 3), 3)
+    return VpnClientsResponse(
+        clients=items,
+        total=len(items),
+        active_count=active_count,
+        total_traffic_gb=total_traffic_gb,
+    )
+
+
+@app.post("/admin/vpn-clients/{telegram_id}/deactivate", response_model=OkResponse)
+def admin_vpn_client_deactivate(telegram_id: int, req: Request, db: Session = Depends(get_db)) -> OkResponse:
+    _require_admin(req)
+    deactivate_vpn_client(telegram_id, db)
+    return OkResponse(ok=True)
+
+
+@app.post("/vpn/sync-traffic", response_model=OkResponse)
+def vpn_sync_traffic_manual(req: Request) -> OkResponse:
+    """Manually trigger VPN traffic sync from 3X-UI (admin only)."""
+    _require_admin(req)
+    try:
+        _process_vpn_traffic_sync()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    return OkResponse(ok=True)

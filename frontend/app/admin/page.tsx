@@ -29,6 +29,26 @@ type VpnOnline = {
   online: number
 }
 
+type VpnClientInfo = {
+  id: number
+  telegram_id: number
+  uuid_prefix: string
+  uuid: string
+  active: boolean
+  traffic_used_gb: number
+  traffic_limit_gb: number
+  max_devices: number
+  created_at: string
+  last_sync_at: string | null
+}
+
+type VpnClientsData = {
+  clients: VpnClientInfo[]
+  total: number
+  active_count: number
+  total_traffic_gb: number
+}
+
 type SubInfo = {
   id: number
   telegram_id: number
@@ -177,6 +197,8 @@ export default function AdminPage() {
   const [stats, setStats] = useState<Stats | null>(null)
   const [proxy, setProxy] = useState<ProxyStatus | null>(null)
   const [vpnOnline, setVpnOnline] = useState<VpnOnline | null>(null)
+  const [vpnClients, setVpnClients] = useState<VpnClientsData | null>(null)
+  const [vpnDeactivatingId, setVpnDeactivatingId] = useState<number | null>(null)
   const [overview, setOverview] = useState<UsersOverview | null>(null)
   const [funnel, setFunnel] = useState<FunnelStats | null>(null)
   const [userTab, setUserTab] = useState<"new" | "subscribers">("new")
@@ -240,12 +262,13 @@ export default function AdminPage() {
       setLoading(true)
       setError("")
       try {
-        const [sRes, pRes, ovRes, fRes, vRes] = await Promise.all([
+        const [sRes, pRes, ovRes, fRes, vRes, vcRes] = await Promise.all([
           fetch("/api/admin/stats", { headers: headers(activeKey), cache: "no-store" }),
           fetch("/api/admin/proxy-status", { headers: headers(activeKey), cache: "no-store" }),
           fetch("/api/admin/users-overview", { headers: headers(activeKey), cache: "no-store" }),
           fetch("/api/admin/funnel", { headers: headers(activeKey), cache: "no-store" }),
           fetch("/api/admin/vpn-online", { headers: headers(activeKey), cache: "no-store" }),
+          fetch("/api/admin/vpn-clients", { headers: headers(activeKey), cache: "no-store" }),
         ])
 
         if (sRes.status === 403 || ovRes.status === 403) {
@@ -261,12 +284,13 @@ export default function AdminPage() {
           return
         }
 
-        const [sData, pData, ovData, fData, vData] = await Promise.all([
+        const [sData, pData, ovData, fData, vData, vcData] = await Promise.all([
           sRes.json(),
           pRes.json(),
           ovRes.json(),
           fRes.ok ? fRes.json() : Promise.resolve(null),
           vRes.ok ? vRes.json() : Promise.resolve(null),
+          vcRes.ok ? vcRes.json() : Promise.resolve(null),
         ])
         const rawStats = sData as Stats & { marketing_opt_out_users?: number }
         setStats({
@@ -275,6 +299,7 @@ export default function AdminPage() {
         })
         setProxy(pData)
         setVpnOnline(vData as VpnOnline | null)
+        setVpnClients(vcData as VpnClientsData | null)
         setOverview(ovData as UsersOverview)
         setFunnel(fData as FunnelStats | null)
         setAuthed(true)
@@ -484,6 +509,7 @@ export default function AdminPage() {
     setStats(null)
     setProxy(null)
     setVpnOnline(null)
+    setVpnClients(null)
     setKey("")
     setError("")
   }
@@ -1087,6 +1113,106 @@ export default function AdminPage() {
             </div>
           )}
         </section>
+
+        {/* VPN Clients section */}
+        {vpnClients !== null && (
+          <section>
+            <h2 className="text-lg font-semibold mb-4 text-gray-300">VPN клиенты (VLESS)</h2>
+
+            {/* Summary cards */}
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
+              <div className="bg-gray-900 border border-gray-800 rounded-xl p-4">
+                <div className="text-xs text-gray-400 mb-1">Всего клиентов</div>
+                <div className="text-2xl font-bold text-blue-400">{vpnClients.total}</div>
+              </div>
+              <div className="bg-gray-900 border border-gray-800 rounded-xl p-4">
+                <div className="text-xs text-gray-400 mb-1">Активных</div>
+                <div className="text-2xl font-bold text-emerald-400">{vpnClients.active_count}</div>
+              </div>
+              <div className="bg-gray-900 border border-gray-800 rounded-xl p-4">
+                <div className="text-xs text-gray-400 mb-1">Отключённых</div>
+                <div className="text-2xl font-bold text-orange-400">{vpnClients.total - vpnClients.active_count}</div>
+              </div>
+              <div className="bg-gray-900 border border-gray-800 rounded-xl p-4">
+                <div className="text-xs text-gray-400 mb-1">Суммарный трафик</div>
+                <div className="text-2xl font-bold text-cyan-400">{vpnClients.total_traffic_gb.toFixed(2)} GB</div>
+              </div>
+            </div>
+
+            <div className="bg-gray-900 border border-gray-800 rounded-2xl overflow-hidden">
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b border-gray-800 text-gray-400 text-left">
+                      <th className="px-4 py-3 font-medium">Telegram ID</th>
+                      <th className="px-4 py-3 font-medium">UUID</th>
+                      <th className="px-4 py-3 font-medium">Статус</th>
+                      <th className="px-4 py-3 font-medium">Трафик</th>
+                      <th className="px-4 py-3 font-medium">Создан</th>
+                      <th className="px-4 py-3 font-medium">Синхронизирован</th>
+                      <th className="px-4 py-3 font-medium text-right">Действие</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {vpnClients.clients.map((c) => (
+                      <tr key={c.id} className="border-b border-gray-800/50 hover:bg-gray-800/30 transition-colors">
+                        <td className="px-4 py-3 font-mono">{c.telegram_id}</td>
+                        <td className="px-4 py-3 font-mono text-xs text-gray-400" title={c.uuid}>
+                          {c.uuid_prefix}…
+                        </td>
+                        <td className="px-4 py-3">
+                          <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${c.active ? "bg-emerald-100 text-emerald-800" : "bg-gray-700 text-gray-400"}`}>
+                            {c.active ? "Активен" : "Отключён"}
+                          </span>
+                        </td>
+                        <td className="px-4 py-3 text-gray-300 font-mono text-xs">
+                          {c.traffic_used_gb.toFixed(3)} GB
+                          {c.traffic_limit_gb > 0 && <span className="text-gray-500"> / {c.traffic_limit_gb} GB</span>}
+                        </td>
+                        <td className="px-4 py-3 text-gray-400 text-xs">{formatDate(c.created_at)}</td>
+                        <td className="px-4 py-3 text-gray-500 text-xs">{c.last_sync_at ? formatDate(c.last_sync_at) : "—"}</td>
+                        <td className="px-4 py-3 text-right">
+                          {c.active ? (
+                            <button
+                              type="button"
+                              disabled={vpnDeactivatingId === c.telegram_id}
+                              onClick={async () => {
+                                setVpnDeactivatingId(c.telegram_id)
+                                try {
+                                  const res = await fetch(`/api/admin/vpn-clients/${c.telegram_id}/deactivate`, {
+                                    method: "POST",
+                                    headers: { ...headers(), "Content-Type": "application/json" },
+                                    body: "{}",
+                                    cache: "no-store",
+                                  })
+                                  if (res.ok) await fetchAll()
+                                } finally {
+                                  setVpnDeactivatingId(null)
+                                }
+                              }}
+                              className="px-3 py-1.5 text-xs font-medium rounded-lg bg-red-900/60 text-red-300 hover:bg-red-900 disabled:opacity-50 transition-colors"
+                            >
+                              {vpnDeactivatingId === c.telegram_id ? "…" : "Деактивировать"}
+                            </button>
+                          ) : (
+                            <span className="text-xs text-gray-600">—</span>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                    {vpnClients.clients.length === 0 && (
+                      <tr>
+                        <td colSpan={7} className="px-4 py-8 text-center text-gray-500">
+                          VPN клиентов нет
+                        </td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </section>
+        )}
 
         {stats?.referrals && stats.referrals.length > 0 && (
           <section>

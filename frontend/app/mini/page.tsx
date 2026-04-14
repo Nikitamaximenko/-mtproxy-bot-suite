@@ -19,8 +19,16 @@ type SubscriptionData = {
 
 type VpnData = {
   available: boolean
+  reason?: string | null
   vless_link: string | null
   uuid: string | null
+}
+
+type FreeProxyData = {
+  server: string
+  port: number
+  secret: string
+  proxy_link: string
 }
 
 function FrostIcon({ className }: { className?: string }) {
@@ -300,6 +308,10 @@ export default function MiniAppPage() {
   const [vpnLinkCopied, setVpnLinkCopied] = useState(false)
   const [vpnPlatform, setVpnPlatform] = useState<"android" | "ios" | "windows" | "mac">("android")
 
+  // Free proxy (no subscription needed)
+  const [freeProxy, setFreeProxy] = useState<FreeProxyData | null>(null)
+  const [freeProxyCopied, setFreeProxyCopied] = useState(false)
+
   useEffect(() => {
     const params = new URLSearchParams(window.location.search)
     const hasTgIdInUrl = params.has("tg_id")
@@ -377,6 +389,21 @@ export default function MiniAppPage() {
     navigator.clipboard.writeText(vpn.vless_link)
     setVpnLinkCopied(true)
     setTimeout(() => setVpnLinkCopied(false), 2000)
+  }
+
+  // Fetch free proxy on mount (shown in sell view)
+  useEffect(() => {
+    fetch("/api/proxy-free", { cache: "no-store" })
+      .then((r) => r.ok ? r.json() : null)
+      .then((d) => d && setFreeProxy(d as FreeProxyData))
+      .catch(() => {/* ignore */})
+  }, [])
+
+  const handleCopyFreeProxy = () => {
+    if (!freeProxy?.proxy_link) return
+    navigator.clipboard.writeText(freeProxy.proxy_link)
+    setFreeProxyCopied(true)
+    setTimeout(() => setFreeProxyCopied(false), 2000)
   }
 
   const isPaid = !!sub?.active
@@ -939,6 +966,32 @@ export default function MiniAppPage() {
               {errorDetail && (
                 <p className="text-xs text-center break-words px-1" style={{ color: "#6B7280" }}>{errorDetail}</p>
               )}
+            </div>
+          )}
+
+          {/* Free proxy section */}
+          {freeProxy && (
+            <div className="mt-5 p-4" style={{ background: "#F7F8FA", borderRadius: "16px", border: "1px solid #E5E7EB" }}>
+              <div className="flex items-center justify-between mb-2">
+                <p className="text-xs font-semibold" style={{ color: "#374151" }}>📡 Бесплатный MTProxy для Telegram</p>
+                <button
+                  onClick={handleCopyFreeProxy}
+                  className="flex items-center gap-1 text-xs touch-manipulation"
+                  style={{ color: freeProxyCopied ? "#16A34A" : "#6B7280" }}
+                >
+                  {freeProxyCopied ? <><Check className="w-3 h-3" />Скопировано</> : <><Copy className="w-3 h-3" />Копировать</>}
+                </button>
+              </div>
+              <button
+                onClick={() => openTelegramLink(freeProxy.proxy_link)}
+                className="w-full flex items-center justify-center gap-2 text-sm font-semibold touch-manipulation active:scale-95 transition-all"
+                style={{ background: "#FFFFFF", color: "#374151", height: "44px", borderRadius: "12px", border: "1px solid #E5E7EB" }}
+              >
+                Подключить прокси бесплатно
+              </button>
+              <p className="text-xs mt-2 text-center" style={{ color: "#9CA3AF" }}>
+                Только Telegram · без VPN · без регистрации
+              </p>
             </div>
           )}
 
