@@ -312,6 +312,24 @@ export default function MiniAppPage() {
   const [freeProxy, setFreeProxy] = useState<FreeProxyData | null>(null)
   const [freeProxyCopied, setFreeProxyCopied] = useState(false)
 
+  // VPN server ping
+  const [vpnPing, setVpnPing] = useState<{ online: boolean; latency_ms: number | null } | null>(null)
+
+  useEffect(() => {
+    const checkPing = async () => {
+      try {
+        const r = await fetch("/api/vpn-ping")
+        const d = await r.json() as { online: boolean; latency_ms: number | null }
+        setVpnPing(d)
+      } catch {
+        setVpnPing({ online: false, latency_ms: null })
+      }
+    }
+    checkPing()
+    const interval = setInterval(checkPing, 30000)
+    return () => clearInterval(interval)
+  }, [])
+
   useEffect(() => {
     const params = new URLSearchParams(window.location.search)
     const hasTgIdInUrl = params.has("tg_id")
@@ -939,6 +957,26 @@ export default function MiniAppPage() {
             {showEmailError && (
               <p className="text-xs mt-1.5" style={{ color: "#EF4444" }}>Введите корректный email (например, you@mail.ru)</p>
             )}
+          </div>
+
+          {/* VPN server ping */}
+          <div style={{
+            display: "flex", alignItems: "center", gap: "8px",
+            background: "#F7F8FA", borderRadius: "10px",
+            padding: "8px 14px", marginBottom: "16px",
+            fontSize: "13px", color: "#6B7280",
+          }}>
+            <span style={{
+              width: "8px", height: "8px", borderRadius: "50%",
+              background: vpnPing?.online ? "#10B981" : "#9CA3AF",
+              display: "inline-block", flexShrink: 0,
+            }} />
+            {vpnPing === null
+              ? "Проверяем сервер..."
+              : vpnPing.online
+                ? `🇫🇮 Финляндия · ${vpnPing.latency_ms} мс · Онлайн`
+                : "Сервер недоступен"
+            }
           </div>
 
           {/* 6. CTA Button */}

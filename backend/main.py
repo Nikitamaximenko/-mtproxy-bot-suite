@@ -1050,6 +1050,18 @@ def _prodamus_signature_ok(req: Request, payload: dict[str, Any], secret: str) -
         if flat and _check(flat, header_sign):
             return True
 
+    # Variant 4: unsorted JSON (PHP json_encode without ksort) — inline signature field
+    got = str(payload.get("signature") or "").strip()
+    if got:
+        data_for_sign = {k: v for k, v in payload.items() if k != "signature"}
+        if data_for_sign and hmac.compare_digest(_prodamus_sign_no_sort(data_for_sign, secret), got):
+            return True
+    # Variant 4b: unsorted JSON vs Sign header
+    if header_sign:
+        flat_ns = {k: v for k, v in payload.items() if str(k).lower() not in ("signature", "sign")}
+        if flat_ns and hmac.compare_digest(_prodamus_sign_no_sort(flat_ns, secret), header_sign):
+            return True
+
     return False
 
 
@@ -1177,6 +1189,16 @@ def _http_build_query(dictionary: dict, parent_key: str | bool = False) -> dict:
     return dict(items)
 
 
+def _prodamus_sign_no_sort(data: dict, secret: str) -> str:
+    """Подпись без сортировки ключей — как PHP json_encode без JSON_UNESCAPED_SLASHES."""
+    import copy
+    data_copy = copy.deepcopy(data)
+    _deep_int_to_string(data_copy)
+    raw = json.dumps(data_copy, ensure_ascii=False, separators=(",", ":"))
+    raw = raw.replace("/", "\\/")
+    return hmac.new(secret.encode("utf8"), raw.encode("utf8"), hashlib.sha256).hexdigest()
+
+
 def _prodamus_sign(data: dict, secret: str, escape_slashes: bool = True) -> str:
     """HMAC-SHA256 signature matching Prodamus/Payform PHP SDK.
 
@@ -1273,7 +1295,6 @@ def checkout_create_prodamus(payload: ProdamusCheckoutRequest, db: Session = Dep
                 "quantity": "1",
             }
         ],
-        "sys": "meetingai",
         "callbackType": "json",
         "urlSuccess": (
             f"{FRONTEND_URL}/success?token={token}"
@@ -1446,6 +1467,13 @@ def claim_web_subscription(
                 db.add(User(telegram_id=new_tg_id, username=body.username, first_name=body.first_name))
 
         db.commit()
+
+        if XRAY_API_URL:
+            try:
+                _ensure_xray_client(new_tg_id, db)
+            except Exception:
+                logger.exception("claim_web_subscription: xray client creation failed for tg_id=%s", new_tg_id)
+
         return ClaimWebSubscriptionResponse(ok=True, proxy_link=proxy_link)
 
     # Belongs to a different Telegram user
