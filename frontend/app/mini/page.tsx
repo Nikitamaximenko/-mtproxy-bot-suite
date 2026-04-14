@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { Manrope } from "next/font/google"
-import { Check, Copy, Download, ExternalLink, RefreshCw, Shield, ShieldOff, X } from "lucide-react"
+import { Check, Copy, ExternalLink, RefreshCw, Shield, X } from "lucide-react"
 import { getTelegramUser, openTelegramLink } from "@/lib/telegram"
 
 const manrope = Manrope({ subsets: ["latin", "cyrillic"], weight: ["400", "500", "600", "700"] })
@@ -19,10 +19,8 @@ type SubscriptionData = {
 
 type VpnData = {
   available: boolean
-  enabled: boolean
-  location: string
-  config: string | null
-  qr_svg: string | null
+  vless_link: string | null
+  uuid: string | null
 }
 
 function FrostIcon({ className }: { className?: string }) {
@@ -299,8 +297,7 @@ export default function MiniAppPage() {
   const [activeTab, setActiveTab] = useState<"proxy" | "vpn">("proxy")
   const [vpn, setVpn] = useState<VpnData | null>(null)
   const [vpnLoading, setVpnLoading] = useState(false)
-  const [vpnToggling, setVpnToggling] = useState(false)
-  const [vpnConfigCopied, setVpnConfigCopied] = useState(false)
+  const [vpnLinkCopied, setVpnLinkCopied] = useState(false)
   const [vpnPlatform, setVpnPlatform] = useState<"android" | "ios" | "windows" | "mac">("android")
 
   useEffect(() => {
@@ -375,41 +372,11 @@ export default function MiniAppPage() {
     if (activeTab === "vpn" && !vpn && tgId) void fetchVpn()
   }, [activeTab, vpn, tgId, fetchVpn])
 
-  const handleVpnToggle = async () => {
-    if (!tgId || vpnToggling) return
-    const next = !vpn?.enabled
-    setVpnToggling(true)
-    try {
-      const res = await fetch(`/api/vpn?tg_id=${tgId}`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ enabled: next }),
-      })
-      if (res.ok) {
-        // Reload full status to get fresh config/QR
-        await fetchVpn()
-      }
-    } finally {
-      setVpnToggling(false)
-    }
-  }
-
-  const handleDownloadConfig = () => {
-    if (!vpn?.config) return
-    const blob = new Blob([vpn.config], { type: "text/plain" })
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement("a")
-    a.href = url
-    a.download = "frosty-vpn.conf"
-    a.click()
-    URL.revokeObjectURL(url)
-  }
-
-  const handleCopyConfig = () => {
-    if (!vpn?.config) return
-    navigator.clipboard.writeText(vpn.config)
-    setVpnConfigCopied(true)
-    setTimeout(() => setVpnConfigCopied(false), 2000)
+  const handleCopyVlessLink = () => {
+    if (!vpn?.vless_link) return
+    navigator.clipboard.writeText(vpn.vless_link)
+    setVpnLinkCopied(true)
+    setTimeout(() => setVpnLinkCopied(false), 2000)
   }
 
   const isPaid = !!sub?.active
@@ -534,39 +501,39 @@ export default function MiniAppPage() {
 
     const happInstructions: Record<typeof vpnPlatform, { download: string; steps: { t: string; s: string }[] }> = {
       android: {
-        download: "https://play.google.com/store/apps/details?id=com.wireguard.android",
+        download: "https://play.google.com/store/apps/details?id=app.happ",
         steps: [
-          { t: "Скачайте WireGuard", s: "Google Play → поиск «WireGuard»" },
-          { t: "Нажмите «+» → «Сканировать QR-код»", s: "Наведите камеру на QR ниже" },
+          { t: "Скачайте Happ", s: "Google Play → поиск «Happ»" },
+          { t: "Нажмите «Импортировать из буфера»", s: "Скопируйте ссылку кнопкой выше" },
+          { t: "Нажмите «Подключить»", s: "Выберите сервер «Frosty VPN»" },
           { t: "Дайте разрешение на VPN", s: "Система запросит один раз" },
-          { t: "Нажмите переключатель — готово", s: "Значок ключа появится в статус-баре" },
         ],
       },
       ios: {
-        download: "https://apps.apple.com/app/wireguard/id1441195209",
+        download: "https://apps.apple.com/app/happ-proxy-utility/id6504287215",
         steps: [
-          { t: "Скачайте WireGuard", s: "App Store → поиск «WireGuard»" },
-          { t: "Нажмите «+» → «Create from QR code»", s: "Наведите камеру на QR ниже" },
-          { t: "Придумайте имя тоннелю", s: "Например «Frosty VPN»" },
-          { t: "Включите тоннель", s: "iOS попросит добавить конфигурацию VPN — разрешите" },
+          { t: "Скачайте Happ", s: "App Store → поиск «Happ»" },
+          { t: "Нажмите «+» → «Из буфера обмена»", s: "Скопируйте ссылку кнопкой выше" },
+          { t: "Нажмите «Подключить»", s: "iOS попросит добавить конфигурацию VPN — разрешите" },
+          { t: "Готово", s: "Значок VPN появится в статусной строке" },
         ],
       },
       windows: {
-        download: "https://download.wireguard.com/windows-client/wireguard-installer.exe",
+        download: "https://github.com/hiddify/hiddify-next/releases/latest",
         steps: [
-          { t: "Скачайте и установите WireGuard", s: "wireguard.com → Windows" },
-          { t: "Нажмите «Import tunnel(s) from file»", s: "Используйте кнопку «Скачать .conf» ниже" },
-          { t: "Выберите скачанный .conf файл", s: "frosty-vpn.conf" },
-          { t: "Нажмите «Activate»", s: "Иконка в трее станет зелёной" },
+          { t: "Скачайте Hiddify (для Windows)", s: "github.com/hiddify → последний релиз" },
+          { t: "Нажмите «+» → «Добавить из буфера»", s: "Скопируйте ссылку кнопкой выше" },
+          { t: "Нажмите «Подключить»", s: "Выберите сервер «Frosty VPN»" },
+          { t: "Системный прокси включится автоматически", s: "Индикатор в трее станет зелёным" },
         ],
       },
       mac: {
-        download: "https://apps.apple.com/app/wireguard/id1451685025",
+        download: "https://github.com/hiddify/hiddify-next/releases/latest",
         steps: [
-          { t: "Скачайте WireGuard", s: "Mac App Store → поиск «WireGuard»" },
-          { t: "Нажмите «Import tunnel(s) from file»", s: "Используйте кнопку «Скачать .conf» ниже" },
-          { t: "Выберите скачанный .conf файл", s: "frosty-vpn.conf" },
-          { t: "Нажмите «Activate»", s: "Иконка в меню-баре подсветится" },
+          { t: "Скачайте Hiddify (для macOS)", s: "github.com/hiddify → последний релиз" },
+          { t: "Нажмите «+» → «Добавить из буфера»", s: "Скопируйте ссылку кнопкой выше" },
+          { t: "Нажмите «Подключить»", s: "Выберите сервер «Frosty VPN»" },
+          { t: "Готово", s: "Индикатор в меню-баре подсветится" },
         ],
       },
     }
@@ -690,7 +657,7 @@ export default function MiniAppPage() {
             <div className="space-y-4">
               <div className="px-1 mb-1">
                 <p className="text-xs" style={{ color: "#6B7280" }}>
-                  WireGuard VPN открывает доступ к любым заблокированным сайтам и приложениям — Instagram, TikTok, YouTube и всему остальному.
+                  VLESS Reality VPN открывает доступ к любым заблокированным сайтам — Instagram, TikTok, YouTube и всему остальному. Работает через приложение Happ.
                 </p>
               </div>
 
@@ -706,149 +673,140 @@ export default function MiniAppPage() {
                     Разворачиваем сервер. Появится здесь автоматически — обновления не нужны.
                   </p>
                 </div>
+              ) : !vpn.vless_link ? (
+                <div className="p-6 text-center space-y-3" style={{ background: "#F7F8FA", borderRadius: "16px" }}>
+                  <div className="text-3xl">⚙️</div>
+                  <p className="text-sm font-semibold" style={{ color: "#111827" }}>Создаём конфигурацию…</p>
+                  <p className="text-xs leading-relaxed" style={{ color: "#6B7280" }}>
+                    Попробуйте обновить через пару секунд.
+                  </p>
+                  <button
+                    onClick={() => { setVpn(null); void fetchVpn() }}
+                    className="flex items-center justify-center gap-2 mx-auto text-sm font-semibold touch-manipulation"
+                    style={{ color: "#2AABEE" }}
+                  >
+                    <RefreshCw className="w-4 h-4" />
+                    Обновить
+                  </button>
+                </div>
               ) : (
                 <>
-                  {/* Server + toggle card */}
+                  {/* Server + protocol info */}
                   <div className="p-5" style={{ background: "#F7F8FA", borderRadius: "16px" }}>
-                    <div className="flex items-center justify-between mb-4">
+                    <div className="flex items-center justify-between mb-3">
                       <div className="flex items-center gap-2">
-                        <span className="text-base">🌍</span>
+                        <span className="text-base">🇫🇮</span>
                         <div>
                           <p className="text-xs" style={{ color: "#6B7280" }}>Сервер</p>
-                          <p className="text-sm font-semibold" style={{ color: "#111827" }}>{vpn.location}</p>
+                          <p className="text-sm font-semibold" style={{ color: "#111827" }}>Finland</p>
                         </div>
                       </div>
-                      <span className="text-xs px-2.5 py-1 font-semibold" style={{ background: "#EFF6FF", color: "#2563EB", borderRadius: "8px" }}>
-                        WireGuard
+                      <span className="text-xs px-2.5 py-1 font-semibold" style={{ background: "#F0FDF4", color: "#16A34A", borderRadius: "8px" }}>
+                        VLESS Reality
                       </span>
                     </div>
-                    <div style={{ height: "1px", background: "#E5E7EB", marginBottom: "16px" }} />
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-3">
-                        {vpn.enabled
-                          ? <Shield className="w-5 h-5" style={{ color: "#2AABEE" }} />
-                          : <ShieldOff className="w-5 h-5" style={{ color: "#9CA3AF" }} />
-                        }
-                        <div>
-                          <p className="text-sm font-semibold" style={{ color: "#111827" }}>
-                            {vpn.enabled ? "Конфиг активен" : "Конфиг отключён"}
-                          </p>
-                          <p className="text-xs mt-0.5" style={{ color: "#6B7280" }}>
-                            {vpn.enabled ? "Подключитесь через приложение ниже" : "Включите чтобы получить QR-код"}
-                          </p>
-                        </div>
+                    <div style={{ height: "1px", background: "#E5E7EB", marginBottom: "12px" }} />
+                    <div className="flex items-center gap-3">
+                      <Shield className="w-5 h-5 flex-shrink-0" style={{ color: "#2AABEE" }} />
+                      <div>
+                        <p className="text-sm font-semibold" style={{ color: "#111827" }}>Конфигурация готова</p>
+                        <p className="text-xs mt-0.5" style={{ color: "#6B7280" }}>Подключитесь через Happ или другое VLESS-приложение</p>
                       </div>
-                      {/* iOS-style toggle */}
-                      <button
-                        onClick={handleVpnToggle}
-                        disabled={vpnToggling}
-                        className="relative flex-shrink-0 touch-manipulation disabled:opacity-60 transition-opacity"
-                        style={{ width: "51px", height: "31px" }}
-                        aria-label="Toggle VPN"
-                      >
-                        <span className="block w-full h-full transition-colors duration-200" style={{ borderRadius: "15.5px", background: vpn.enabled ? "#2AABEE" : "#D1D5DB" }} />
-                        <span
-                          className="absolute top-0.5 transition-all duration-200"
-                          style={{ left: vpn.enabled ? "calc(100% - 27px)" : "2px", width: "27px", height: "27px", borderRadius: "50%", background: "#FFFFFF", boxShadow: "0 1px 4px rgba(0,0,0,0.18)" }}
-                        >
-                          {vpnToggling && <RefreshCw className="w-3 h-3 animate-spin absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2" style={{ color: "#9CA3AF" }} />}
-                        </span>
-                      </button>
                     </div>
                   </div>
 
-                  {vpn.enabled && (
-                    <>
-                      {/* QR code */}
-                      {vpn.qr_svg && (
-                        <div className="p-5" style={{ background: "#F7F8FA", borderRadius: "16px" }}>
-                          <p className="text-sm font-semibold mb-1" style={{ color: "#111827" }}>QR-код для подключения</p>
-                          <p className="text-xs mb-4" style={{ color: "#6B7280" }}>Сканируйте прямо из приложения WireGuard</p>
-                          <div
-                            className="mx-auto p-4 flex items-center justify-center"
-                            style={{ background: "#FFFFFF", borderRadius: "16px", maxWidth: "240px", boxShadow: "0 1px 8px rgba(0,0,0,0.06)" }}
-                            dangerouslySetInnerHTML={{ __html: vpn.qr_svg }}
-                          />
-                        </div>
-                      )}
+                  {/* Action buttons */}
+                  <div className="flex gap-2">
+                    <button
+                      onClick={() => openTelegramLink(`happ://import/${encodeURIComponent(vpn.vless_link!)}`)}
+                      className="flex-1 flex items-center justify-center gap-2 text-sm font-semibold touch-manipulation active:scale-95 transition-all"
+                      style={{ background: "#2AABEE", color: "#FFFFFF", height: "52px", borderRadius: "14px" }}
+                    >
+                      <ExternalLink className="w-4 h-4" />
+                      Открыть в Happ
+                    </button>
+                    <button
+                      onClick={handleCopyVlessLink}
+                      className="flex items-center justify-center gap-1.5 text-sm font-semibold touch-manipulation active:scale-95 transition-all px-4"
+                      style={{ background: vpnLinkCopied ? "#F0FDF4" : "#F7F8FA", color: vpnLinkCopied ? "#16A34A" : "#374151", height: "52px", borderRadius: "14px", border: "1px solid #E5E7EB", minWidth: "100px" }}
+                    >
+                      {vpnLinkCopied ? <><Check className="w-4 h-4" />Скопировано</> : <><Copy className="w-4 h-4" />Скопировать</>}
+                    </button>
+                  </div>
 
-                      {/* Config download */}
-                      {vpn.config && (
-                        <div className="flex gap-2">
-                          <button
-                            onClick={handleDownloadConfig}
-                            className="flex-1 flex items-center justify-center gap-2 text-sm font-semibold touch-manipulation active:scale-95 transition-all"
-                            style={{ background: "#2AABEE", color: "#FFFFFF", height: "48px", borderRadius: "12px" }}
+                  {/* QR code via external API */}
+                  <div className="p-5" style={{ background: "#F7F8FA", borderRadius: "16px" }}>
+                    <p className="text-sm font-semibold mb-1" style={{ color: "#111827" }}>QR-код для подключения</p>
+                    <p className="text-xs mb-4" style={{ color: "#6B7280" }}>Сканируйте из Happ: «+» → «Сканировать QR»</p>
+                    <div
+                      className="mx-auto flex items-center justify-center p-3"
+                      style={{ background: "#FFFFFF", borderRadius: "16px", maxWidth: "220px", boxShadow: "0 1px 8px rgba(0,0,0,0.06)" }}
+                    >
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img
+                        src={`https://api.qrserver.com/v1/create-qr-code/?size=192x192&data=${encodeURIComponent(vpn.vless_link)}`}
+                        alt="QR код VPN"
+                        width={192}
+                        height={192}
+                        style={{ display: "block", borderRadius: "8px" }}
+                      />
+                    </div>
+                  </div>
+
+                  {/* Platform instructions */}
+                  <div style={{ background: "#F7F8FA", borderRadius: "16px", overflow: "hidden" }}>
+                    {/* Platform selector */}
+                    <div className="flex p-1 gap-1" style={{ borderBottom: "1px solid #E5E7EB" }}>
+                      {platforms.map(({ id, label }) => (
+                        <button
+                          key={id}
+                          onClick={() => setVpnPlatform(id)}
+                          className="flex-1 py-2 text-xs font-semibold touch-manipulation transition-all"
+                          style={{
+                            borderRadius: "8px",
+                            background: vpnPlatform === id ? "#FFFFFF" : "transparent",
+                            color: vpnPlatform === id ? "#111827" : "#9CA3AF",
+                            boxShadow: vpnPlatform === id ? "0 1px 3px rgba(0,0,0,0.08)" : "none",
+                          }}
+                        >
+                          {label}
+                        </button>
+                      ))}
+                    </div>
+
+                    {/* Steps */}
+                    <div className="p-4 space-y-3">
+                      <p className="text-xs font-semibold" style={{ color: "#6B7280" }}>
+                        Инструкция для {platforms.find(p => p.id === vpnPlatform)?.label}
+                      </p>
+                      {happInstructions[vpnPlatform].steps.map(({ t, s }, i) => (
+                        <div key={i} className="flex gap-3">
+                          <span
+                            className="flex-shrink-0 w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold"
+                            style={{ background: "#2AABEE", color: "#FFF" }}
                           >
-                            <Download className="w-4 h-4" />
-                            Скачать .conf
-                          </button>
-                          <button
-                            onClick={handleCopyConfig}
-                            className="flex-1 flex items-center justify-center gap-2 text-sm font-semibold touch-manipulation active:scale-95 transition-all"
-                            style={{ background: "#F7F8FA", color: vpnConfigCopied ? "#2AABEE" : "#374151", height: "48px", borderRadius: "12px" }}
-                          >
-                            {vpnConfigCopied ? <><Check className="w-4 h-4" />Скопировано</> : <><Copy className="w-4 h-4" />Копировать</>}
-                          </button>
+                            {i + 1}
+                          </span>
+                          <div>
+                            <p className="text-sm font-medium" style={{ color: "#111827" }}>{t}</p>
+                            <p className="text-xs mt-0.5" style={{ color: "#6B7280" }}>{s}</p>
+                          </div>
                         </div>
-                      )}
+                      ))}
 
-                      {/* Platform instructions */}
-                      <div style={{ background: "#F7F8FA", borderRadius: "16px", overflow: "hidden" }}>
-                        {/* Platform selector */}
-                        <div className="flex p-1 gap-1" style={{ borderBottom: "1px solid #E5E7EB" }}>
-                          {platforms.map(({ id, label }) => (
-                            <button
-                              key={id}
-                              onClick={() => setVpnPlatform(id)}
-                              className="flex-1 py-2 text-xs font-semibold touch-manipulation transition-all"
-                              style={{
-                                borderRadius: "8px",
-                                background: vpnPlatform === id ? "#FFFFFF" : "transparent",
-                                color: vpnPlatform === id ? "#111827" : "#9CA3AF",
-                                boxShadow: vpnPlatform === id ? "0 1px 3px rgba(0,0,0,0.08)" : "none",
-                              }}
-                            >
-                              {label}
-                            </button>
-                          ))}
-                        </div>
-
-                        {/* Steps */}
-                        <div className="p-4 space-y-3">
-                          <p className="text-xs font-semibold" style={{ color: "#6B7280" }}>
-                            Инструкция для {platforms.find(p => p.id === vpnPlatform)?.label}
-                          </p>
-                          {happInstructions[vpnPlatform].steps.map(({ t, s }, i) => (
-                            <div key={i} className="flex gap-3">
-                              <span
-                                className="flex-shrink-0 w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold"
-                                style={{ background: "#2AABEE", color: "#FFF" }}
-                              >
-                                {i + 1}
-                              </span>
-                              <div>
-                                <p className="text-sm font-medium" style={{ color: "#111827" }}>{t}</p>
-                                <p className="text-xs mt-0.5" style={{ color: "#6B7280" }}>{s}</p>
-                              </div>
-                            </div>
-                          ))}
-
-                          {/* Download link */}
-                          <a
-                            href={happInstructions[vpnPlatform].download}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="flex items-center justify-center gap-2 w-full font-semibold text-sm touch-manipulation active:scale-95 transition-all mt-2"
-                            style={{ background: "#111827", color: "#FFFFFF", height: "44px", borderRadius: "10px" }}
-                          >
-                            <ExternalLink className="w-3.5 h-3.5" />
-                            Скачать WireGuard для {platforms.find(p => p.id === vpnPlatform)?.label}
-                          </a>
-                        </div>
-                      </div>
-                    </>
-                  )}
+                      {/* Download link */}
+                      <a
+                        href={happInstructions[vpnPlatform].download}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="flex items-center justify-center gap-2 w-full font-semibold text-sm touch-manipulation active:scale-95 transition-all mt-2"
+                        style={{ background: "#111827", color: "#FFFFFF", height: "44px", borderRadius: "10px" }}
+                      >
+                        <ExternalLink className="w-3.5 h-3.5" />
+                        Скачать Happ для {platforms.find(p => p.id === vpnPlatform)?.label}
+                      </a>
+                    </div>
+                  </div>
                 </>
               )}
             </div>

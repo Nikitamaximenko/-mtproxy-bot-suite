@@ -3,12 +3,12 @@ import { NextRequest, NextResponse } from "next/server"
 const BACKEND = (process.env.BACKEND_URL || "http://localhost:8000").replace(/\/+$/, "")
 
 export async function GET(req: NextRequest) {
-  const tgId = Number(req.nextUrl.searchParams.get("tg_id"))
-  if (!Number.isFinite(tgId) || tgId < 1) {
-    return NextResponse.json({ error: "Missing tg_id" }, { status: 400 })
-  }
+  const adminKey = req.headers.get("x-admin-key") || ""
   try {
-    const res = await fetch(`${BACKEND}/vpn/config/${tgId}`, { cache: "no-store" })
+    const res = await fetch(`${BACKEND}/vpn/online`, {
+      headers: { "x-admin-key": adminKey },
+      cache: "no-store",
+    })
     const text = await res.text()
     return NextResponse.json(JSON.parse(text), { status: res.ok ? 200 : res.status })
   } catch (e) {

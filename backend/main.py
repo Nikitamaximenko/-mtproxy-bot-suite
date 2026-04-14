@@ -100,6 +100,16 @@ WG_EASY_URL = (os.getenv("WG_EASY_URL") or "").strip().rstrip("/")
 WG_EASY_PASSWORD = (os.getenv("WG_EASY_PASSWORD") or "").strip()
 WG_SERVER_LOCATION = (os.getenv("WG_SERVER_LOCATION") or "Netherlands").strip()
 
+# VLESS Reality VPN via 3X-UI (Xray)
+XRAY_API_URL = (os.getenv("XRAY_API_URL") or "").strip().rstrip("/")
+XRAY_USERNAME = (os.getenv("XRAY_USERNAME") or "admin").strip()
+XRAY_PASSWORD = (os.getenv("XRAY_PASSWORD") or "").strip()
+XRAY_INBOUND_ID = int((os.getenv("XRAY_INBOUND_ID") or "1").strip() or "1")
+XRAY_PUBLIC_KEY = (os.getenv("XRAY_PUBLIC_KEY") or "").strip()
+XRAY_SHORT_ID = (os.getenv("XRAY_SHORT_ID") or "").strip()
+XRAY_SNI = (os.getenv("XRAY_SNI") or "www.microsoft.com").strip()
+XRAY_SERVER_IP = (os.getenv("XRAY_SERVER_IP") or "").strip()
+
 
 def utcnow() -> datetime:
     return datetime.now(timezone.utc)
@@ -166,6 +176,17 @@ class VpnPeer(Base):
     wg_client_id: Mapped[str] = mapped_column(String(64), nullable=False)
     server_location: Mapped[str] = mapped_column(String(64), default="Netherlands", nullable=False)
     enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
+
+
+class VpnClient(Base):
+    """One VLESS Reality client per user, managed via 3X-UI."""
+    __tablename__ = "vpn_clients"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    telegram_id: Mapped[int] = mapped_column(BigInteger, unique=True, index=True, nullable=False)
+    uuid: Mapped[str] = mapped_column(String(36), nullable=False)
+    vless_link: Mapped[str] = mapped_column(String(1024), nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
 
 
@@ -878,6 +899,13 @@ async def lava_webhook(req: Request, db: Session = Depends(get_db)) -> OkRespons
     db.commit()
     logger.info("Subscription activated for tg_id=%s contract=%s", sub.telegram_id, contract_id)
 
+    # Auto-create VLESS client (best effort — don't fail the webhook on error)
+    if XRAY_API_URL and int(sub.telegram_id) > 0:
+        try:
+            _ensure_xray_client(int(sub.telegram_id), db)
+        except Exception:
+            logger.exception("Failed to auto-create VLESS client for tg_id=%s", sub.telegram_id)
+
     proxy_link = f"tg://proxy?server={sub.proxy_server}&port={sub.proxy_port}&secret={sub.proxy_secret}"
     _notify_payment_success(sub.telegram_id, proxy_link)
     _notify_admin_payment(sub.telegram_id)
@@ -1058,6 +1086,12 @@ async def prodamus_webhook(req: Request, db: Session = Depends(get_db)) -> Plain
 
     db.commit()
     logger.info("Prodamus subscription activated tg_id=%s token=%s", sub.telegram_id, sub.payment_token)
+
+    if XRAY_API_URL and int(sub.telegram_id) > 0:
+        try:
+            _ensure_xray_client(int(sub.telegram_id), db)
+        except Exception:
+            logger.exception("Failed to auto-create VLESS client for tg_id=%s (prodamus)", sub.telegram_id)
 
     proxy_link = f"tg://proxy?server={sub.proxy_server}&port={sub.proxy_port}&secret={sub.proxy_secret}"
     _notify_payment_success(sub.telegram_id, proxy_link)
@@ -1499,6 +1533,127 @@ def _wg_get_qr(client_id: str) -> str | None:
     return None
 
 
+# ── 3X-UI / Xray VLESS Reality helpers ──────────────────────────────────────
+
+_xray_cookie: str | None = None
+_xray_cookie_lock = threading.Lock()
+
+
+def _xray_login() -> str | None:
+    if not XRAY_API_URL or not XRAY_PASSWORD:
+        return None
+    try:
+        data = json.dumps({"username": XRAY_USERNAME, "password": XRAY_PASSWORD}).encode()
+        req = urllib.request.Request(
+            f"{XRAY_API_URL}/login",
+            data=data,
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            raw_cookie = resp.headers.get("Set-Cookie", "")
+            return raw_cookie.split(";")[0] if raw_cookie else None
+    except Exception as e:
+        logger.warning("3X-UI login failed: %s", e)
+        return None
+
+
+def _xray_req(method: str, path: str, body: dict | None = None) -> dict | None:
+    global _xray_cookie
+
+    def _do(cookie: str) -> tuple[int, dict | None]:
+        url = f"{XRAY_API_URL}{path}"
+        raw_body = json.dumps(body).encode() if body is not None else None
+        headers: dict[str, str] = {"Cookie": cookie}
+        if raw_body:
+            headers["Content-Type"] = "application/json"
+        req_obj = urllib.request.Request(url, data=raw_body, headers=headers, method=method)
+        try:
+            with urllib.request.urlopen(req_obj, timeout=15) as resp:
+                raw = resp.read()
+                return resp.status, json.loads(raw) if raw else None
+        except urllib.error.HTTPError as e:
+            return e.code, None
+
+    with _xray_cookie_lock:
+        if not _xray_cookie:
+            _xray_cookie = _xray_login()
+        if not _xray_cookie:
+            return None
+        status, result = _do(_xray_cookie)
+        if status in (401, 403):
+            _xray_cookie = _xray_login()
+            if not _xray_cookie:
+                return None
+            status, result = _do(_xray_cookie)
+        return result if status < 300 else None
+
+
+def _xray_build_vless_link(client_uuid: str) -> str:
+    if not (XRAY_SERVER_IP and XRAY_PUBLIC_KEY):
+        return ""
+    params = (
+        f"security=reality&encryption=none&pbk={XRAY_PUBLIC_KEY}"
+        f"&fp=chrome&type=tcp&sni={XRAY_SNI}&sid={XRAY_SHORT_ID}&spx=%2F"
+    )
+    return f"vless://{client_uuid}@{XRAY_SERVER_IP}:443?{params}#Frosty VPN"
+
+
+def _xray_add_client(tg_id: int) -> tuple[str, str] | None:
+    """Add a client to inbound XRAY_INBOUND_ID. Returns (uuid, vless_link) or None."""
+    if not XRAY_API_URL:
+        return None
+    import uuid as _uuid_mod
+    client_uuid = str(_uuid_mod.uuid4())
+    vless_link = _xray_build_vless_link(client_uuid)
+    payload = {
+        "id": XRAY_INBOUND_ID,
+        "settings": json.dumps({
+            "clients": [{
+                "id": client_uuid,
+                "flow": "",
+                "email": f"frosty_{tg_id}",
+                "limitIp": 0,
+                "totalGB": 0,
+                "expiryTime": 0,
+                "enable": True,
+                "tgId": str(tg_id),
+                "subId": "",
+            }]
+        }),
+    }
+    result = _xray_req("POST", "/panel/api/inbounds/addClient", payload)
+    if result and result.get("success"):
+        return client_uuid, vless_link
+    logger.warning("3X-UI addClient failed for tg_id=%s: %s", tg_id, result)
+    return None
+
+
+def _xray_get_online_count() -> int:
+    """Returns number of currently connected Xray clients."""
+    result = _xray_req("POST", "/panel/api/inbounds/onlines")
+    if isinstance(result, dict) and result.get("success"):
+        obj = result.get("obj") or []
+        if isinstance(obj, list):
+            return len(obj)
+    return 0
+
+
+def _ensure_xray_client(tg_id: int, db: Session) -> tuple[str, str] | None:
+    """Create Xray VLESS client if not exists. Returns (uuid, vless_link) or None."""
+    existing = db.execute(select(VpnClient).where(VpnClient.telegram_id == tg_id)).scalar_one_or_none()
+    if existing:
+        return existing.uuid, existing.vless_link
+    result = _xray_add_client(tg_id)
+    if not result:
+        return None
+    client_uuid, vless_link = result
+    vpn_client = VpnClient(telegram_id=tg_id, uuid=client_uuid, vless_link=vless_link)
+    db.add(vpn_client)
+    db.commit()
+    return client_uuid, vless_link
+
+
 # ── VPN endpoints ────────────────────────────────────────────────────────────
 
 class VpnStatusResponse(BaseModel):
@@ -1592,6 +1747,40 @@ def vpn_toggle(telegram_id: int, payload: VpnToggleRequest, db: Session = Depend
     db.commit()
     logger.info("VPN toggle: tg_id=%s enabled=%s", telegram_id, payload.enabled)
     return VpnToggleResponse(ok=True, enabled=peer.enabled)
+
+
+# ── VLESS Reality endpoints ───────────────────────────────────────────────────
+
+class VpnConfigResponse(BaseModel):
+    available: bool
+    vless_link: str | None = None
+    uuid: str | None = None
+
+
+@app.get("/vpn/config/{telegram_id}", response_model=VpnConfigResponse)
+def vpn_config(telegram_id: int, db: Session = Depends(get_db)) -> VpnConfigResponse:
+    if not _active_sub_for_vpn(telegram_id, db):
+        raise HTTPException(status_code=403, detail="No active subscription")
+
+    if not XRAY_API_URL:
+        return VpnConfigResponse(available=False)
+
+    result = _ensure_xray_client(telegram_id, db)
+    if not result:
+        return VpnConfigResponse(available=True, vless_link=None, uuid=None)
+
+    client_uuid, vless_link = result
+    return VpnConfigResponse(available=True, vless_link=vless_link, uuid=client_uuid)
+
+
+class VpnOnlineResponse(BaseModel):
+    online: int
+
+
+@app.get("/vpn/online", response_model=VpnOnlineResponse)
+def vpn_online(req: Request) -> VpnOnlineResponse:
+    _require_admin(req)
+    return VpnOnlineResponse(online=_xray_get_online_count())
 
 
 def _require_admin(req: Request) -> None:
@@ -1844,6 +2033,13 @@ def admin_activate(telegram_id: int, req: Request, db: Session = Depends(get_db)
 
     db.commit()
     logger.info("Admin granted full activation for tg_id=%s", telegram_id)
+
+    if XRAY_API_URL and int(telegram_id) > 0:
+        try:
+            _ensure_xray_client(int(telegram_id), db)
+        except Exception:
+            logger.exception("Failed to auto-create VLESS client for tg_id=%s (admin activate)", telegram_id)
+
     return OkResponse(ok=True)
 
 

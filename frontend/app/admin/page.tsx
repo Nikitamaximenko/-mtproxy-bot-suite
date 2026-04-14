@@ -25,6 +25,10 @@ type ProxyStatus = {
   latency_ms: number | null
 }
 
+type VpnOnline = {
+  online: number
+}
+
 type SubInfo = {
   id: number
   telegram_id: number
@@ -172,6 +176,7 @@ export default function AdminPage() {
   const [bootstrapped, setBootstrapped] = useState(false)
   const [stats, setStats] = useState<Stats | null>(null)
   const [proxy, setProxy] = useState<ProxyStatus | null>(null)
+  const [vpnOnline, setVpnOnline] = useState<VpnOnline | null>(null)
   const [overview, setOverview] = useState<UsersOverview | null>(null)
   const [funnel, setFunnel] = useState<FunnelStats | null>(null)
   const [userTab, setUserTab] = useState<"new" | "subscribers">("new")
@@ -235,11 +240,12 @@ export default function AdminPage() {
       setLoading(true)
       setError("")
       try {
-        const [sRes, pRes, ovRes, fRes] = await Promise.all([
+        const [sRes, pRes, ovRes, fRes, vRes] = await Promise.all([
           fetch("/api/admin/stats", { headers: headers(activeKey), cache: "no-store" }),
           fetch("/api/admin/proxy-status", { headers: headers(activeKey), cache: "no-store" }),
           fetch("/api/admin/users-overview", { headers: headers(activeKey), cache: "no-store" }),
           fetch("/api/admin/funnel", { headers: headers(activeKey), cache: "no-store" }),
+          fetch("/api/admin/vpn-online", { headers: headers(activeKey), cache: "no-store" }),
         ])
 
         if (sRes.status === 403 || ovRes.status === 403) {
@@ -255,11 +261,12 @@ export default function AdminPage() {
           return
         }
 
-        const [sData, pData, ovData, fData] = await Promise.all([
+        const [sData, pData, ovData, fData, vData] = await Promise.all([
           sRes.json(),
           pRes.json(),
           ovRes.json(),
           fRes.ok ? fRes.json() : Promise.resolve(null),
+          vRes.ok ? vRes.json() : Promise.resolve(null),
         ])
         const rawStats = sData as Stats & { marketing_opt_out_users?: number }
         setStats({
@@ -267,6 +274,7 @@ export default function AdminPage() {
           marketing_opt_out_users: rawStats.marketing_opt_out_users ?? 0,
         })
         setProxy(pData)
+        setVpnOnline(vData as VpnOnline | null)
         setOverview(ovData as UsersOverview)
         setFunnel(fData as FunnelStats | null)
         setAuthed(true)
@@ -475,6 +483,7 @@ export default function AdminPage() {
     setOverview(null)
     setStats(null)
     setProxy(null)
+    setVpnOnline(null)
     setKey("")
     setError("")
   }
@@ -572,30 +581,46 @@ export default function AdminPage() {
 
       <main className="max-w-6xl mx-auto px-6 py-8 space-y-8">
         <section>
-          <h2 className="text-lg font-semibold mb-4 text-gray-300">Прокси-сервер</h2>
-          <div className="bg-gray-900 border border-gray-800 rounded-2xl p-6">
-            {proxy ? (
-              <div className="flex items-center justify-between flex-wrap gap-4">
-                <div className="flex items-center gap-3">
-                  <div
-                    className={`w-3 h-3 rounded-full ${proxy.online ? "bg-emerald-400 animate-pulse" : "bg-red-500"}`}
-                  />
-                  <span className="text-lg font-medium">
-                    {proxy.server}:{proxy.port}
-                  </span>
-                  <span className={`text-sm font-medium ${proxy.online ? "text-emerald-400" : "text-red-400"}`}>
-                    {proxy.online ? "Online" : "Offline"}
-                  </span>
+          <h2 className="text-lg font-semibold mb-4 text-gray-300">Инфраструктура</h2>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="bg-gray-900 border border-gray-800 rounded-2xl p-6">
+              <div className="text-xs text-gray-400 mb-3 font-medium">📡 MTProxy</div>
+              {proxy ? (
+                <div className="flex items-center justify-between flex-wrap gap-4">
+                  <div className="flex items-center gap-3">
+                    <div
+                      className={`w-3 h-3 rounded-full ${proxy.online ? "bg-emerald-400 animate-pulse" : "bg-red-500"}`}
+                    />
+                    <span className="text-base font-medium">
+                      {proxy.server}:{proxy.port}
+                    </span>
+                    <span className={`text-sm font-medium ${proxy.online ? "text-emerald-400" : "text-red-400"}`}>
+                      {proxy.online ? "Online" : "Offline"}
+                    </span>
+                  </div>
+                  {proxy.latency_ms !== null && (
+                    <span className="text-sm text-gray-400">
+                      <span className="text-white font-mono">{proxy.latency_ms}ms</span>
+                    </span>
+                  )}
                 </div>
-                {proxy.latency_ms !== null && (
-                  <span className="text-sm text-gray-400">
-                    Latency: <span className="text-white font-mono">{proxy.latency_ms}ms</span>
-                  </span>
-                )}
+              ) : (
+                <div className="text-gray-500">Загрузка…</div>
+              )}
+            </div>
+            <div className="bg-gray-900 border border-gray-800 rounded-2xl p-6">
+              <div className="text-xs text-gray-400 mb-3 font-medium">🛡 VLESS Reality VPN</div>
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <div className={`w-3 h-3 rounded-full ${vpnOnline !== null ? "bg-emerald-400 animate-pulse" : "bg-gray-600"}`} />
+                  <span className="text-base font-medium">Finland · 138.124.80.97</span>
+                </div>
+                <div className="text-right">
+                  <div className="text-2xl font-bold text-emerald-400">{vpnOnline?.online ?? "—"}</div>
+                  <div className="text-xs text-gray-500">онлайн сейчас</div>
+                </div>
               </div>
-            ) : (
-              <div className="text-gray-500">Загрузка…</div>
-            )}
+            </div>
           </div>
         </section>
 
