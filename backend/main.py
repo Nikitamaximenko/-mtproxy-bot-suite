@@ -95,6 +95,11 @@ FRONTEND_URL = (os.getenv("FRONTEND_URL") or "").strip().rstrip("/")
 MINIAPP_PATH = (os.getenv("MINIAPP_PATH") or "/mini").strip() or "/mini"
 ADMIN_NOTIFY_CHAT_ID = (os.getenv("ADMIN_NOTIFY_CHAT_ID") or "").strip()
 
+# WireGuard VPN via wg-easy (https://github.com/wg-easy/wg-easy)
+WG_EASY_URL = (os.getenv("WG_EASY_URL") or "").strip().rstrip("/")
+WG_EASY_PASSWORD = (os.getenv("WG_EASY_PASSWORD") or "").strip()
+WG_SERVER_LOCATION = (os.getenv("WG_SERVER_LOCATION") or "Netherlands").strip()
+
 
 def utcnow() -> datetime:
     return datetime.now(timezone.utc)
@@ -149,6 +154,18 @@ class Subscription(Base):
     # Ручное отключение в админке: не меняет оплаченный период (expires_at), только снимает доступ к прокси.
     access_suspended: Mapped[bool] = mapped_column(Boolean, default=False, server_default=sa_false(), nullable=False)
 
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
+
+
+class VpnPeer(Base):
+    """One WireGuard peer per user, managed via wg-easy."""
+    __tablename__ = "vpn_peers"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    telegram_id: Mapped[int] = mapped_column(BigInteger, unique=True, index=True, nullable=False)
+    wg_client_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    server_location: Mapped[str] = mapped_column(String(64), default="Netherlands", nullable=False)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
 
 
@@ -221,6 +238,8 @@ def _migrate() -> None:
                     conn.execute(text("ALTER TABLE users ADD COLUMN nudge_3_sent_at DATETIME"))
             if "email" not in existing:
                 conn.execute(text("ALTER TABLE users ADD COLUMN email VARCHAR(255)"))
+
+    # vpn_peers: new table, created by create_all on first run; no ALTER needed for existing columns.
 
     # PostgreSQL: принудительно BIGINT для telegram_id (уже BIGINT — будет ошибка, игнорируем).
     if engine.dialect.name == "postgresql":
@@ -1354,23 +1373,225 @@ def claim_web_subscription(
 
 @app.get("/subscription/by-email/{email}")
 def subscription_by_email(email: str, db: Session = Depends(get_db)):
+    """Look up active subscription by the email stored at checkout time."""
+    clean = email.strip().lower()
+    # Match on User.email (preferred) or User.username when username was set to email for web users
     user = db.execute(
         select(User).where(
-            (User.username == email) | (User.email == email)
-        )
+            (func.lower(User.email) == clean) | (func.lower(User.username) == clean)
+        ).limit(1)
     ).scalar_one_or_none()
     if not user:
         return {"active": False}
+
+    now = utcnow()
     sub = db.execute(
         select(Subscription)
-        .where(Subscription.telegram_id == user.telegram_id)
-        .where(Subscription.payment_status == "paid")
-        .order_by(Subscription.created_at.desc())
+        .where(
+            Subscription.telegram_id == user.telegram_id,
+            Subscription.payment_status == "paid",
+            Subscription.expires_at.is_not(None),
+            Subscription.expires_at > now,
+        )
+        .order_by(Subscription.expires_at.desc())
+        .limit(1)
     ).scalar_one_or_none()
+
     if not sub:
         return {"active": False}
-    proxy_link = f"tg://proxy?server={sub.proxy_server}&port={sub.proxy_port}&secret={sub.proxy_secret}"
+
+    if sub.access_suspended:
+        return {"active": False, "suspended": True, "expires_at": sub.expires_at}
+
+    proxy_link: str | None = None
+    if sub.proxy_server and sub.proxy_port and sub.proxy_secret:
+        proxy_link = f"tg://proxy?server={sub.proxy_server}&port={sub.proxy_port}&secret={sub.proxy_secret}"
+
     return {"active": True, "proxy_link": proxy_link, "expires_at": sub.expires_at}
+
+
+# ── wg-easy helpers ──────────────────────────────────────────────────────────
+
+_wg_cookie: str | None = None
+_wg_cookie_lock = threading.Lock()
+
+
+def _wg_authenticate() -> str | None:
+    if not WG_EASY_URL or not WG_EASY_PASSWORD:
+        return None
+    try:
+        data = json.dumps({"password": WG_EASY_PASSWORD}).encode()
+        req = urllib.request.Request(
+            f"{WG_EASY_URL}/api/session",
+            data=data,
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            raw_cookie = resp.headers.get("Set-Cookie", "")
+            # Extract the session token part (before first ';')
+            return raw_cookie.split(";")[0] if raw_cookie else None
+    except Exception as e:
+        logger.warning("wg-easy auth failed: %s", e)
+        return None
+
+
+def _wg_req(method: str, path: str, body: dict | None = None) -> dict | bytes | None:
+    global _wg_cookie
+
+    def _do(cookie: str) -> tuple[int, dict | bytes]:
+        url = f"{WG_EASY_URL}{path}"
+        raw_body = json.dumps(body).encode() if body is not None else None
+        headers: dict[str, str] = {"Cookie": cookie}
+        if raw_body:
+            headers["Content-Type"] = "application/json"
+        req = urllib.request.Request(url, data=raw_body, headers=headers, method=method)
+        try:
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                raw = resp.read()
+                ct = resp.headers.get("Content-Type", "")
+                if "json" in ct:
+                    return resp.status, json.loads(raw)
+                return resp.status, raw
+        except urllib.error.HTTPError as e:
+            return e.code, b""
+
+    with _wg_cookie_lock:
+        if not _wg_cookie:
+            _wg_cookie = _wg_authenticate()
+        if not _wg_cookie:
+            return None
+        status, result = _do(_wg_cookie)
+        if status == 401:
+            _wg_cookie = _wg_authenticate()
+            if not _wg_cookie:
+                return None
+            status, result = _do(_wg_cookie)
+        return result if status < 300 else None
+
+
+def _wg_create_client(name: str) -> str | None:
+    result = _wg_req("POST", "/api/wireguard/client", {"name": name})
+    if isinstance(result, dict):
+        return result.get("id")
+    return None
+
+
+def _wg_enable_client(client_id: str) -> None:
+    _wg_req("POST", f"/api/wireguard/client/{client_id}/enable")
+
+
+def _wg_disable_client(client_id: str) -> None:
+    _wg_req("POST", f"/api/wireguard/client/{client_id}/disable")
+
+
+def _wg_get_config(client_id: str) -> str | None:
+    result = _wg_req("GET", f"/api/wireguard/client/{client_id}/configuration")
+    if isinstance(result, bytes):
+        return result.decode("utf-8", errors="replace")
+    return None
+
+
+def _wg_get_qr(client_id: str) -> str | None:
+    result = _wg_req("GET", f"/api/wireguard/client/{client_id}/qrcode.svg")
+    if isinstance(result, bytes):
+        return result.decode("utf-8", errors="replace")
+    return None
+
+
+# ── VPN endpoints ────────────────────────────────────────────────────────────
+
+class VpnStatusResponse(BaseModel):
+    available: bool
+    enabled: bool
+    location: str
+    config: str | None
+    qr_svg: str | None
+
+
+class VpnToggleRequest(BaseModel):
+    enabled: bool
+
+
+class VpnToggleResponse(BaseModel):
+    ok: bool
+    enabled: bool
+
+
+def _active_sub_for_vpn(telegram_id: int, db: Session) -> bool:
+    now = utcnow()
+    stmt = (
+        select(Subscription.id)
+        .where(
+            Subscription.telegram_id == telegram_id,
+            Subscription.payment_status == "paid",
+            Subscription.expires_at > now,
+            Subscription.access_suspended == False,  # noqa: E712
+        )
+        .limit(1)
+    )
+    return db.execute(stmt).scalar_one_or_none() is not None
+
+
+@app.get("/vpn/status/{telegram_id}", response_model=VpnStatusResponse)
+def vpn_status(telegram_id: int, db: Session = Depends(get_db)) -> VpnStatusResponse:
+    if not _active_sub_for_vpn(telegram_id, db):
+        raise HTTPException(status_code=403, detail="No active subscription")
+
+    if not WG_EASY_URL:
+        return VpnStatusResponse(available=False, enabled=False, location=WG_SERVER_LOCATION, config=None, qr_svg=None)
+
+    peer = db.execute(select(VpnPeer).where(VpnPeer.telegram_id == telegram_id)).scalar_one_or_none()
+
+    if not peer:
+        client_id = _wg_create_client(f"frosty_{telegram_id}")
+        if not client_id:
+            logger.error("wg-easy: failed to create peer for %s", telegram_id)
+            return VpnStatusResponse(available=True, enabled=False, location=WG_SERVER_LOCATION, config=None, qr_svg=None)
+        peer = VpnPeer(telegram_id=telegram_id, wg_client_id=client_id, server_location=WG_SERVER_LOCATION, enabled=True)
+        db.add(peer)
+        db.commit()
+        db.refresh(peer)
+
+    config = _wg_get_config(peer.wg_client_id) if peer.enabled else None
+    qr_svg = _wg_get_qr(peer.wg_client_id) if peer.enabled else None
+
+    return VpnStatusResponse(
+        available=True,
+        enabled=peer.enabled,
+        location=peer.server_location,
+        config=config,
+        qr_svg=qr_svg,
+    )
+
+
+@app.post("/vpn/toggle/{telegram_id}", response_model=VpnToggleResponse)
+def vpn_toggle(telegram_id: int, payload: VpnToggleRequest, db: Session = Depends(get_db)) -> VpnToggleResponse:
+    if not _active_sub_for_vpn(telegram_id, db):
+        raise HTTPException(status_code=403, detail="No active subscription")
+
+    if not WG_EASY_URL:
+        raise HTTPException(status_code=503, detail="VPN not configured")
+
+    peer = db.execute(select(VpnPeer).where(VpnPeer.telegram_id == telegram_id)).scalar_one_or_none()
+
+    if not peer:
+        client_id = _wg_create_client(f"frosty_{telegram_id}")
+        if not client_id:
+            raise HTTPException(status_code=503, detail="Failed to create VPN peer")
+        peer = VpnPeer(telegram_id=telegram_id, wg_client_id=client_id, server_location=WG_SERVER_LOCATION, enabled=payload.enabled)
+        db.add(peer)
+    else:
+        peer.enabled = payload.enabled
+
+    if payload.enabled:
+        _wg_enable_client(peer.wg_client_id)
+    else:
+        _wg_disable_client(peer.wg_client_id)
+
+    db.commit()
+    logger.info("VPN toggle: tg_id=%s enabled=%s", telegram_id, payload.enabled)
+    return VpnToggleResponse(ok=True, enabled=peer.enabled)
 
 
 def _require_admin(req: Request) -> None:
