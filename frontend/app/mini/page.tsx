@@ -301,6 +301,7 @@ export default function MiniAppPage() {
   const [vpnLoading, setVpnLoading] = useState(false)
   const [vpnToggling, setVpnToggling] = useState(false)
   const [vpnConfigCopied, setVpnConfigCopied] = useState(false)
+  const [vpnPlatform, setVpnPlatform] = useState<"android" | "ios" | "windows" | "mac">("android")
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search)
@@ -524,6 +525,52 @@ export default function MiniAppPage() {
 
   /* ── Active subscription ── */
   if (isPaid) {
+    const platforms = [
+      { id: "android", label: "Android" },
+      { id: "ios",     label: "iOS" },
+      { id: "windows", label: "Windows" },
+      { id: "mac",     label: "Mac" },
+    ] as const
+
+    const happInstructions: Record<typeof vpnPlatform, { download: string; steps: { t: string; s: string }[] }> = {
+      android: {
+        download: "https://play.google.com/store/apps/details?id=com.wireguard.android",
+        steps: [
+          { t: "Скачайте WireGuard", s: "Google Play → поиск «WireGuard»" },
+          { t: "Нажмите «+» → «Сканировать QR-код»", s: "Наведите камеру на QR ниже" },
+          { t: "Дайте разрешение на VPN", s: "Система запросит один раз" },
+          { t: "Нажмите переключатель — готово", s: "Значок ключа появится в статус-баре" },
+        ],
+      },
+      ios: {
+        download: "https://apps.apple.com/app/wireguard/id1441195209",
+        steps: [
+          { t: "Скачайте WireGuard", s: "App Store → поиск «WireGuard»" },
+          { t: "Нажмите «+» → «Create from QR code»", s: "Наведите камеру на QR ниже" },
+          { t: "Придумайте имя тоннелю", s: "Например «Frosty VPN»" },
+          { t: "Включите тоннель", s: "iOS попросит добавить конфигурацию VPN — разрешите" },
+        ],
+      },
+      windows: {
+        download: "https://download.wireguard.com/windows-client/wireguard-installer.exe",
+        steps: [
+          { t: "Скачайте и установите WireGuard", s: "wireguard.com → Windows" },
+          { t: "Нажмите «Import tunnel(s) from file»", s: "Используйте кнопку «Скачать .conf» ниже" },
+          { t: "Выберите скачанный .conf файл", s: "frosty-vpn.conf" },
+          { t: "Нажмите «Activate»", s: "Иконка в трее станет зелёной" },
+        ],
+      },
+      mac: {
+        download: "https://apps.apple.com/app/wireguard/id1451685025",
+        steps: [
+          { t: "Скачайте WireGuard", s: "Mac App Store → поиск «WireGuard»" },
+          { t: "Нажмите «Import tunnel(s) from file»", s: "Используйте кнопку «Скачать .conf» ниже" },
+          { t: "Выберите скачанный .conf файл", s: "frosty-vpn.conf" },
+          { t: "Нажмите «Activate»", s: "Иконка в меню-баре подсветится" },
+        ],
+      },
+    }
+
     return (
       <div className={`${manrope.className} min-h-screen px-4 py-6`} style={{ background: "#FFFFFF" }}>
         <div className="max-w-sm mx-auto">
@@ -537,28 +584,32 @@ export default function MiniAppPage() {
           {justPaid && (
             <div className="mb-5 p-4 text-center" style={{ background: "#F0FDF4", borderRadius: "16px" }}>
               <p className="text-sm font-semibold" style={{ color: "#16A34A" }}>✅ Оплата прошла успешно!</p>
-              <p className="text-xs mt-1" style={{ color: "#6B7280" }}>Подключитесь ниже</p>
+              <p className="text-xs mt-1" style={{ color: "#6B7280" }}>Подключите прокси и VPN ниже</p>
             </div>
           )}
 
           {/* Status card */}
           <div className="p-4 mb-5" style={{ background: "#F7F8FA", borderRadius: "16px" }}>
             <div className="flex items-center justify-between mb-2">
-              <span className="text-sm" style={{ color: "#6B7280" }}>Статус</span>
-              <span className="flex items-center gap-1.5 text-sm font-semibold" style={{ color: "#2AABEE" }}>
-                <span className="w-2 h-2 rounded-full animate-pulse" style={{ background: "#2AABEE" }} />
+              <div>
+                <span className="text-sm font-semibold" style={{ color: "#111827" }}>Подписка 2 в 1</span>
+                <p className="text-xs mt-0.5" style={{ color: "#6B7280" }}>Прокси для Telegram + VPN для всего</p>
+              </div>
+              <span className="flex items-center gap-1.5 text-sm font-semibold" style={{ color: "#16A34A" }}>
+                <span className="w-2 h-2 rounded-full animate-pulse" style={{ background: "#16A34A" }} />
                 Активна
               </span>
             </div>
-            <div className="flex items-center justify-between mb-2">
-              <span className="text-sm" style={{ color: "#6B7280" }}>Следующий платёж</span>
-              <span className="text-sm font-medium" style={{ color: "#111827" }}>
+            <div style={{ height: "1px", background: "#E5E7EB", margin: "12px 0" }} />
+            <div className="flex items-center justify-between mb-1.5">
+              <span className="text-xs" style={{ color: "#6B7280" }}>Действует до</span>
+              <span className="text-xs font-semibold" style={{ color: "#111827" }}>
                 {expiresAt ? new Date(expiresAt).toLocaleDateString("ru-RU") : "—"}
               </span>
             </div>
             <div className="flex items-center justify-between">
-              <span className="text-sm" style={{ color: "#6B7280" }}>Тариф</span>
-              <span className="text-sm font-medium" style={{ color: "#111827" }}>299 ₽/мес</span>
+              <span className="text-xs" style={{ color: "#6B7280" }}>Тариф</span>
+              <span className="text-xs font-semibold" style={{ color: "#111827" }}>299 ₽/мес</span>
             </div>
           </div>
 
@@ -576,7 +627,7 @@ export default function MiniAppPage() {
                   boxShadow: activeTab === tab ? "0 1px 4px rgba(0,0,0,0.08)" : "none",
                 }}
               >
-                {tab === "proxy" ? "📡 MTProxy" : "🛡 VPN"}
+                {tab === "proxy" ? "📡 Telegram" : "🛡 VPN"}
               </button>
             ))}
           </div>
@@ -584,6 +635,11 @@ export default function MiniAppPage() {
           {/* ── Proxy tab ── */}
           {activeTab === "proxy" && (
             <div className="space-y-3">
+              <div className="px-1 mb-1">
+                <p className="text-xs" style={{ color: "#6B7280" }}>
+                  MTProxy снимает блокировку прямо внутри Telegram — без дополнительных приложений. Включается в один клик.
+                </p>
+              </div>
               {proxyLink ? (
                 <div className="p-5" style={{ background: "#F7F8FA", borderRadius: "16px" }}>
                   <div className="flex items-center justify-between mb-3">
@@ -612,10 +668,19 @@ export default function MiniAppPage() {
                   <p className="text-sm" style={{ color: "#6B7280" }}>Прокси настраивается, скоро появится</p>
                 </div>
               )}
-              <div className="flex flex-col gap-2 mt-2">
-                {["🔒 Без логов — содержимое сообщений не хранится", "⚡ Работает 24/7 автоматически", "📡 Не мешает VPN и другим приложениям"].map((t, i) => (
+              <div className="flex flex-col gap-2">
+                {[
+                  "⚡ Работает только внутри Telegram — не затрагивает другие приложения",
+                  "🔒 Без логов — мы не видим содержимое сообщений",
+                  "📡 Персональный сервер — не делишь скорость с чужими",
+                ].map((t, i) => (
                   <div key={i} className="px-4 py-3 text-sm" style={{ background: "#F7F8FA", borderRadius: "12px", color: "#6B7280" }}>{t}</div>
                 ))}
+              </div>
+              <div className="px-1 pt-1">
+                <p className="text-xs" style={{ color: "#9CA3AF" }}>
+                  Нужен доступ к Instagram, TikTok, YouTube? Переключитесь на вкладку <strong style={{ color: "#6B7280" }}>VPN</strong>.
+                </p>
               </div>
             </div>
           )}
@@ -623,29 +688,41 @@ export default function MiniAppPage() {
           {/* ── VPN tab ── */}
           {activeTab === "vpn" && (
             <div className="space-y-4">
+              <div className="px-1 mb-1">
+                <p className="text-xs" style={{ color: "#6B7280" }}>
+                  WireGuard VPN открывает доступ к любым заблокированным сайтам и приложениям — Instagram, TikTok, YouTube и всему остальному.
+                </p>
+              </div>
+
               {vpnLoading && !vpn ? (
                 <div className="flex items-center justify-center py-12">
                   <RefreshCw className="w-6 h-6 animate-spin" style={{ color: "#2AABEE" }} />
                 </div>
               ) : !vpn?.available ? (
-                /* VPN not configured yet — coming soon card */
                 <div className="p-6 text-center space-y-3" style={{ background: "#F7F8FA", borderRadius: "16px" }}>
                   <div className="text-3xl">🚧</div>
                   <p className="text-sm font-semibold" style={{ color: "#111827" }}>VPN скоро появится</p>
                   <p className="text-xs leading-relaxed" style={{ color: "#6B7280" }}>
-                    Мы разворачиваем сервер. Как только будет готово — появится здесь автоматически.
+                    Разворачиваем сервер. Появится здесь автоматически — обновления не нужны.
                   </p>
                 </div>
               ) : (
                 <>
-                  {/* Location badge */}
-                  <div className="flex items-center justify-between px-4 py-3" style={{ background: "#F7F8FA", borderRadius: "14px" }}>
-                    <span className="text-sm" style={{ color: "#6B7280" }}>Сервер</span>
-                    <span className="text-sm font-semibold" style={{ color: "#111827" }}>🌍 {vpn.location}</span>
-                  </div>
-
-                  {/* Toggle */}
+                  {/* Server + toggle card */}
                   <div className="p-5" style={{ background: "#F7F8FA", borderRadius: "16px" }}>
+                    <div className="flex items-center justify-between mb-4">
+                      <div className="flex items-center gap-2">
+                        <span className="text-base">🌍</span>
+                        <div>
+                          <p className="text-xs" style={{ color: "#6B7280" }}>Сервер</p>
+                          <p className="text-sm font-semibold" style={{ color: "#111827" }}>{vpn.location}</p>
+                        </div>
+                      </div>
+                      <span className="text-xs px-2.5 py-1 font-semibold" style={{ background: "#EFF6FF", color: "#2563EB", borderRadius: "8px" }}>
+                        WireGuard
+                      </span>
+                    </div>
+                    <div style={{ height: "1px", background: "#E5E7EB", marginBottom: "16px" }} />
                     <div className="flex items-center justify-between">
                       <div className="flex items-center gap-3">
                         {vpn.enabled
@@ -654,66 +731,48 @@ export default function MiniAppPage() {
                         }
                         <div>
                           <p className="text-sm font-semibold" style={{ color: "#111827" }}>
-                            {vpn.enabled ? "VPN включён" : "VPN выключен"}
+                            {vpn.enabled ? "Конфиг активен" : "Конфиг отключён"}
                           </p>
                           <p className="text-xs mt-0.5" style={{ color: "#6B7280" }}>
-                            {vpn.enabled ? "Конфиг активен на сервере" : "Трафик не проходит через VPN"}
+                            {vpn.enabled ? "Подключитесь через приложение ниже" : "Включите чтобы получить QR-код"}
                           </p>
                         </div>
                       </div>
-                      {/* Toggle switch */}
+                      {/* iOS-style toggle */}
                       <button
                         onClick={handleVpnToggle}
                         disabled={vpnToggling}
-                        className="relative touch-manipulation disabled:opacity-60 transition-opacity"
+                        className="relative flex-shrink-0 touch-manipulation disabled:opacity-60 transition-opacity"
                         style={{ width: "51px", height: "31px" }}
                         aria-label="Toggle VPN"
                       >
-                        <span
-                          className="block w-full h-full transition-colors duration-200"
-                          style={{
-                            borderRadius: "15.5px",
-                            background: vpn.enabled ? "#2AABEE" : "#D1D5DB",
-                          }}
-                        />
+                        <span className="block w-full h-full transition-colors duration-200" style={{ borderRadius: "15.5px", background: vpn.enabled ? "#2AABEE" : "#D1D5DB" }} />
                         <span
                           className="absolute top-0.5 transition-all duration-200"
-                          style={{
-                            left: vpn.enabled ? "calc(100% - 27px)" : "2px",
-                            width: "27px",
-                            height: "27px",
-                            borderRadius: "50%",
-                            background: "#FFFFFF",
-                            boxShadow: "0 1px 4px rgba(0,0,0,0.18)",
-                          }}
+                          style={{ left: vpn.enabled ? "calc(100% - 27px)" : "2px", width: "27px", height: "27px", borderRadius: "50%", background: "#FFFFFF", boxShadow: "0 1px 4px rgba(0,0,0,0.18)" }}
                         >
-                          {vpnToggling && (
-                            <RefreshCw className="w-3 h-3 animate-spin absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2" style={{ color: "#9CA3AF" }} />
-                          )}
+                          {vpnToggling && <RefreshCw className="w-3 h-3 animate-spin absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2" style={{ color: "#9CA3AF" }} />}
                         </span>
                       </button>
                     </div>
                   </div>
 
-                  {/* Config & QR (only when enabled) */}
                   {vpn.enabled && (
                     <>
                       {/* QR code */}
                       {vpn.qr_svg && (
                         <div className="p-5" style={{ background: "#F7F8FA", borderRadius: "16px" }}>
-                          <p className="text-sm font-medium mb-3" style={{ color: "#111827" }}>QR-код для Amnezia / WireGuard</p>
+                          <p className="text-sm font-semibold mb-1" style={{ color: "#111827" }}>QR-код для подключения</p>
+                          <p className="text-xs mb-4" style={{ color: "#6B7280" }}>Сканируйте прямо из приложения WireGuard</p>
                           <div
-                            className="mx-auto p-3 flex items-center justify-center"
-                            style={{ background: "#FFFFFF", borderRadius: "12px", maxWidth: "220px" }}
+                            className="mx-auto p-4 flex items-center justify-center"
+                            style={{ background: "#FFFFFF", borderRadius: "16px", maxWidth: "240px", boxShadow: "0 1px 8px rgba(0,0,0,0.06)" }}
                             dangerouslySetInnerHTML={{ __html: vpn.qr_svg }}
                           />
-                          <p className="text-xs text-center mt-3" style={{ color: "#6B7280" }}>
-                            Откройте Amnezia → «+» → «Сканировать QR»
-                          </p>
                         </div>
                       )}
 
-                      {/* Config actions */}
+                      {/* Config download */}
                       {vpn.config && (
                         <div className="flex gap-2">
                           <button
@@ -734,22 +793,59 @@ export default function MiniAppPage() {
                         </div>
                       )}
 
-                      {/* Setup instructions */}
-                      <div className="p-4 space-y-3" style={{ background: "#F7F8FA", borderRadius: "16px" }}>
-                        <p className="text-xs font-semibold uppercase tracking-wide" style={{ color: "#9CA3AF" }}>Как подключить</p>
-                        {[
-                          { n: "1", t: "Скачайте Amnezia VPN", s: "App Store / Google Play — бесплатно" },
-                          { n: "2", t: "Нажмите «+» → «Сканировать QR»", s: "Или «Импортировать из файла» (.conf)" },
-                          { n: "3", t: "Нажмите «Подключить»", s: "VPN включится за секунду" },
-                        ].map(({ n, t, s }) => (
-                          <div key={n} className="flex gap-3">
-                            <span className="flex-shrink-0 w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold" style={{ background: "#2AABEE", color: "#FFF" }}>{n}</span>
-                            <div>
-                              <p className="text-sm font-medium" style={{ color: "#111827" }}>{t}</p>
-                              <p className="text-xs" style={{ color: "#6B7280" }}>{s}</p>
+                      {/* Platform instructions */}
+                      <div style={{ background: "#F7F8FA", borderRadius: "16px", overflow: "hidden" }}>
+                        {/* Platform selector */}
+                        <div className="flex p-1 gap-1" style={{ borderBottom: "1px solid #E5E7EB" }}>
+                          {platforms.map(({ id, label }) => (
+                            <button
+                              key={id}
+                              onClick={() => setVpnPlatform(id)}
+                              className="flex-1 py-2 text-xs font-semibold touch-manipulation transition-all"
+                              style={{
+                                borderRadius: "8px",
+                                background: vpnPlatform === id ? "#FFFFFF" : "transparent",
+                                color: vpnPlatform === id ? "#111827" : "#9CA3AF",
+                                boxShadow: vpnPlatform === id ? "0 1px 3px rgba(0,0,0,0.08)" : "none",
+                              }}
+                            >
+                              {label}
+                            </button>
+                          ))}
+                        </div>
+
+                        {/* Steps */}
+                        <div className="p-4 space-y-3">
+                          <p className="text-xs font-semibold" style={{ color: "#6B7280" }}>
+                            Инструкция для {platforms.find(p => p.id === vpnPlatform)?.label}
+                          </p>
+                          {happInstructions[vpnPlatform].steps.map(({ t, s }, i) => (
+                            <div key={i} className="flex gap-3">
+                              <span
+                                className="flex-shrink-0 w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold"
+                                style={{ background: "#2AABEE", color: "#FFF" }}
+                              >
+                                {i + 1}
+                              </span>
+                              <div>
+                                <p className="text-sm font-medium" style={{ color: "#111827" }}>{t}</p>
+                                <p className="text-xs mt-0.5" style={{ color: "#6B7280" }}>{s}</p>
+                              </div>
                             </div>
-                          </div>
-                        ))}
+                          ))}
+
+                          {/* Download link */}
+                          <a
+                            href={happInstructions[vpnPlatform].download}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="flex items-center justify-center gap-2 w-full font-semibold text-sm touch-manipulation active:scale-95 transition-all mt-2"
+                            style={{ background: "#111827", color: "#FFFFFF", height: "44px", borderRadius: "10px" }}
+                          >
+                            <ExternalLink className="w-3.5 h-3.5" />
+                            Скачать WireGuard для {platforms.find(p => p.id === vpnPlatform)?.label}
+                          </a>
+                        </div>
                       </div>
                     </>
                   )}
@@ -786,36 +882,53 @@ export default function MiniAppPage() {
             </div>
           )}
 
-          {/* 2. Heading */}
-          <h1 className="text-center font-bold leading-tight mb-3" style={{ fontSize: "32px", color: "#111827" }}>
-            Telegram работает.<br />Даже когда заблокирован.
+          {/* 2. Badge */}
+          <div className="flex justify-center mb-4">
+            <span className="text-xs font-bold px-3 py-1.5 tracking-wide" style={{ background: "#EFF6FF", color: "#2563EB", borderRadius: "20px" }}>
+              2 В 1 — ПРОКСИ + VPN
+            </span>
+          </div>
+
+          {/* 3. Heading */}
+          <h1 className="text-center font-bold leading-tight mb-3" style={{ fontSize: "30px", color: "#111827" }}>
+            Работает всё — Telegram,<br />Instagram, TikTok и другие.
           </h1>
 
-          {/* 3. Subtitle */}
-          <p className="text-center mb-8" style={{ fontSize: "16px", fontWeight: 400, color: "#6B7280", lineHeight: "1.5" }}>
-            Персональный прокси только для тебя — не общий с тысячами незнакомцев
+          {/* 4. Subtitle */}
+          <p className="text-center mb-7" style={{ fontSize: "15px", fontWeight: 400, color: "#6B7280", lineHeight: "1.6" }}>
+            Одна подписка решает сразу обе проблемы: прокси включает Telegram без лишних действий, а VPN открывает всё остальное.
           </p>
 
-          {/* 4. Features */}
-          <div className="flex flex-col gap-3 mb-8">
+          {/* 5. Features — две колонки */}
+          <div className="grid grid-cols-2 gap-2 mb-3">
+            <div className="p-4" style={{ background: "#F0F9FF", borderRadius: "16px", border: "1px solid #BAE6FD" }}>
+              <p className="text-xs font-bold mb-2" style={{ color: "#0284C7" }}>📡 MTProxy</p>
+              <p className="text-xs leading-relaxed" style={{ color: "#374151" }}>Telegram работает сразу — без дополнительных приложений</p>
+            </div>
+            <div className="p-4" style={{ background: "#F0FDF4", borderRadius: "16px", border: "1px solid #BBF7D0" }}>
+              <p className="text-xs font-bold mb-2" style={{ color: "#16A34A" }}>🛡 VPN</p>
+              <p className="text-xs leading-relaxed" style={{ color: "#374151" }}>Instagram, TikTok, YouTube — любые сайты без ограничений</p>
+            </div>
+          </div>
+          <div className="flex flex-col gap-2 mb-7">
             {[
-              "⚡ Только твой сервер — без очередей и чужих пользователей",
-              "🔒 Без VPN — работает прямо в Telegram, ничего не нужно включать",
-              "📡 Стабильно 24/7 — мы следим за сервером, ты просто пользуешься",
+              "⚡ Персональный сервер — скорость не делишь с чужими",
+              "🔒 Без логов — мы не видим, что ты делаешь в сети",
+              "📲 Настройка за 2 минуты — подробная инструкция внутри",
             ].map((text, i) => (
-              <div key={i} className="px-4 py-3.5 text-sm font-medium" style={{ background: "#F7F8FA", borderRadius: "16px", color: "#374151" }}>
+              <div key={i} className="px-4 py-3 text-sm font-medium" style={{ background: "#F7F8FA", borderRadius: "14px", color: "#374151" }}>
                 {text}
               </div>
             ))}
           </div>
 
-          {/* 5. Price */}
+          {/* 6. Price */}
           <div className="text-center mb-6">
             <div className="flex items-baseline justify-center gap-1">
               <span className="font-bold" style={{ fontSize: "40px", color: "#111827" }}>299 ₽</span>
               <span className="text-base" style={{ color: "#6B7280" }}>/мес</span>
             </div>
-            <p className="text-sm mt-1" style={{ color: "#6B7280" }}>= 10 ₽ в день · Отмена в любой момент</p>
+            <p className="text-sm mt-1" style={{ color: "#6B7280" }}>= 10 ₽ в день · Прокси + VPN · Отмена в любой момент</p>
           </div>
 
           {/* Email */}
@@ -859,7 +972,7 @@ export default function MiniAppPage() {
               fontSize: "17px",
             }}
           >
-            Подключить за 299 ₽ →
+            Получить Прокси + VPN за 299 ₽ →
           </button>
 
           {error && (
@@ -871,11 +984,11 @@ export default function MiniAppPage() {
             </div>
           )}
 
-          {/* 7. Payment note */}
+          {/* Payment note */}
           <p className="text-center text-xs mt-3" style={{ color: "#6B7280" }}>
-            Оплата картой или СБП через Lava
+            Оплата картой или СБП · Прокси включается сразу · VPN — после установки приложения
           </p>
-          <p className="text-center text-xs mt-1" style={{ color: "#6B7280" }}>
+          <p className="text-center text-xs mt-1" style={{ color: "#9CA3AF" }}>
             Отмена в любой момент — напишите в поддержку
           </p>
 
