@@ -35,18 +35,9 @@ MINIAPP_PATH = (os.getenv("MINIAPP_PATH") or "/mini").strip() or "/mini"
 
 _log = logging.getLogger(__name__)
 
-# После load_dotenv: ключ для авто-включения ИИ-поддержки
-try:
-    from support_ai import LLM_API_KEY
-except ImportError:
-    LLM_API_KEY = ""
-
-
 def _has_llm_api_key() -> bool:
-    """Ключ читаем из окружения напрямую (Railway), не только из импорта support_ai."""
-    if (os.getenv("OPENROUTER_API_KEY") or os.getenv("OPENAI_API_KEY") or "").strip():
-        return True
-    return bool(LLM_API_KEY)
+    """Ключ LLM: только из окружения (Railway Variables), без кэша при импорте support_ai."""
+    return bool((os.getenv("OPENROUTER_API_KEY") or os.getenv("OPENAI_API_KEY") or "").strip())
 
 
 def _ai_support_enabled() -> bool:
@@ -631,7 +622,15 @@ async def main() -> None:
         tg_id = message.from_user.id if message.from_user else 0
         if not tg_id:
             return
-        if _ai_support_enabled():
+        ai_on = _ai_support_enabled()
+        _log.info(
+            "support: tg_id=%s ai_enabled=%s openrouter_key=%s support_ai_enabled_env=%r",
+            tg_id,
+            ai_on,
+            bool(os.getenv("OPENROUTER_API_KEY", "").strip()),
+            os.getenv("SUPPORT_AI_ENABLED", ""),
+        )
+        if ai_on:
             session = _get_session(dp)
             try:
                 await message.bot.send_chat_action(message.chat.id, "typing")
@@ -652,6 +651,7 @@ async def main() -> None:
                 )
                 return
             await state.update_data(support_history=new_history)
+            _log.info("support_ai: reply sent tg_id=%s len=%s", tg_id, len(reply))
             await message.answer(reply, reply_markup=support_chat_kb())
             return
 

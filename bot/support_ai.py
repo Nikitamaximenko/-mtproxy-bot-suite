@@ -14,10 +14,10 @@ import aiohttp
 
 _log = logging.getLogger(__name__)
 
-# OpenRouter: https://openrouter.ai — один ключ для разных моделей; бесплатные: суффикс :free или модель openrouter/free
-OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY", "").strip()
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "").strip()
-LLM_API_KEY = OPENROUTER_API_KEY or OPENAI_API_KEY
+# Ключи НЕ кэшируем на уровне модуля: на Railway env иногда виден только после полного старта процесса;
+# повторное чтение через os.getenv гарантирует актуальное значение в run_support_reply.
+def llm_api_key() -> str:
+    return (os.getenv("OPENROUTER_API_KEY") or os.getenv("OPENAI_API_KEY") or "").strip()
 
 OPENAI_BASE_URL = (os.getenv("OPENAI_BASE_URL") or "https://openrouter.ai/api/v1").rstrip("/")
 # openrouter/free — free-роутер OpenRouter: сам выбирает живую free-модель с tools-support,
@@ -51,7 +51,7 @@ def _internal_headers() -> dict[str, str]:
 def _chat_completion_headers() -> dict[str, str]:
     """Заголовки для /chat/completions. OpenRouter просит Referer и Title для рейтинга."""
     h: dict[str, str] = {
-        "Authorization": f"Bearer {LLM_API_KEY}",
+        "Authorization": f"Bearer {llm_api_key()}",
         "Content-Type": "application/json",
     }
     if "openrouter.ai" in OPENAI_BASE_URL:
@@ -272,7 +272,11 @@ async def run_support_reply(
     history: список сообщений в формате OpenAI (roles: user/assistant/tool/system без system —
     system добавляем сами). Возвращаем (reply_text, new_history).
     """
-    if not LLM_API_KEY:
+    key = llm_api_key()
+    if not key:
+        _log.warning(
+            "support_ai: no OPENROUTER_API_KEY/OPENAI_API_KEY at request time (check Railway → bot service Variables)"
+        )
         return (
             (
                 "Помощник ИИ не настроен: в .env нужен OPENROUTER_API_KEY (OpenRouter) "
