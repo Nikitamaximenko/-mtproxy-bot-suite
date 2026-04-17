@@ -43,16 +43,24 @@ except ImportError:
     LLM_API_KEY = ""
 
 
+def _has_llm_api_key() -> bool:
+    """Ключ читаем из окружения напрямую (Railway), не только из импорта support_ai."""
+    if (os.getenv("OPENROUTER_API_KEY") or os.getenv("OPENAI_API_KEY") or "").strip():
+        return True
+    return bool(LLM_API_KEY)
+
+
 def _ai_support_enabled() -> bool:
     """
-    ИИ в этом чате: SUPPORT_AI_ENABLED=false — выкл.; true — вкл.; не задано — вкл., если есть OPENROUTER_API_KEY / OPENAI_API_KEY.
+    ИИ: SUPPORT_AI_ENABLED=false — выкл.; true — вкл. только если задан ключ;
+    не задано — вкл. автоматически при наличии OPENROUTER_API_KEY / OPENAI_API_KEY.
     """
     raw = os.getenv("SUPPORT_AI_ENABLED", "").strip().lower()
     if raw in ("0", "false", "no"):
         return False
     if raw in ("1", "true", "yes"):
-        return True
-    return bool(LLM_API_KEY)
+        return _has_llm_api_key()
+    return _has_llm_api_key()
 
 
 class SupportStates(StatesGroup):
@@ -466,6 +474,13 @@ async def main() -> None:
 
     async def on_startup(**kwargs: Any) -> None:
         dp["http_session"] = aiohttp.ClientSession()
+        _log.info(
+            "Support AI: enabled=%s (OPENROUTER key set=%s, OPENAI key set=%s, SUPPORT_AI_ENABLED=%r)",
+            _ai_support_enabled(),
+            bool(os.getenv("OPENROUTER_API_KEY", "").strip()),
+            bool(os.getenv("OPENAI_API_KEY", "").strip()),
+            os.getenv("SUPPORT_AI_ENABLED", ""),
+        )
         try:
             await bot.set_chat_menu_button(menu_button=MenuButtonDefault())
         except Exception:
