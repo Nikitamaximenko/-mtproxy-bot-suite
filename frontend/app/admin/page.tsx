@@ -198,25 +198,6 @@ const PRODUCTION_TELEGRAM_IDS = [
   231115635, 1760841179, 1759725640, 195699085, 282345092,
 ] as const
 
-// #region agent log
-function adminDbg(hypothesisId: string, message: string, data: Record<string, unknown>) {
-  if (typeof window === "undefined") return
-  fetch("http://127.0.0.1:7280/ingest/b7181c25-f78c-4d85-b0bd-4bbec7e46947", {
-    method: "POST",
-    headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "5f0ad3" },
-    body: JSON.stringify({
-      sessionId: "5f0ad3",
-      hypothesisId,
-      location: "admin/page.tsx",
-      message,
-      data,
-      timestamp: Date.now(),
-      runId: "pre",
-    }),
-  }).catch(() => {})
-}
-// #endregion
-
 /** API может отдать неполный объект — без этого рендер падает на funnel.source_stats.length */
 function safeFunnel(raw: unknown): FunnelStats | null {
   if (raw == null || typeof raw !== "object") return null
@@ -362,30 +343,11 @@ export default function AdminPage() {
         setVpnOnline(vData as VpnOnline | null)
         setVpnClients(vcData as VpnClientsData | null)
         setOverview(ovData as UsersOverview)
-        // #region agent log
-        adminDbg("H-funnel-raw", "funnel before normalize", {
-          fOk: fRes.ok,
-          fStatus: fRes.status,
-          rawHasSourceStatsArray:
-            fData != null &&
-            typeof fData === "object" &&
-            Array.isArray((fData as { source_stats?: unknown }).source_stats),
-        })
-        // #endregion
         const funnelNorm = safeFunnel(fData)
-        // #region agent log
-        adminDbg("H-funnel-safe", "after safeFunnel", {
-          nonNull: funnelNorm != null,
-          sourceStatsLen: funnelNorm?.source_stats?.length ?? -1,
-        })
-        // #endregion
         setFunnel(funnelNorm)
         setAuthed(true)
         persistKey(activeKey)
       } catch (e) {
-        // #region agent log
-        adminDbg("H-fetch-catch", "fetchAll catch", { err: String(e) })
-        // #endregion
         setError("Не удалось загрузить данные")
       } finally {
         setLoading(false)
@@ -595,31 +557,6 @@ export default function AdminPage() {
     }
   }, [fetchAll, headers])
 
-  useEffect(() => {
-    // #region agent log
-    adminDbg("H-mount", "AdminPage mounted", { path: window.location.pathname })
-    const onErr = (e: ErrorEvent) => {
-      adminDbg("H-window-error", e.message || "error", {
-        filename: e.filename,
-        lineno: e.lineno,
-        colno: e.colno,
-        err: e.error != null ? String(e.error) : "",
-      })
-    }
-    const onRej = (e: PromiseRejectionEvent) => {
-      adminDbg("H-unhandledrejection", "unhandledrejection", {
-        reason: e.reason instanceof Error ? e.reason.message : String(e.reason),
-      })
-    }
-    window.addEventListener("error", onErr)
-    window.addEventListener("unhandledrejection", onRej)
-    return () => {
-      window.removeEventListener("error", onErr)
-      window.removeEventListener("unhandledrejection", onRej)
-    }
-    // #endregion
-  }, [])
-
   /** Один раз при монтировании: пробуем ключ из localStorage и не показываем форму входа до проверки */
   useEffect(() => {
     let cancelled = false
@@ -820,7 +757,11 @@ export default function AdminPage() {
         </section>
 
         <section>
-          <h2 className="text-lg font-semibold mb-4 text-gray-300">Сводка</h2>
+          <h2 className="text-lg font-semibold mb-1 text-gray-300">Сводка</h2>
+          <p className="text-xs text-gray-500 mb-4">
+            Подписки — уникальные пользователи Telegram (tg_id &gt; 0); веб-оформления не входят в эти числа. «Истекших» — без текущего доступа.
+            Выручка ≈ число завершённых оплат в БД × цена (продления — отдельные строки).
+          </p>
           <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4">
             {[
               {
@@ -829,12 +770,28 @@ export default function AdminPage() {
                 sub: stats ? `+ ${stats.total_users - stats.tg_users} веб` : undefined,
                 color: "text-blue-400",
               },
-              { label: "Активных подписок", value: stats?.active_subscriptions ?? "—", color: "text-emerald-400" },
-              { label: "Истекших", value: stats?.expired_subscriptions ?? "—", color: "text-orange-400" },
-              { label: "Ожидают оплату", value: stats?.pending_payments ?? "—", color: "text-yellow-400" },
+              {
+                label: "Активных подписок",
+                value: stats?.active_subscriptions ?? "—",
+                sub: "уник. с доступом",
+                color: "text-emerald-400",
+              },
+              {
+                label: "Истекших",
+                value: stats?.expired_subscriptions ?? "—",
+                sub: "уник., без активного периода",
+                color: "text-orange-400",
+              },
+              {
+                label: "Ожидают оплату",
+                value: stats?.pending_payments ?? "—",
+                sub: "уник., нет активной подписки",
+                color: "text-yellow-400",
+              },
               {
                 label: "Выручка (≈)",
                 value: stats ? `${stats.revenue_estimate.toLocaleString("ru-RU")} ₽` : "—",
+                sub: "по строкам оплат",
                 color: "text-green-400",
               },
             ].map(({ label, value, sub, color }) => (

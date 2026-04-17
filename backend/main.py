@@ -2332,6 +2332,7 @@ class AdminStatsResponse(BaseModel):
     total_users: int
     tg_users: int  # users with real Telegram ids (telegram_id > 0) — used for broadcast targeting
     marketing_opt_out_users: int
+    # Subscription metrics: unique telegram_id (TG bot only); multiple checkout rows no longer inflate counts
     active_subscriptions: int
     expired_subscriptions: int
     pending_payments: int
@@ -2373,38 +2374,55 @@ def admin_stats(req: Request, db: Session = Depends(get_db)) -> AdminStatsRespon
     marketing_opt_out_users = db.execute(select(func.count()).select_from(User).where(and_(*mo_conds))).scalar() or 0
 
     def _sub_conds(*parts):
-        p = list(parts)
+        # TG bot only (aligns with tg_users); web checkouts (telegram_id < 0) stay in funnel only
+        p = [Subscription.telegram_id > 0, *list(parts)]
         if scope:
-            p.insert(0, Subscription.telegram_id.in_(scope))
+            p.insert(1, Subscription.telegram_id.in_(scope))
         return and_(*p)
 
+    active_conds = _sub_conds(
+        Subscription.payment_status == "paid",
+        Subscription.expires_at.is_not(None),
+        Subscription.expires_at > now,
+        Subscription.access_suspended == False,  # noqa: E712
+    )
+    active_tg_sq = select(Subscription.telegram_id).where(active_conds).distinct()
+
     active = db.execute(
-        select(func.count()).select_from(Subscription).where(
-            _sub_conds(
-                Subscription.payment_status == "paid",
-                Subscription.expires_at.is_not(None),
-                Subscription.expires_at > now,
-                Subscription.access_suspended == False,  # noqa: E712
-            )
-        )
+        select(func.count(Subscription.telegram_id.distinct()))
+        .select_from(Subscription)
+        .where(active_conds)
     ).scalar() or 0
 
+    # Users with at least one past-period row, excluding anyone who still has active access
     expired = db.execute(
-        select(func.count()).select_from(Subscription).where(
-            _sub_conds(
-                Subscription.payment_status.in_(["paid", "expired"]),
-                Subscription.expires_at.is_not(None),
-                Subscription.expires_at <= now,
+        select(func.count(Subscription.telegram_id.distinct()))
+        .select_from(Subscription)
+        .where(
+            and_(
+                _sub_conds(
+                    Subscription.payment_status.in_(["paid", "expired"]),
+                    Subscription.expires_at.is_not(None),
+                    Subscription.expires_at <= now,
+                ),
+                ~Subscription.telegram_id.in_(active_tg_sq),
             )
         )
     ).scalar() or 0
 
+    # Distinct users with a pending checkout and no current active subscription (orphan retries collapse to one)
     pending = db.execute(
-        select(func.count()).select_from(Subscription).where(
-            _sub_conds(Subscription.payment_status == "pending")
+        select(func.count(Subscription.telegram_id.distinct()))
+        .select_from(Subscription)
+        .where(
+            and_(
+                _sub_conds(Subscription.payment_status == "pending"),
+                ~Subscription.telegram_id.in_(active_tg_sq),
+            )
         )
     ).scalar() or 0
 
+    # One row ≈ one completed payment period (renewals = multiple rows); TG bot only
     total_paid = db.execute(
         select(func.count()).select_from(Subscription).where(
             _sub_conds(Subscription.payment_status.in_(["paid", "expired"]))
@@ -2526,15 +2544,18 @@ def admin_funnel(req: Request, db: Session = Depends(get_db)) -> FunnelStatsResp
 
     # Active now
     active_now_conds = [
+        Subscription.telegram_id > 0,
         Subscription.payment_status == "paid",
         Subscription.expires_at.is_not(None),
         Subscription.expires_at > now,
         Subscription.access_suspended == False,  # noqa: E712
     ]
     if scope is not None:
-        active_now_conds.insert(0, Subscription.telegram_id.in_(scope))
+        active_now_conds.insert(1, Subscription.telegram_id.in_(scope))
     active_now = db.execute(
-        select(func.count()).select_from(Subscription).where(and_(*active_now_conds))
+        select(func.count(Subscription.telegram_id.distinct()))
+        .select_from(Subscription)
+        .where(and_(*active_now_conds))
     ).scalar() or 0
 
     # ── Web users (telegram_id < 0) — скрыты при production-scope ─────────────
