@@ -2555,6 +2555,57 @@ def internal_support_activate(
     return OkResponse(ok=True)
 
 
+class InternalDiagSubDump(BaseModel):
+    id: int
+    telegram_id: int
+    payment_status: str
+    expires_at: str | None
+    access_suspended: bool
+    has_proxy: bool
+    created_at: str
+
+
+class InternalDiagSubsResponse(BaseModel):
+    total_subs: int
+    total_users: int
+    paid_subs: list[InternalDiagSubDump]
+
+
+@app.get("/internal/diag/subs-dump", response_model=InternalDiagSubsResponse)
+def internal_diag_subs_dump(req: Request, db: Session = Depends(get_db)) -> InternalDiagSubsResponse:
+    """Дамп всех подписок (paid или свежих) и кол-ва записей в users — для поиска split-brain БД."""
+    _require_internal_token(req)
+    total_subs = db.execute(select(func.count()).select_from(Subscription)).scalar() or 0
+    total_users = db.execute(select(func.count()).select_from(User)).scalar() or 0
+    rows = (
+        db.execute(
+            select(Subscription)
+            .where(Subscription.payment_status.in_(["paid", "expired"]))
+            .order_by(Subscription.created_at.desc())
+            .limit(50)
+        )
+        .scalars()
+        .all()
+    )
+    paid_subs = [
+        InternalDiagSubDump(
+            id=s.id,
+            telegram_id=int(s.telegram_id),
+            payment_status=s.payment_status,
+            expires_at=s.expires_at.isoformat() if s.expires_at else None,
+            access_suspended=bool(s.access_suspended),
+            has_proxy=bool(s.proxy_server and s.proxy_port and s.proxy_secret),
+            created_at=s.created_at.isoformat() if s.created_at else "",
+        )
+        for s in rows
+    ]
+    return InternalDiagSubsResponse(
+        total_subs=int(total_subs),
+        total_users=int(total_users),
+        paid_subs=paid_subs,
+    )
+
+
 class InternalDiagRecentDbgResponse(BaseModel):
     count: int
     lines: list[str]
