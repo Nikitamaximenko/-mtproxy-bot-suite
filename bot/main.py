@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import html
 import logging
 import os
 from datetime import datetime, timezone
@@ -51,6 +52,43 @@ def _ai_support_enabled() -> bool:
     if raw in ("1", "true", "yes"):
         return _has_llm_api_key()
     return _has_llm_api_key()
+
+
+def _bot_admin_ids() -> set[int]:
+    raw = os.getenv("BOT_ADMIN_TELEGRAM_IDS", "").strip()
+    if not raw:
+        return set()
+    out: set[int] = set()
+    for part in raw.split(","):
+        p = part.strip()
+        if not p:
+            continue
+        try:
+            out.add(int(p))
+        except ValueError:
+            continue
+    return out
+
+
+def _support_ai_diagnostic_text() -> str:
+    """Без секретов: только флаги и длина ключа."""
+    lines = [
+        f"ai_enabled={_ai_support_enabled()}",
+        f"OPENROUTER_API_KEY set={bool(os.getenv('OPENROUTER_API_KEY', '').strip())}",
+        f"OPENAI_API_KEY set={bool(os.getenv('OPENAI_API_KEY', '').strip())}",
+        f"SUPPORT_AI_ENABLED={os.getenv('SUPPORT_AI_ENABLED', '')!r}",
+        f"INTERNAL_API_TOKEN set={bool(INTERNAL_API_TOKEN)}",
+        f"BACKEND_BASE_URL={BACKEND_BASE_URL}",
+    ]
+    try:
+        import support_ai as sa
+
+        k = sa.llm_api_key()
+        lines.append(f"support_ai.llm_api_key() len={len(k)}")
+        lines.append("support_ai import=ok")
+    except Exception as e:
+        lines.append(f"support_ai import=FAIL {e!r}")
+    return "\n".join(lines)
 
 
 class SupportStates(StatesGroup):
@@ -466,6 +504,15 @@ async def main() -> None:
             os.getenv("SUPPORT_AI_ENABLED", ""),
         )
         try:
+            import support_ai as _sa
+
+            _log.info(
+                "support_ai: import OK, llm_api_key len=%s",
+                len(_sa.llm_api_key()),
+            )
+        except Exception as e:
+            _log.error("support_ai: import FAILED (fix Railway Root Directory=bot or PYTHONPATH): %s", e)
+        try:
             await bot.set_chat_menu_button(menu_button=MenuButtonDefault())
         except Exception:
             pass
@@ -507,6 +554,16 @@ async def main() -> None:
     @dp.message(Command("help"))
     async def _help(message: Message) -> None:
         await message.answer(HELP_GENERAL, parse_mode="HTML")
+
+    @dp.message(Command("aistatus"))
+    async def _aistatus(message: Message) -> None:
+        """Диагностика ИИ-поддержки (только BOT_ADMIN_TELEGRAM_IDS)."""
+        uid = message.from_user.id if message.from_user else 0
+        admins = _bot_admin_ids()
+        if not admins or uid not in admins:
+            return
+        text = _support_ai_diagnostic_text()
+        await message.answer(f"<pre>{html.escape(text)}</pre>", parse_mode="HTML")
 
     @dp.message(Command("stop"))
     async def _stop(message: Message) -> None:
