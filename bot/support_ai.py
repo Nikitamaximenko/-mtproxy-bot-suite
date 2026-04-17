@@ -1,5 +1,7 @@
 """
 ИИ-поддержка в Telegram: OpenAI-compatible Chat Completions + tools (статус, оплата, выдача доступа).
+
+По умолчанию: OpenRouter (дешёвые/бесплатные модели). Ключ: OPENROUTER_API_KEY или совместимый OPENAI_API_KEY.
 """
 from __future__ import annotations
 
@@ -12,9 +14,14 @@ import aiohttp
 
 _log = logging.getLogger(__name__)
 
+# OpenRouter: https://openrouter.ai — один ключ для разных моделей; бесплатные: суффикс :free или модель openrouter/free
+OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY", "").strip()
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "").strip()
-OPENAI_BASE_URL = (os.getenv("OPENAI_BASE_URL") or "https://api.openai.com/v1").rstrip("/")
-SUPPORT_AI_MODEL = (os.getenv("SUPPORT_AI_MODEL") or "gpt-4o-mini").strip()
+LLM_API_KEY = OPENROUTER_API_KEY or OPENAI_API_KEY
+
+OPENAI_BASE_URL = (os.getenv("OPENAI_BASE_URL") or "https://openrouter.ai/api/v1").rstrip("/")
+# Бесплатный роутер OpenRouter или любая модель вида org/model:free — см. https://openrouter.ai/models?order=newest&pricing=free
+SUPPORT_AI_MODEL = (os.getenv("SUPPORT_AI_MODEL") or "openrouter/free").strip()
 SUPPORT_AI_ALLOW_GRANT = os.getenv("SUPPORT_AI_ALLOW_GRANT", "true").strip().lower() in (
     "1",
     "true",
@@ -32,6 +39,20 @@ def _internal_headers() -> dict[str, str]:
     if not INTERNAL_API_TOKEN:
         return {}
     return {"X-Internal-Token": INTERNAL_API_TOKEN}
+
+
+def _chat_completion_headers() -> dict[str, str]:
+    """Заголовки для /chat/completions. OpenRouter просит Referer и Title для рейтинга."""
+    h: dict[str, str] = {
+        "Authorization": f"Bearer {LLM_API_KEY}",
+        "Content-Type": "application/json",
+    }
+    if "openrouter.ai" in OPENAI_BASE_URL:
+        referer = (os.getenv("OPENROUTER_HTTP_REFERER") or FRONTEND_URL or "https://t.me").strip()
+        title = (os.getenv("OPENROUTER_APP_NAME") or "Frosty Support").strip()[:128]
+        h["HTTP-Referer"] = referer or "https://t.me"
+        h["X-Title"] = title
+    return h
 
 
 def _miniapp_url(tg_id: int) -> str:
@@ -157,16 +178,13 @@ async def run_support_reply(
     user_text: str,
 ) -> str:
     """Один раунд диалога: до нескольких tool-calls, затем текст ответа."""
-    if not OPENAI_API_KEY:
+    if not LLM_API_KEY:
         return (
-            "Помощник не настроен: задайте OPENAI_API_KEY для бота. "
+            "Помощник не настроен: задайте OPENROUTER_API_KEY (OpenRouter) или OPENAI_API_KEY. "
             "Пока можете написать разработчику или повторить попытку позже."
         )
 
-    headers = {
-        "Authorization": f"Bearer {OPENAI_API_KEY}",
-        "Content-Type": "application/json",
-    }
+    headers = _chat_completion_headers()
     messages: list[dict[str, Any]] = [
         {"role": "system", "content": SYSTEM_PROMPT},
         {"role": "user", "content": user_text},
@@ -193,7 +211,7 @@ async def run_support_reply(
                 status = resp.status
                 raw = await resp.json(content_type=None)
         except Exception as e:
-            _log.warning("OpenAI request failed: %s", e)
+            _log.warning("LLM chat/completions request failed: %s", e)
             return "Сервис ответа временно недоступен. Попробуйте через минуту."
 
         if status >= 400:
