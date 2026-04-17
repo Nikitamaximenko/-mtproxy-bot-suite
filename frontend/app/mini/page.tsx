@@ -10,6 +10,9 @@ const manrope = Manrope({ subsets: ["latin", "cyrillic"], weight: ["400", "500",
 /** Второй поток оплаты (Prodamus / СБП). По умолчанию скрыт — см. NEXT_PUBLIC_ENABLE_PRODAMUS_CHECKOUT и backend ENABLE_PRODAMUS_CHECKOUT. */
 const ENABLE_PRODAMUS_SBP = process.env.NEXT_PUBLIC_ENABLE_PRODAMUS_CHECKOUT === "true"
 
+/** Ссылка на бота — для fallback, когда proxy_link не пришёл с API (нет INTERNAL_API_TOKEN на Vercel и т.п.). */
+const TELEGRAM_BOT_URL = (process.env.NEXT_PUBLIC_TELEGRAM_BOT_URL || "https://t.me/FrostyProxyBot").replace(/\/+$/, "")
+
 type SubscriptionData = {
   active: boolean
   expires_at?: string | null
@@ -626,59 +629,137 @@ export default function MiniAppPage() {
             ))}
           </div>
 
-          {/* ── Proxy tab ── Бонус к подписке. Главный продукт — VPN. */}
+          {/* ── Proxy tab — один главный путь: огромная кнопка «подключить прокси» */}
           {activeTab === "proxy" && (
-            <div className="space-y-3">
-              <div className="px-1 mb-1">
-                <p className="text-xs" style={{ color: "#6B7280" }}>
-                  Бонус к подписке: MTProxy снимает блокировку прямо внутри Telegram — без отдельных приложений. Подключается в один клик.
-                </p>
-              </div>
+            <div className="space-y-4">
+              <p className="px-1 text-xs leading-relaxed" style={{ color: "#6B7280" }}>
+                MTProxy работает только внутри Telegram — отдельные приложения не нужны.
+              </p>
+
               {proxyLink ? (
-                <div className="p-5" style={{ background: "#F7F8FA", borderRadius: "16px" }}>
-                  <div className="flex items-center justify-between mb-3">
-                    <span className="text-sm font-medium" style={{ color: "#111827" }}>Ваша ссылка на прокси</span>
+                <>
+                  <div
+                    className="p-5"
+                    style={{
+                      background: "linear-gradient(145deg, #229ED9 0%, #2AABEE 55%, #0088CC 100%)",
+                      borderRadius: "20px",
+                      boxShadow: "0 8px 28px rgba(34,158,217,0.35)",
+                    }}
+                  >
+                    <p className="text-base font-bold" style={{ color: "#FFFFFF" }}>Прокси для Telegram</p>
+                    <p className="text-xs mt-1 mb-5" style={{ color: "rgba(255,255,255,0.92)" }}>
+                      Один тап — Telegram сам добавит ваш персональный MTProxy.
+                    </p>
                     <button
-                      onClick={handleCopy}
-                      className="flex items-center gap-1.5 text-xs font-medium touch-manipulation active:scale-95 transition-all"
-                      style={{ color: copied ? "#2AABEE" : "#6B7280" }}
+                      type="button"
+                      onClick={() => openTelegramLink(proxyLink)}
+                      className="w-full font-extrabold touch-manipulation active:scale-[0.98] transition-all leading-tight px-2"
+                      style={{
+                        background: "#FFFFFF",
+                        color: "#0088CC",
+                        height: "68px",
+                        borderRadius: "16px",
+                        fontSize: "14px",
+                        letterSpacing: "0.04em",
+                      }}
                     >
-                      {copied ? <><Check className="w-3.5 h-3.5" />Скопировано</> : <><Copy className="w-3.5 h-3.5" />Копировать</>}
+                      ПОДКЛЮЧИТЬ ПРОКСИ В TELEGRAM
                     </button>
                   </div>
-                  <div className="p-3 font-mono text-xs break-all leading-relaxed" style={{ background: "#FFFFFF", borderRadius: "10px", color: "#6B7280" }}>
-                    {proxyLink}
-                  </div>
-                  <button
-                    onClick={() => openTelegramLink(proxyLink)}
-                    className="w-full mt-4 flex items-center justify-center gap-2 font-bold touch-manipulation active:scale-95 transition-all"
-                    style={{ background: "#2AABEE", color: "#FFFFFF", height: "56px", borderRadius: "14px", fontSize: "17px" }}
-                  >
-                    Подключить в Telegram
-                  </button>
-                </div>
+
+                  <details className="group">
+                    <summary
+                      className="flex items-center justify-between px-4 py-3 cursor-pointer list-none touch-manipulation"
+                      style={{ background: "#F7F8FA", borderRadius: "14px", color: "#111827" }}
+                    >
+                      <span className="text-sm font-semibold">Ссылка или копирование</span>
+                      <span className="text-xs" style={{ color: "#2AABEE" }}>Открыть ↓</span>
+                    </summary>
+                    <div className="mt-2 p-4 space-y-3" style={{ background: "#F7F8FA", borderRadius: "14px" }}>
+                      <div className="p-3 font-mono text-[11px] break-all leading-relaxed" style={{ background: "#FFFFFF", borderRadius: "10px", color: "#6B7280" }}>
+                        {proxyLink}
+                      </div>
+                      <button
+                        type="button"
+                        onClick={handleCopy}
+                        className="w-full flex items-center justify-center gap-2 text-sm font-semibold touch-manipulation active:scale-95 transition-all"
+                        style={{
+                          background: copied ? "#F0FDF4" : "#FFFFFF",
+                          color: copied ? "#16A34A" : "#374151",
+                          height: "48px",
+                          borderRadius: "12px",
+                          border: "1px solid #E5E7EB",
+                        }}
+                      >
+                        {copied ? <><Check className="w-4 h-4" />Скопировано</> : <><Copy className="w-4 h-4" />Скопировать ссылку</>}
+                      </button>
+                    </div>
+                  </details>
+                </>
               ) : (
-                <div className="p-5 text-center space-y-2" style={{ background: "#F7F8FA", borderRadius: "16px" }}>
-                  <p className="text-sm font-semibold" style={{ color: "#111827" }}>Ссылка временно недоступна здесь</p>
-                  <p className="text-xs leading-relaxed" style={{ color: "#6B7280" }}>
-                    Откройте бота и нажмите <strong style={{ color: "#2AABEE" }}>«✅ Статус»</strong> — там вашу персональную ссылку на прокси всегда можно скопировать и подключить одним кликом.
-                  </p>
+                <div className="space-y-3">
+                  <div
+                    className="p-5 text-center space-y-3"
+                    style={{
+                      background: "linear-gradient(145deg, #E0F2FE 0%, #F7F8FA 100%)",
+                      borderRadius: "20px",
+                      border: "1px solid #BAE6FD",
+                    }}
+                  >
+                    <p className="text-sm font-semibold" style={{ color: "#0C4A6E" }}>Ссылка ещё не подтянулась</p>
+                    <p className="text-xs leading-relaxed" style={{ color: "#0369A1" }}>
+                      Нажмите «Обновить» — чаще всего сразу появляется большая кнопка подключения. Или откройте бота — там «Статус» тоже даёт ссылку.
+                    </p>
+                    <button
+                      type="button"
+                      onClick={() => void refresh()}
+                      className="w-full font-extrabold touch-manipulation active:scale-[0.98] transition-all"
+                      style={{
+                        background: "#2AABEE",
+                        color: "#FFFFFF",
+                        height: "64px",
+                        borderRadius: "16px",
+                        fontSize: "15px",
+                        letterSpacing: "0.02em",
+                        textTransform: "uppercase",
+                      }}
+                    >
+                      Обновить и подключить
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => openTelegramLink(TELEGRAM_BOT_URL)}
+                      className="w-full text-sm font-semibold touch-manipulation py-3"
+                      style={{ color: "#0369A1" }}
+                    >
+                      Открыть бота Frosty
+                    </button>
+                  </div>
                 </div>
               )}
-              <div className="flex flex-col gap-2">
-                {[
-                  "⚡ Работает только внутри Telegram — не затрагивает другие приложения",
-                  "🔒 Без логов — мы не видим содержимое сообщений",
-                  "📡 Персональный сервер — не делишь скорость с чужими",
-                ].map((t, i) => (
-                  <div key={i} className="px-4 py-3 text-sm" style={{ background: "#F7F8FA", borderRadius: "12px", color: "#6B7280" }}>{t}</div>
-                ))}
-              </div>
-              <div className="px-1 pt-1">
-                <p className="text-xs" style={{ color: "#9CA3AF" }}>
-                  Для Instagram, TikTok, YouTube и всего остального — вкладка <strong style={{ color: "#2AABEE" }}>🛡 VPN</strong>.
-                </p>
-              </div>
+
+              <details>
+                <summary
+                  className="flex items-center justify-between px-4 py-3 cursor-pointer list-none touch-manipulation text-sm font-semibold"
+                  style={{ background: "#F7F8FA", borderRadius: "14px", color: "#6B7280" }}
+                >
+                  Почему это безопасно
+                  <span className="text-xs font-normal" style={{ color: "#2AABEE" }}>↓</span>
+                </summary>
+                <div className="mt-2 flex flex-col gap-2 px-1 pb-1">
+                  {[
+                    "⚡ Только Telegram — остальные приложения не затрагивает",
+                    "🔒 Без логов содержимого чатов",
+                    "📡 Персональный сервер",
+                  ].map((t, i) => (
+                    <div key={i} className="px-3 py-2.5 text-xs" style={{ background: "#F7F8FA", borderRadius: "10px", color: "#6B7280" }}>{t}</div>
+                  ))}
+                </div>
+              </details>
+
+              <p className="text-xs text-center px-1" style={{ color: "#9CA3AF" }}>
+                Instagram, TikTok, YouTube — вкладка <strong style={{ color: "#2AABEE" }}>🛡 VPN</strong>
+              </p>
             </div>
           )}
 
