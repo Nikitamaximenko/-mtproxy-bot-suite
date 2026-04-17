@@ -872,6 +872,43 @@ def _notify_admin_payment(tg_id: int) -> None:
     _send_tg(chat_id, f"💰 Оплата получена от пользователя <code>{tg_id}</code>")
 
 
+# region agent log
+def _dbg_admin_chat_ids() -> list[int]:
+    """Куда слать DBG5F0AD3-отчёты. BOT_ADMIN_TELEGRAM_IDS (csv) ∪ ADMIN_NOTIFY_CHAT_ID."""
+    out: list[int] = []
+    raw = (os.getenv("BOT_ADMIN_TELEGRAM_IDS") or "").strip()
+    for part in raw.split(","):
+        p = part.strip()
+        if not p:
+            continue
+        try:
+            out.append(int(p))
+        except ValueError:
+            continue
+    if ADMIN_NOTIFY_CHAT_ID:
+        try:
+            cid = int(ADMIN_NOTIFY_CHAT_ID)
+            if cid not in out:
+                out.append(cid)
+        except ValueError:
+            pass
+    return out
+
+
+def _dbg_notify_admin(text: str) -> None:
+    """Шлёт DBG5F0AD3-отчёт в Telegram админам. Best-effort."""
+    if not BOT_TOKEN:
+        return
+    safe = html.escape(text)[:3800]
+    payload = f"<pre>{safe}</pre>"
+    for uid in _dbg_admin_chat_ids():
+        try:
+            _send_tg(uid, payload)
+        except Exception:
+            pass
+# endregion
+
+
 def _notify_expiring(tg_id: int, expires_at: datetime) -> None:
     date_str = expires_at.strftime("%d.%m.%Y")
     buttons: list[list[dict[str, str]]] = [
@@ -2286,6 +2323,27 @@ def admin_deactivate(telegram_id: int, req: Request, db: Session = Depends(get_d
     logger.info("Admin suspended access for tg_id=%s (%d row(s))", telegram_id, len(subs))
     # region agent log
     logger.info("DBG5F0AD3 admin_deactivate.exit tg_id=%s rows=%s", telegram_id, len(subs))
+    try:
+        latest = db.execute(
+            select(Subscription)
+            .where(Subscription.telegram_id == telegram_id)
+            .order_by(Subscription.created_at.desc())
+            .limit(1)
+        ).scalars().first()
+        report = (
+            "DBG5F0AD3 admin_deactivate\n"
+            f"tg_id={telegram_id}\n"
+            f"rows_updated={len(subs)}\n"
+            f"MT_PROXY_SERVER_set={bool(MT_PROXY_SERVER)}\n"
+            f"MT_PROXY_SECRET_set={bool(MT_PROXY_SECRET)}\n"
+            f"after.sub_id={latest.id if latest else None}\n"
+            f"after.status={latest.payment_status if latest else None}\n"
+            f"after.suspended={bool(latest.access_suspended) if latest else None}\n"
+            f"after.has_proxy={bool(latest and latest.proxy_server and latest.proxy_port and latest.proxy_secret) if latest else None}"
+        )
+        _dbg_notify_admin(report)
+    except Exception:
+        logger.exception("DBG5F0AD3 admin_deactivate: dbg notify failed")
     # endregion
     return OkResponse(ok=True)
 
@@ -2433,7 +2491,43 @@ def admin_activate(telegram_id: int, req: Request, db: Session = Depends(get_db)
     )
     # endregion
     _require_admin(req)
-    _admin_activate_user(telegram_id, db)
+    err: str | None = None
+    try:
+        _admin_activate_user(telegram_id, db)
+    except HTTPException as e:
+        err = f"HTTP {e.status_code}: {e.detail}"
+        raise
+    except Exception as e:
+        err = f"EXC {e!r}"
+        raise
+    finally:
+        # region agent log
+        try:
+            latest = db.execute(
+                select(Subscription)
+                .where(Subscription.telegram_id == telegram_id)
+                .order_by(Subscription.created_at.desc())
+                .limit(1)
+            ).scalars().first()
+            report = (
+                "DBG5F0AD3 admin_activate\n"
+                f"tg_id={telegram_id}\n"
+                f"result={'ERROR' if err else 'OK'}\n"
+                f"err={err or '-'}\n"
+                f"MT_PROXY_SERVER_set={bool(MT_PROXY_SERVER)}\n"
+                f"MT_PROXY_SECRET_set={bool(MT_PROXY_SECRET)}\n"
+                f"MT_PROXY_PORT={MT_PROXY_PORT}\n"
+                f"db_dialect={engine.dialect.name}\n"
+                f"after.sub_id={latest.id if latest else None}\n"
+                f"after.status={latest.payment_status if latest else None}\n"
+                f"after.expires_at={latest.expires_at.isoformat() if latest and latest.expires_at else None}\n"
+                f"after.suspended={bool(latest.access_suspended) if latest else None}\n"
+                f"after.has_proxy={bool(latest and latest.proxy_server and latest.proxy_port and latest.proxy_secret) if latest else None}"
+            )
+            _dbg_notify_admin(report)
+        except Exception:
+            logger.exception("DBG5F0AD3 admin_activate: dbg notify failed")
+        # endregion
     return OkResponse(ok=True)
 
 
