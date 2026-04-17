@@ -2,10 +2,9 @@ import type { Metadata } from "next"
 import { Manrope } from "next/font/google"
 import Link from "next/link"
 import { articles } from "./articles"
+import { SITE_URL } from "@/lib/site"
 
 const manrope = Manrope({ subsets: ["latin", "cyrillic"], weight: ["400", "600", "700"] })
-
-const SITE_URL = "https://frostybot.ru"
 
 export const metadata: Metadata = {
   title: "Блог Frosty — Telegram, MTProxy и VPN в России",

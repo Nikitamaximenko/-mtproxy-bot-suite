@@ -1,7 +1,7 @@
 import type { Metadata } from "next"
 import { Landing } from "@/components/Landing"
+import { SITE_URL } from "@/lib/site"
 
-const SITE_URL = "https://frostybot.ru"
 const PRICE_RUB = 299
 
 export const metadata: Metadata = {

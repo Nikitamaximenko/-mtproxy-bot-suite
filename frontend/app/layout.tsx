@@ -3,6 +3,7 @@ import { Manrope, Fraunces } from 'next/font/google'
 import Script from 'next/script'
 import { Analytics } from '@vercel/analytics/next'
 import { BackendKeepAlive } from '@/components/BackendKeepAlive'
+import { SITE_URL } from '@/lib/site'
 import './globals.css'
 
 const manrope = Manrope({
@@ -30,7 +31,7 @@ export const viewport: Viewport = {
 }
 
 export const metadata: Metadata = {
-  metadataBase: new URL('https://frostybot.ru'),
+  metadataBase: new URL(SITE_URL),
   title: {
     default: 'Frosty — MTProxy + VPN для Telegram, Instagram, YouTube',
     template: '%s | Frosty',
@@ -41,7 +42,7 @@ export const metadata: Metadata = {
   openGraph: {
     title: 'Frosty — MTProxy + VPN в одной подписке',
     description: 'Личный MTProxy + VPN в одной подписке. 299 ₽/мес.',
-    url: 'https://frostybot.ru',
+    url: SITE_URL,
     siteName: 'Frosty',
     locale: 'ru_RU',
     type: 'website',
@@ -111,8 +112,8 @@ export default function RootLayout({
               '@context': 'https://schema.org',
               '@type': 'Organization',
               name: 'Frosty',
-              url: 'https://frostybot.ru',
-              logo: 'https://frostybot.ru/icon-light-32x32.png',
+              url: SITE_URL,
+              logo: `${SITE_URL}/icon-light-32x32.png`,
               sameAs: ['https://t.me/frostytg_bot'],
             }),
           }}
@@ -126,11 +127,11 @@ export default function RootLayout({
               '@context': 'https://schema.org',
               '@type': 'WebSite',
               name: 'Frosty',
-              url: 'https://frostybot.ru',
+              url: SITE_URL,
               inLanguage: 'ru-RU',
               potentialAction: {
                 '@type': 'SearchAction',
-                target: 'https://frostybot.ru/blog?q={search_term_string}',
+                target: `${SITE_URL}/blog?q={search_term_string}`,
                 'query-input': 'required name=search_term_string',
               },
             }),

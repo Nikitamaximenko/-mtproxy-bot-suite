@@ -3,10 +3,9 @@ import { notFound } from "next/navigation"
 import Link from "next/link"
 import { Manrope } from "next/font/google"
 import { articles } from "../articles"
+import { SITE_URL } from "@/lib/site"
 
 const manrope = Manrope({ subsets: ["latin", "cyrillic"], weight: ["400", "600", "700"] })
-
-const SITE_URL = "https://frostybot.ru"
 
 export async function generateStaticParams() {
   return articles.map((a) => ({ slug: a.slug }))
