@@ -20,11 +20,11 @@ OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "").strip()
 LLM_API_KEY = OPENROUTER_API_KEY or OPENAI_API_KEY
 
 OPENAI_BASE_URL = (os.getenv("OPENAI_BASE_URL") or "https://openrouter.ai/api/v1").rstrip("/")
-# Valid, tools-capable free model id (см. https://openrouter.ai/models?order=newest&pricing=free).
-# "openrouter/free" невалиден — использовать имя провайдера/модели с суффиксом :free.
-SUPPORT_AI_MODEL = (os.getenv("SUPPORT_AI_MODEL") or "meta-llama/llama-3.3-70b-instruct:free").strip()
-# Резервная модель на случай, если основная тупит / нет tool-support; задаётся тем же env.
-SUPPORT_AI_FALLBACK_MODEL = (os.getenv("SUPPORT_AI_FALLBACK_MODEL") or "openrouter/auto").strip()
+# openrouter/free — free-роутер OpenRouter: сам выбирает живую free-модель с tools-support,
+# обходит upstream rate-limits конкретных провайдеров. Проверено: отдаёт корректные tool_calls.
+SUPPORT_AI_MODEL = (os.getenv("SUPPORT_AI_MODEL") or "openrouter/free").strip()
+# Fallback — конкретная стабильная free-модель с tools; используется если основная вернула 4xx/5xx.
+SUPPORT_AI_FALLBACK_MODEL = (os.getenv("SUPPORT_AI_FALLBACK_MODEL") or "openai/gpt-oss-120b:free").strip()
 # По умолчанию ВЫКЛ: free-модели склонны галлюцинировать и выдавать доступ без реальной причины.
 SUPPORT_AI_ALLOW_GRANT = os.getenv("SUPPORT_AI_ALLOW_GRANT", "false").strip().lower() in (
     "1",
