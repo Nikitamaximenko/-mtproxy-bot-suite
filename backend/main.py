@@ -152,6 +152,31 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("mtproxy")
 
 
+# region agent log
+from collections import deque as _deque
+
+_DBG5F0AD3_RING: _deque[tuple[float, str, str]] = _deque(maxlen=300)
+
+
+class _DBG5F0AD3Handler(logging.Handler):
+    """Captures INFO/WARN records whose formatted message contains DBG5F0AD3 into a ring buffer."""
+
+    def emit(self, record: logging.LogRecord) -> None:
+        try:
+            msg = record.getMessage()
+            if "DBG5F0AD3" in msg:
+                _DBG5F0AD3_RING.append((record.created, record.levelname, msg))
+        except Exception:
+            pass
+
+
+_dbg_handler = _DBG5F0AD3Handler(level=logging.DEBUG)
+_dbg_handler.setFormatter(logging.Formatter("%(message)s"))
+logging.getLogger().addHandler(_dbg_handler)
+logger.addHandler(_dbg_handler)
+# endregion
+
+
 class Base(DeclarativeBase):
     pass
 
@@ -2076,11 +2101,25 @@ def vpn_online(req: Request) -> VpnOnlineResponse:
 
 def _require_admin(req: Request) -> None:
     if not ADMIN_API_KEY:
+        # region agent log
+        logger.warning(
+            "DBG5F0AD3 _require_admin.REJECT path=%s reason=backend_ADMIN_API_KEY_unset",
+            req.url.path,
+        )
+        # endregion
         raise HTTPException(status_code=403, detail="Admin API not configured")
     got = (req.headers.get("x-admin-key") or "").strip()
-    # FIX: Use hmac.compare_digest to prevent timing-based key enumeration
     if not hmac.compare_digest(got, ADMIN_API_KEY):
+        # region agent log
+        logger.warning(
+            "DBG5F0AD3 _require_admin.REJECT path=%s got_len=%s expected_len=%s",
+            req.url.path, len(got), len(ADMIN_API_KEY),
+        )
+        # endregion
         raise HTTPException(status_code=403, detail="Forbidden")
+    # region agent log
+    logger.info("DBG5F0AD3 _require_admin.OK path=%s", req.url.path)
+    # endregion
 
 
 class LavaTestRequest(BaseModel):
@@ -2386,6 +2425,13 @@ def _admin_activate_user(telegram_id: int, db: Session) -> None:
 
 @app.post("/admin/activate/{telegram_id}", response_model=OkResponse)
 def admin_activate(telegram_id: int, req: Request, db: Session = Depends(get_db)) -> OkResponse:
+    # region agent log
+    _got_key = (req.headers.get("x-admin-key") or "").strip()
+    logger.info(
+        "DBG5F0AD3 admin_activate.enter tg_id=%s admin_key_len=%s backend_admin_key_set=%s",
+        telegram_id, len(_got_key), bool(ADMIN_API_KEY),
+    )
+    # endregion
     _require_admin(req)
     _admin_activate_user(telegram_id, db)
     return OkResponse(ok=True)
@@ -2413,6 +2459,25 @@ def internal_support_activate(
         (body.reason if body else None),
     )
     return OkResponse(ok=True)
+
+
+class InternalDiagRecentDbgResponse(BaseModel):
+    count: int
+    lines: list[str]
+
+
+@app.get("/internal/diag/recent-dbg", response_model=InternalDiagRecentDbgResponse)
+def internal_diag_recent_dbg(
+    req: Request, limit: int = Query(80, ge=1, le=300)
+) -> InternalDiagRecentDbgResponse:
+    """Возвращает последние DBG5F0AD3-строки из runtime-кольца (для /bdb в боте)."""
+    _require_internal_token(req)
+    items = list(_DBG5F0AD3_RING)[-limit:]
+    lines = [
+        f"{datetime.fromtimestamp(ts, tz=timezone.utc).strftime('%H:%M:%S')} [{lvl}] {msg}"
+        for ts, lvl, msg in items
+    ]
+    return InternalDiagRecentDbgResponse(count=len(lines), lines=lines)
 
 
 class InternalDiagSubscriptionResponse(BaseModel):

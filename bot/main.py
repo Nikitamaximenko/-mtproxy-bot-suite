@@ -715,9 +715,19 @@ async def main() -> None:
         except Exception as e:
             lines.append(f"/internal/diag EXC {e!r}")
 
+        try:
+            recent = await backend_get(session, "/internal/diag/recent-dbg?limit=60")
+            recent_lines = recent.get("lines", []) if isinstance(recent, dict) else []
+            joined = "\n".join(recent_lines[-40:]) if recent_lines else "(empty ring buffer)"
+            lines.append(f"/internal/diag/recent-dbg count={recent.get('count', 0)}\n{joined}")
+        except BackendError as e:
+            lines.append(f"/internal/diag/recent-dbg FAILED {e.status}: {e.body[:200]}")
+        except Exception as e:
+            lines.append(f"/internal/diag/recent-dbg EXC {e!r}")
+
         text = "\n\n".join(lines)
         if len(text) > 3800:
-            text = text[:3800] + "\n…(truncated)"
+            text = text[-3800:]
         await message.answer(f"<pre>{html.escape(text)}</pre>", parse_mode="HTML")
 
     @dp.message(Command("stop"))
