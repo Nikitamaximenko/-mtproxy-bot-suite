@@ -295,10 +295,13 @@ export default function MiniAppPage() {
   const [webEmail, setWebEmail] = useState<string | null>(null)
 
   // VPN state
-  const [activeTab, setActiveTab] = useState<"proxy" | "vpn">("proxy")
+  // Дефолтный таб = VPN: это главный продукт. MTProxy — приятный бонус,
+  // но акцент сознательно смещён на VPN, т.к. именно он открывает Instagram/TikTok/YouTube.
+  const [activeTab, setActiveTab] = useState<"vpn" | "proxy">("vpn")
   const [vpn, setVpn] = useState<VpnData | null>(null)
   const [vpnLoading, setVpnLoading] = useState(false)
   const [vpnLinkCopied, setVpnLinkCopied] = useState(false)
+  const [vpnError, setVpnError] = useState<string | null>(null)
 
 
   // VPN server ping
@@ -389,9 +392,23 @@ export default function MiniAppPage() {
   const fetchVpn = useCallback(async () => {
     if (!tgId) return
     setVpnLoading(true)
+    setVpnError(null)
     try {
       const res = await fetch(`/api/vpn?tg_id=${tgId}`, { cache: "no-store" })
-      if (res.ok) setVpn((await res.json()) as VpnData)
+      if (!res.ok) {
+        setVpn(null)
+        setVpnError(
+          res.status === 403
+            ? "Не удалось авторизоваться на сервере. Обнови страницу или напиши в поддержку."
+            : "Сервер временно не отвечает. Попробуй ещё раз."
+        )
+        return
+      }
+      const data = (await res.json()) as VpnData
+      setVpn(data)
+    } catch {
+      setVpn(null)
+      setVpnError("Сеть недоступна. Проверь подключение и попробуй снова.")
     } finally {
       setVpnLoading(false)
     }
@@ -400,6 +417,16 @@ export default function MiniAppPage() {
   useEffect(() => {
     if (activeTab === "vpn" && !vpn && tgId) void fetchVpn()
   }, [activeTab, vpn, tgId, fetchVpn])
+
+  // Если бэкенд сказал «VPN ещё создаётся» — автоматически ретраим через 2 сек,
+  // пока ссылка не появится. Пользователю не нужно жать «обновить» руками.
+  useEffect(() => {
+    if (activeTab !== "vpn" || !vpn) return
+    if (vpn.available && !vpn.vless_link) {
+      const t = setTimeout(() => { void fetchVpn() }, 2000)
+      return () => clearTimeout(t)
+    }
+  }, [activeTab, vpn, fetchVpn])
 
   const handleCopyVlessLink = () => {
     if (!vpn?.vless_link) return
@@ -547,12 +574,12 @@ export default function MiniAppPage() {
             </div>
           )}
 
-          {/* Status card */}
+          {/* Status card — акцент на VPN: он главный продукт, MTProxy идёт бонусом */}
           <div className="p-4 mb-5" style={{ background: "#F7F8FA", borderRadius: "16px" }}>
             <div className="flex items-center justify-between mb-2">
               <div>
-                <span className="text-sm font-semibold" style={{ color: "#111827" }}>Подписка 2 в 1</span>
-                <p className="text-xs mt-0.5" style={{ color: "#6B7280" }}>Прокси для Telegram + VPN для всего</p>
+                <span className="text-sm font-semibold" style={{ color: "#111827" }}>VPN-подписка активна</span>
+                <p className="text-xs mt-0.5" style={{ color: "#6B7280" }}>Instagram, TikTok, YouTube и прокси для Telegram</p>
               </div>
               <span className="flex items-center gap-1.5 text-sm font-semibold" style={{ color: "#16A34A" }}>
                 <span className="w-2 h-2 rounded-full animate-pulse" style={{ background: "#16A34A" }} />
@@ -572,9 +599,9 @@ export default function MiniAppPage() {
             </div>
           </div>
 
-          {/* Tabs */}
+          {/* Tabs — VPN первым (это то, за чем пришли). Telegram — бонусом */}
           <div className="flex mb-5 p-1" style={{ background: "#F7F8FA", borderRadius: "14px" }}>
-            {(["proxy", "vpn"] as const).map((tab) => (
+            {(["vpn", "proxy"] as const).map((tab) => (
               <button
                 key={tab}
                 onClick={() => setActiveTab(tab)}
@@ -586,17 +613,17 @@ export default function MiniAppPage() {
                   boxShadow: activeTab === tab ? "0 1px 4px rgba(0,0,0,0.08)" : "none",
                 }}
               >
-                {tab === "proxy" ? "📡 Telegram" : "🛡 VPN"}
+                {tab === "vpn" ? "🛡 VPN" : "📡 Telegram"}
               </button>
             ))}
           </div>
 
-          {/* ── Proxy tab ── */}
+          {/* ── Proxy tab ── Бонус к подписке. Главный продукт — VPN. */}
           {activeTab === "proxy" && (
             <div className="space-y-3">
               <div className="px-1 mb-1">
                 <p className="text-xs" style={{ color: "#6B7280" }}>
-                  MTProxy снимает блокировку прямо внутри Telegram — без дополнительных приложений. Включается в один клик.
+                  Бонус к подписке: MTProxy снимает блокировку прямо внутри Telegram — без отдельных приложений. Подключается в один клик.
                 </p>
               </div>
               {proxyLink ? (
@@ -641,154 +668,202 @@ export default function MiniAppPage() {
               </div>
               <div className="px-1 pt-1">
                 <p className="text-xs" style={{ color: "#9CA3AF" }}>
-                  Нужен доступ к Instagram, TikTok, YouTube? Переключитесь на вкладку <strong style={{ color: "#6B7280" }}>VPN</strong>.
+                  Для Instagram, TikTok, YouTube и всего остального — вкладка <strong style={{ color: "#2AABEE" }}>🛡 VPN</strong>.
                 </p>
               </div>
             </div>
           )}
 
-          {/* ── VPN tab ── */}
+          {/* ── VPN tab ── Супер-простой путь: одна кнопка → импорт в Happ → работает */}
           {activeTab === "vpn" && (
             <div className="space-y-4">
-              <div className="px-1 mb-1">
-                <p className="text-xs" style={{ color: "#6B7280" }}>
-                  VLESS Reality VPN открывает доступ к любым заблокированным сайтам — Instagram, TikTok, YouTube и всему остальному. Работает через приложение Happ.
-                </p>
-              </div>
+              {/* Стейт 1: первичная загрузка */}
+              {vpnLoading && !vpn && !vpnError && (
+                <div className="flex flex-col items-center justify-center py-14 gap-3">
+                  <RefreshCw className="w-7 h-7 animate-spin" style={{ color: "#2AABEE" }} />
+                  <p className="text-xs" style={{ color: "#6B7280" }}>Готовим ваш VPN…</p>
+                </div>
+              )}
 
-              {vpnLoading && !vpn ? (
-                <div className="flex items-center justify-center py-12">
-                  <RefreshCw className="w-6 h-6 animate-spin" style={{ color: "#2AABEE" }} />
-                </div>
-              ) : !vpn?.available ? (
-                <div className="p-6 text-center space-y-3" style={{ background: "#F7F8FA", borderRadius: "16px" }}>
-                  <div className="text-3xl">🚧</div>
-                  <p className="text-sm font-semibold" style={{ color: "#111827" }}>VPN скоро появится</p>
-                  <p className="text-xs leading-relaxed" style={{ color: "#6B7280" }}>
-                    Разворачиваем сервер. Появится здесь автоматически — обновления не нужны.
-                  </p>
-                </div>
-              ) : !vpn.vless_link ? (
-                <div className="p-6 text-center space-y-3" style={{ background: "#F7F8FA", borderRadius: "16px" }}>
-                  <div className="text-3xl">⚙️</div>
-                  <p className="text-sm font-semibold" style={{ color: "#111827" }}>Создаём конфигурацию…</p>
-                  <p className="text-xs leading-relaxed" style={{ color: "#6B7280" }}>
-                    Попробуйте обновить через пару секунд.
-                  </p>
+              {/* Стейт 2: сетевая ошибка */}
+              {!vpnLoading && vpnError && !vpn && (
+                <div className="p-6 text-center space-y-3" style={{ background: "#FEF2F2", borderRadius: "16px", border: "1px solid #FECACA" }}>
+                  <p className="text-sm font-semibold" style={{ color: "#991B1B" }}>Не удалось загрузить VPN</p>
+                  <p className="text-xs leading-relaxed" style={{ color: "#B91C1C" }}>{vpnError}</p>
                   <button
-                    onClick={() => { setVpn(null); void fetchVpn() }}
-                    className="flex items-center justify-center gap-2 mx-auto text-sm font-semibold touch-manipulation"
-                    style={{ color: "#2AABEE" }}
+                    onClick={() => void fetchVpn()}
+                    className="flex items-center justify-center gap-2 mx-auto text-sm font-semibold touch-manipulation active:scale-95 transition-all px-4 py-2"
+                    style={{ color: "#FFFFFF", background: "#DC2626", borderRadius: "10px" }}
                   >
                     <RefreshCw className="w-4 h-4" />
-                    Обновить
+                    Повторить
                   </button>
                 </div>
-              ) : (
-                <>
-                  {/* Server + protocol info */}
-                  <div className="p-5" style={{ background: "#F7F8FA", borderRadius: "16px" }}>
-                    <div className="flex items-center justify-between mb-3">
-                      <div className="flex items-center gap-2">
-                        <span className="text-base">🇫🇮</span>
-                        <div>
-                          <p className="text-xs" style={{ color: "#6B7280" }}>Сервер</p>
-                          <p className="text-sm font-semibold" style={{ color: "#111827" }}>Finland</p>
-                        </div>
-                      </div>
-                      <span className="text-xs px-2.5 py-1 font-semibold" style={{ background: "#F0FDF4", color: "#16A34A", borderRadius: "8px" }}>
-                        VLESS Reality
-                      </span>
-                    </div>
-                    <div style={{ height: "1px", background: "#E5E7EB", marginBottom: "12px" }} />
-                    <div className="flex items-center gap-3">
-                      <Shield className="w-5 h-5 flex-shrink-0" style={{ color: "#2AABEE" }} />
-                      <div>
-                        <p className="text-sm font-semibold" style={{ color: "#111827" }}>Конфигурация готова</p>
-                        <p className="text-xs mt-0.5" style={{ color: "#6B7280" }}>Подключитесь через Happ или другое VLESS-приложение</p>
-                      </div>
-                    </div>
-                  </div>
+              )}
 
-                  {/* Action buttons */}
-                  <div className="flex gap-2">
+              {/* Стейт 3: подписка есть, но VPN-сервер не настроен (редкий кейс админа) */}
+              {!vpnLoading && vpn && !vpn.available && (
+                <div className="p-6 text-center space-y-3" style={{ background: "#FEF3C7", borderRadius: "16px" }}>
+                  <p className="text-sm font-semibold" style={{ color: "#92400E" }}>VPN временно недоступен</p>
+                  <p className="text-xs leading-relaxed" style={{ color: "#92400E" }}>
+                    Мы уже чиним. Напишите в поддержку, если срочно — вернём деньги или продлим подписку.
+                  </p>
+                  <button
+                    onClick={() => void fetchVpn()}
+                    className="flex items-center justify-center gap-2 mx-auto text-sm font-semibold touch-manipulation"
+                    style={{ color: "#92400E" }}
+                  >
+                    <RefreshCw className="w-4 h-4" />
+                    Проверить снова
+                  </button>
+                </div>
+              )}
+
+              {/* Стейт 4: VPN доступен, но конфиг ещё создаётся. Автоматически ретраим в useEffect. */}
+              {!vpnLoading && vpn?.available && !vpn.vless_link && (
+                <div className="p-6 text-center space-y-3" style={{ background: "#F7F8FA", borderRadius: "16px" }}>
+                  <RefreshCw className="w-6 h-6 animate-spin mx-auto" style={{ color: "#2AABEE" }} />
+                  <p className="text-sm font-semibold" style={{ color: "#111827" }}>Создаём вашу конфигурацию…</p>
+                  <p className="text-xs leading-relaxed" style={{ color: "#6B7280" }}>
+                    Это занимает пару секунд. Страница обновится сама.
+                  </p>
+                </div>
+              )}
+
+              {/* Стейт 5: всё готово — главный экран «СУПЕР ПРОСТО подключиться» */}
+              {vpn?.available && vpn.vless_link && (
+                <>
+                  {/* Главный CTA — одна огромная кнопка. Нажал → Happ открылся → конфиг импортирован. */}
+                  <div
+                    className="p-5"
+                    style={{
+                      background: "linear-gradient(135deg, #0EA5E9 0%, #2AABEE 100%)",
+                      borderRadius: "20px",
+                      boxShadow: "0 8px 24px rgba(14,165,233,0.25)",
+                    }}
+                  >
+                    <div className="flex items-center gap-3 mb-4">
+                      <div
+                        className="flex items-center justify-center flex-shrink-0"
+                        style={{ width: "44px", height: "44px", background: "rgba(255,255,255,0.2)", borderRadius: "12px" }}
+                      >
+                        <Shield className="w-6 h-6" style={{ color: "#FFFFFF" }} />
+                      </div>
+                      <div>
+                        <p className="text-sm font-bold" style={{ color: "#FFFFFF" }}>Ваш VPN готов</p>
+                        <p className="text-xs" style={{ color: "rgba(255,255,255,0.85)" }}>Сервер Finland · VLESS Reality</p>
+                      </div>
+                    </div>
+
                     <button
                       onClick={() => openTelegramLink(`happ://import/${encodeURIComponent(vpn.vless_link!)}`)}
-                      className="flex-1 flex items-center justify-center gap-2 text-sm font-semibold touch-manipulation active:scale-95 transition-all"
-                      style={{ background: "#2AABEE", color: "#FFFFFF", height: "52px", borderRadius: "14px" }}
+                      className="w-full flex items-center justify-center gap-2 font-bold touch-manipulation active:scale-[0.98] transition-all"
+                      style={{
+                        background: "#FFFFFF",
+                        color: "#0EA5E9",
+                        height: "64px",
+                        borderRadius: "16px",
+                        fontSize: "18px",
+                      }}
                     >
-                      <ExternalLink className="w-4 h-4" />
-                      Открыть в Happ
+                      Подключить VPN в один тап
                     </button>
-                    <button
-                      onClick={handleCopyVlessLink}
-                      className="flex items-center justify-center gap-1.5 text-sm font-semibold touch-manipulation active:scale-95 transition-all px-4"
-                      style={{ background: vpnLinkCopied ? "#F0FDF4" : "#F7F8FA", color: vpnLinkCopied ? "#16A34A" : "#374151", height: "52px", borderRadius: "14px", border: "1px solid #E5E7EB", minWidth: "100px" }}
-                    >
-                      {vpnLinkCopied ? <><Check className="w-4 h-4" />Скопировано</> : <><Copy className="w-4 h-4" />Скопировать</>}
-                    </button>
-                  </div>
-
-                  {/* QR code via external API */}
-                  <div className="p-5" style={{ background: "#F7F8FA", borderRadius: "16px" }}>
-                    <p className="text-sm font-semibold mb-1" style={{ color: "#111827" }}>QR-код для подключения</p>
-                    <p className="text-xs mb-4" style={{ color: "#6B7280" }}>Сканируйте из Happ: «+» → «Сканировать QR»</p>
-                    <div
-                      className="mx-auto flex items-center justify-center p-3"
-                      style={{ background: "#FFFFFF", borderRadius: "16px", maxWidth: "220px", boxShadow: "0 1px 8px rgba(0,0,0,0.06)" }}
-                    >
-                      {/* eslint-disable-next-line @next/next/no-img-element */}
-                      <img
-                        src={`https://api.qrserver.com/v1/create-qr-code/?size=192x192&data=${encodeURIComponent(vpn.vless_link)}`}
-                        alt="QR код VPN"
-                        width={192}
-                        height={192}
-                        style={{ display: "block", borderRadius: "8px" }}
-                      />
-                    </div>
-                  </div>
-
-                  {/* Step-by-step instructions */}
-                  <div style={{ background: "#F7F8FA", borderRadius: "16px", padding: "20px" }}>
-                    <p style={{ fontSize: "14px", fontWeight: 700, color: "#111827", marginBottom: "16px" }}>
-                      Как подключить VPN:
+                    <p className="text-xs text-center mt-3" style={{ color: "rgba(255,255,255,0.9)" }}>
+                      Нажмите и конфиг импортируется в Happ автоматически
                     </p>
+                  </div>
 
-                    <div style={{ display: "flex", gap: "12px", marginBottom: "12px", alignItems: "flex-start" }}>
-                      <div style={{ width: "28px", height: "28px", borderRadius: "50%", background: "#2AABEE", color: "white", fontSize: "13px", fontWeight: 700, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>1</div>
+                  {/* Если Happ ещё не установлен — блок установки. Сворачиваемо по tap */}
+                  <details className="group">
+                    <summary
+                      className="flex items-center justify-between px-4 py-3 cursor-pointer list-none touch-manipulation"
+                      style={{ background: "#F7F8FA", borderRadius: "14px", color: "#111827" }}
+                    >
+                      <span className="text-sm font-semibold">Happ ещё не установлен?</span>
+                      <span className="text-xs" style={{ color: "#2AABEE" }}>
+                        Открыть ↓
+                      </span>
+                    </summary>
+                    <div className="mt-2 p-4 space-y-3" style={{ background: "#F7F8FA", borderRadius: "14px" }}>
+                      <p className="text-xs" style={{ color: "#6B7280" }}>
+                        Happ — бесплатное приложение-клиент для VLESS. Установите и вернитесь сюда, нажмите кнопку выше ещё раз.
+                      </p>
+                      <div className="flex gap-2">
+                        <a
+                          href="https://apps.apple.com/app/happ-proxy-utility/id6504287215"
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="flex-1 flex items-center justify-center gap-1.5 text-sm font-semibold touch-manipulation active:scale-95 transition-all"
+                          style={{ background: "#FFFFFF", color: "#111827", height: "44px", borderRadius: "12px", border: "1px solid #E5E7EB" }}
+                        >
+                          iPhone
+                        </a>
+                        <a
+                          href="https://play.google.com/store/apps/details?id=com.happ.vpn"
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="flex-1 flex items-center justify-center gap-1.5 text-sm font-semibold touch-manipulation active:scale-95 transition-all"
+                          style={{ background: "#FFFFFF", color: "#111827", height: "44px", borderRadius: "12px", border: "1px solid #E5E7EB" }}
+                        >
+                          Android
+                        </a>
+                      </div>
+                    </div>
+                  </details>
+
+                  {/* Альтернативы — ссылка и QR. Убрано с главного экрана чтобы не отвлекать */}
+                  <details>
+                    <summary
+                      className="flex items-center justify-between px-4 py-3 cursor-pointer list-none touch-manipulation"
+                      style={{ background: "#F7F8FA", borderRadius: "14px", color: "#111827" }}
+                    >
+                      <span className="text-sm font-semibold">Другой VPN-клиент или QR-код</span>
+                      <span className="text-xs" style={{ color: "#2AABEE" }}>Открыть ↓</span>
+                    </summary>
+                    <div className="mt-2 p-5 space-y-4" style={{ background: "#F7F8FA", borderRadius: "14px" }}>
                       <div>
-                        <p style={{ fontSize: "14px", fontWeight: 600, color: "#111827", margin: "0 0 4px" }}>Скачайте Happ</p>
-                        <div style={{ display: "flex", gap: "8px" }}>
-                          <a href="https://play.google.com/store/apps/details?id=com.happ.vpn" target="_blank" rel="noopener noreferrer" style={{ fontSize: "13px", color: "#2AABEE", textDecoration: "none" }}>📥 Android</a>
-                          <a href="https://apps.apple.com/app/happ-proxy-utility/id6504287215" target="_blank" rel="noopener noreferrer" style={{ fontSize: "13px", color: "#2AABEE", textDecoration: "none" }}>📥 iOS</a>
+                        <p className="text-xs font-semibold mb-2" style={{ color: "#111827" }}>Ссылка для импорта</p>
+                        <div className="p-3 font-mono text-[11px] break-all leading-relaxed mb-2" style={{ background: "#FFFFFF", borderRadius: "10px", color: "#6B7280" }}>
+                          {vpn.vless_link}
+                        </div>
+                        <button
+                          onClick={handleCopyVlessLink}
+                          className="w-full flex items-center justify-center gap-1.5 text-sm font-semibold touch-manipulation active:scale-95 transition-all"
+                          style={{
+                            background: vpnLinkCopied ? "#F0FDF4" : "#FFFFFF",
+                            color: vpnLinkCopied ? "#16A34A" : "#374151",
+                            height: "44px",
+                            borderRadius: "12px",
+                            border: "1px solid #E5E7EB",
+                          }}
+                        >
+                          {vpnLinkCopied ? <><Check className="w-4 h-4" />Скопировано</> : <><Copy className="w-4 h-4" />Скопировать ссылку</>}
+                        </button>
+                      </div>
+
+                      <div>
+                        <p className="text-xs font-semibold mb-2" style={{ color: "#111827" }}>QR-код для другого устройства</p>
+                        <div
+                          className="mx-auto flex items-center justify-center p-3"
+                          style={{ background: "#FFFFFF", borderRadius: "14px", maxWidth: "200px", boxShadow: "0 1px 6px rgba(0,0,0,0.05)" }}
+                        >
+                          {/* eslint-disable-next-line @next/next/no-img-element */}
+                          <img
+                            src={`https://api.qrserver.com/v1/create-qr-code/?size=180x180&data=${encodeURIComponent(vpn.vless_link)}`}
+                            alt="QR код VPN"
+                            width={180}
+                            height={180}
+                            style={{ display: "block", borderRadius: "8px" }}
+                          />
                         </div>
                       </div>
                     </div>
+                  </details>
 
-                    <div style={{ display: "flex", gap: "12px", marginBottom: "12px", alignItems: "flex-start" }}>
-                      <div style={{ width: "28px", height: "28px", borderRadius: "50%", background: "#2AABEE", color: "white", fontSize: "13px", fontWeight: 700, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>2</div>
-                      <div>
-                        <p style={{ fontSize: "14px", fontWeight: 600, color: "#111827", margin: "0 0 4px" }}>Скопируйте ссылку</p>
-                        <p style={{ fontSize: "13px", color: "#6B7280", margin: 0 }}>Нажмите «Скопировать» выше</p>
-                      </div>
-                    </div>
-
-                    <div style={{ display: "flex", gap: "12px", marginBottom: "12px", alignItems: "flex-start" }}>
-                      <div style={{ width: "28px", height: "28px", borderRadius: "50%", background: "#2AABEE", color: "white", fontSize: "13px", fontWeight: 700, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>3</div>
-                      <div>
-                        <p style={{ fontSize: "14px", fontWeight: 600, color: "#111827", margin: "0 0 4px" }}>Вставьте в Happ</p>
-                        <p style={{ fontSize: "13px", color: "#6B7280", margin: 0 }}>«+» → «Из буфера обмена» → Подключить</p>
-                      </div>
-                    </div>
-
-                    <div style={{ display: "flex", gap: "12px", alignItems: "flex-start" }}>
-                      <div style={{ width: "28px", height: "28px", borderRadius: "50%", background: "#10B981", color: "white", fontSize: "13px", fontWeight: 700, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>✓</div>
-                      <div>
-                        <p style={{ fontSize: "14px", fontWeight: 600, color: "#10B981", margin: "0 0 4px" }}>Готово — нажмите «Подключить» в Happ</p>
-                        <p style={{ fontSize: "13px", color: "#6B7280", margin: 0 }}>VPN включится за 5 секунд</p>
-                      </div>
-                    </div>
-                  </div>
+                  {/* Мелкая подсказка снизу */}
+                  <p className="text-xs text-center px-2" style={{ color: "#9CA3AF" }}>
+                    Один конфиг работает на всех ваших устройствах. Без логов. Персональный сервер.
+                  </p>
                 </>
               )}
             </div>
