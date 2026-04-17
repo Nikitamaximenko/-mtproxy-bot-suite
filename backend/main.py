@@ -1782,12 +1782,26 @@ def _xray_build_vless_link(client_uuid: str) -> str:
     return f"vless://{client_uuid}@{XRAY_SERVER_IP}:443?{params}#Frosty VPN"
 
 
-def _xray_add_client(tg_id: int) -> tuple[str, str] | None:
-    """Add a client to inbound XRAY_INBOUND_ID. Returns (uuid, vless_link) or None."""
+def _xray_add_client(tg_id: int, preferred_uuid: str | None = None) -> tuple[str, str] | None:
+    """Add a client to inbound XRAY_INBOUND_ID. Returns (uuid, vless_link) or None.
+
+    preferred_uuid: при повторной активации после админского «Выкл» передаём прежний UUID из БД,
+    чтобы vless:// не менялся — иначе в Happ остаётся старый импорт и пинг даёт n/a, хотя
+    на сервере уже другой клиент.
+    """
     if not XRAY_API_URL:
         return None
     import uuid as _uuid_mod
-    client_uuid = str(_uuid_mod.uuid4())
+
+    client_uuid: str
+    if preferred_uuid and preferred_uuid.strip():
+        try:
+            _uuid_mod.UUID(preferred_uuid.strip())
+            client_uuid = preferred_uuid.strip()
+        except ValueError:
+            client_uuid = str(_uuid_mod.uuid4())
+    else:
+        client_uuid = str(_uuid_mod.uuid4())
     vless_link = _xray_build_vless_link(client_uuid)
     payload = {
         "id": XRAY_INBOUND_ID,
@@ -1844,8 +1858,15 @@ def _ensure_xray_client(tg_id: int, db: Session) -> tuple[str, str] | None:
     if existing:
         if existing.active:
             return existing.uuid, existing.vless_link
-        # Previously deactivated — recreate in 3X-UI with a fresh UUID
-        result = _xray_add_client(tg_id)
+        # Ранее выключено админкой: клиент удалён из 3X-UI, но UUID в БД сохраняем —
+        # добавляем клиента с тем же id, чтобы ссылка vless:// в Happ не устаревала.
+        result = _xray_add_client(tg_id, preferred_uuid=existing.uuid)
+        if not result:
+            logger.warning(
+                "3X-UI addClient with reused uuid failed for tg_id=%s, trying new uuid (user may need re-import in Happ)",
+                tg_id,
+            )
+            result = _xray_add_client(tg_id, preferred_uuid=None)
         if not result:
             return None
         client_uuid, vless_link = result
