@@ -395,17 +395,25 @@ export default function MiniAppPage() {
     setVpnError(null)
     try {
       const res = await fetch(`/api/vpn?tg_id=${tgId}`, { cache: "no-store" })
+      const text = await res.text()
+      let data: VpnData | null = null
+      try {
+        data = JSON.parse(text) as VpnData
+      } catch {
+        data = null
+      }
       if (!res.ok) {
         setVpn(null)
+        // Старые бэкенды могли отдавать 403 на /vpn/config без тела — после деплоя бэкенда
+        // вместо этого приходит 200 + reason=internal_token_required.
         setVpnError(
           res.status === 403
-            ? "Не удалось авторизоваться на сервере. Обнови страницу или напиши в поддержку."
+            ? "Сервер отклонил запрос VPN. Обновите страницу или напишите в поддержку — если ошибка останется, админу нужно проверить ключ INTERNAL_API_TOKEN на Vercel."
             : "Сервер временно не отвечает. Попробуй ещё раз."
         )
         return
       }
-      const data = (await res.json()) as VpnData
-      setVpn(data)
+      if (data) setVpn(data)
     } catch {
       setVpn(null)
       setVpnError("Сеть недоступна. Проверь подключение и попробуй снова.")
@@ -701,12 +709,53 @@ export default function MiniAppPage() {
                 </div>
               )}
 
-              {/* Стейт 3: подписка есть, но VPN-сервер не настроен (редкий кейс админа) */}
-              {!vpnLoading && vpn && !vpn.available && (
+              {/* Стейт 3a: Vercel без INTERNAL_API_TOKEN (или не совпадает с бэкендом) — раньше был HTTP 403 */}
+              {!vpnLoading && vpn && !vpn.available && vpn.reason === "internal_token_required" && (
+                <div className="p-6 text-center space-y-3" style={{ background: "#EFF6FF", borderRadius: "16px", border: "1px solid #BFDBFE" }}>
+                  <p className="text-sm font-semibold" style={{ color: "#1E40AF" }}>Подписка активна — ссылку для VPN сюда не подгрузить</p>
+                  <p className="text-xs leading-relaxed text-left" style={{ color: "#1E3A8A" }}>
+                    Мини-приложение на сайте не передаёт серверу секретный ключ (на стороне хостинга не задан или не совпадает с бэкендом). Напишите в поддержку в боте — пришлём ссылку для Happ вручную.
+                  </p>
+                  <p className="text-[11px] leading-relaxed text-left" style={{ color: "#64748B" }}>
+                    Админ: в проекте Vercel задайте <code className="font-mono">INTERNAL_API_TOKEN</code> таким же, как на Railway, и сделайте redeploy.
+                  </p>
+                  <button
+                    onClick={() => void fetchVpn()}
+                    className="flex items-center justify-center gap-2 mx-auto text-sm font-semibold touch-manipulation active:scale-95 transition-all px-4 py-2 w-full"
+                    style={{ color: "#FFFFFF", background: "#2563EB", borderRadius: "12px" }}
+                  >
+                    <RefreshCw className="w-4 h-4" />
+                    Проверить снова
+                  </button>
+                </div>
+              )}
+
+              {/* Стейт 3b: XRAY / 3X-UI не подключены на бэкенде */}
+              {!vpnLoading && vpn && !vpn.available && vpn.reason === "vpn_not_configured" && (
+                <div className="p-6 text-center space-y-3" style={{ background: "#FEF3C7", borderRadius: "16px" }}>
+                  <p className="text-sm font-semibold" style={{ color: "#92400E" }}>VPN-сервер на стороне Frosty не настроен</p>
+                  <p className="text-xs leading-relaxed" style={{ color: "#92400E" }}>
+                    Напишите в поддержку — подскажем статус или компенсируем простой.
+                  </p>
+                  <button
+                    onClick={() => void fetchVpn()}
+                    className="flex items-center justify-center gap-2 mx-auto text-sm font-semibold touch-manipulation"
+                    style={{ color: "#92400E" }}
+                  >
+                    <RefreshCw className="w-4 h-4" />
+                    Проверить снова
+                  </button>
+                </div>
+              )}
+
+              {/* Стейт 3c: прочие причины (no_subscription и др.) */}
+              {!vpnLoading && vpn && !vpn.available && vpn.reason !== "internal_token_required" && vpn.reason !== "vpn_not_configured" && (
                 <div className="p-6 text-center space-y-3" style={{ background: "#FEF3C7", borderRadius: "16px" }}>
                   <p className="text-sm font-semibold" style={{ color: "#92400E" }}>VPN временно недоступен</p>
                   <p className="text-xs leading-relaxed" style={{ color: "#92400E" }}>
-                    Мы уже чиним. Напишите в поддержку, если срочно — вернём деньги или продлим подписку.
+                    {vpn.reason === "no_subscription"
+                      ? "Подписка по этому запросу не найдена. Закройте мини-приложение и откройте снова из бота."
+                      : "Мы уже чиним. Напишите в поддержку, если срочно — вернём деньги или продлим подписку."}
                   </p>
                   <button
                     onClick={() => void fetchVpn()}

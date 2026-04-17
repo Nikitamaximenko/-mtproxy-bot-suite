@@ -2024,7 +2024,7 @@ def vpn_toggle(telegram_id: int, payload: VpnToggleRequest, db: Session = Depend
 
 class VpnConfigResponse(BaseModel):
     available: bool
-    reason: str | None = None  # "no_subscription" | "vpn_not_configured" | "creating"
+    reason: str | None = None  # "no_subscription" | "vpn_not_configured" | "creating" | "internal_token_required"
     vless_link: str | None = None
     uuid: str | None = None
 
@@ -2051,7 +2051,15 @@ def _has_valid_internal_token(req: Request) -> bool:
 
 @app.get("/vpn/config/{telegram_id}", response_model=VpnConfigResponse)
 def vpn_config(telegram_id: int, req: Request, db: Session = Depends(get_db)) -> VpnConfigResponse:
-    _require_internal_token(req)
+    # Согласовано с GET /subscription/{telegram_id}: при установленном INTERNAL_API_TOKEN
+    # бэкенд не отдаёт чувствительные данные без заголовка X-Internal-Token, но статус
+    # подписки отдаётся без 403. Раньше здесь всегда вызывали _require_internal_token —
+    # Vercel без того же токена получал 403, а экран подписки в Mini App оставался
+    # «активна» → пользователь видел красную ошибку «авторизация». Возвращаем 200 и
+    # reason=internal_token_required (без проверки подписки — не раскрываем факт наличия sub).
+    if INTERNAL_API_TOKEN and not _has_valid_internal_token(req):
+        return VpnConfigResponse(available=False, reason="internal_token_required")
+
     if not _active_sub_for_vpn(telegram_id, db):
         # Return 200 with reason so frontend can differentiate without catching 403
         return VpnConfigResponse(available=False, reason="no_subscription")
