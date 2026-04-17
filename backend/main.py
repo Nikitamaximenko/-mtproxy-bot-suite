@@ -841,7 +841,7 @@ def _notify_payment_success(tg_id: int, proxy_link: str) -> None:
     ]
     if miniapp_url:
         buttons.append([{"text": "\U0001f6e1 Открыть личный кабинет (VPN)", "web_app": {"url": miniapp_url}}])
-    buttons.append([{"text": "\U0001f4e5 Скачать Happ для Android", "url": "https://play.google.com/store/apps/details?id=com.happ.vpn"}])
+    buttons.append([{"text": "\U0001f4e5 Скачать Happ для Android", "url": "https://play.google.com/store/apps/details?id=com.happproxy"}])
     buttons.append([{"text": "\U0001f4e5 Скачать Happ для iOS", "url": "https://apps.apple.com/app/happ-proxy-utility/id6504287215"}])
     kb = {"inline_keyboard": buttons}
     _send_tg(tg_id, (

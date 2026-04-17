@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from "react"
 import { Snowflake, Shield, Zap, Lock, ChevronDown, Users, Check, X } from "lucide-react"
 
-const TELEGRAM_BOT_URL = "https://t.me/FrostyProxyBot"
+const TELEGRAM_BOT_URL = "https://t.me/frostytg_bot"
 
 function FrostIcon({ className }: { className?: string }) {
   return (

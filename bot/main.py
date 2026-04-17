@@ -200,7 +200,7 @@ HELP_GENERAL = (
     "Подписка активируется автоматически.\n"
     "\n"
     "<b>Шаг 2 — Скачай Happ</b>\n"
-    '• Android: <a href="https://play.google.com/store/apps/details?id=com.happ.vpn">Google Play</a>\n'
+    '• Android: <a href="https://play.google.com/store/apps/details?id=com.happproxy">Google Play</a>\n'
     '• iOS: <a href="https://apps.apple.com/app/happ-proxy-utility/id6504287215">App Store</a>\n'
     '• Windows/Mac: <a href="https://hiddify.com">Hiddify</a>\n'
     "\n"

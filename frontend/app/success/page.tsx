@@ -247,7 +247,7 @@ export default function SuccessPage() {
                   <div style={{ background: "#F7F8FA", borderRadius: "14px", padding: "16px", marginBottom: "12px" }}>
                     <p style={{ fontSize: "14px", color: "#374151", marginBottom: "12px", lineHeight: "1.6" }}>
                       1. Скачайте приложение Happ:<br />
-                      &nbsp;&nbsp;• <a href="https://play.google.com/store/apps/details?id=com.happ.vpn" style={{ color: "#2AABEE" }}>Android — Google Play</a><br />
+                      &nbsp;&nbsp;• <a href="https://play.google.com/store/apps/details?id=com.happproxy" style={{ color: "#2AABEE" }}>Android — Google Play</a><br />
                       &nbsp;&nbsp;• <a href="https://apps.apple.com/app/happ-proxy-utility/id6504287215" style={{ color: "#2AABEE" }}>iOS — App Store</a>
                     </p>
                     <p style={{ fontSize: "14px", color: "#374151", lineHeight: "1.6" }}>
@@ -258,7 +258,7 @@ export default function SuccessPage() {
                   </div>
                   <div style={{ display: "flex", gap: "8px", marginBottom: "16px" }}>
                     <a
-                      href="https://play.google.com/store/apps/details?id=com.happ.vpn"
+                      href="https://play.google.com/store/apps/details?id=com.happproxy"
                       style={{
                         flex: 1, display: "block", background: "#111827", color: "#FFFFFF",
                         height: "48px", borderRadius: "12px", fontSize: "14px", fontWeight: 600,

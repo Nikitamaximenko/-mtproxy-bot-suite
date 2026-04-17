@@ -335,8 +335,14 @@ export default function MiniAppPage() {
 
     const params = new URLSearchParams(window.location.search)
     const hasTgIdInUrl = params.has("tg_id")
-    const hasTgWebApp = !!(window?.Telegram?.WebApp?.version)
-    const inTelegram = hasTgIdInUrl || hasTgWebApp
+    // Раньше смотрели только на window.Telegram.WebApp.version — SDK telegram-web-app.js
+    // выставляет version='6.0' даже в обычном браузере, поэтому детектор ложно срабатывал
+    // и обычные веб-пользователи упирались в форму ввода Telegram ID. Настоящий признак
+    // Mini App — подписанный initData (либо initDataUnsafe.user.id).
+    const wa = window?.Telegram?.WebApp
+    const hasRealTgWebApp =
+      !!(wa?.initData && wa.initData.length > 0) || !!wa?.initDataUnsafe?.user?.id
+    const inTelegram = hasTgIdInUrl || hasRealTgWebApp
     setIsWeb(!inTelegram)
   }, [])
 
@@ -600,7 +606,21 @@ export default function MiniAppPage() {
     )
   }
 
-  /* ── Браузер без tg_id (не из Telegram) — запрашиваем ID ── */
+  /* ── Открыли /mini вне Telegram — это веб-пользователь, уводим на маркетинговую главную.
+     Форму ввода Telegram ID специально убрали: обычный пользователь своего tg_id не знает,
+     и это превращало вход на frostybot.ru в непонятный блок. ── */
+  if (isWeb === true) {
+    if (typeof window !== "undefined") window.location.replace("/")
+    return (
+      <div className={`${manrope.className} min-h-screen flex items-center justify-center`} style={{ background: "#FFFFFF" }}>
+        <FrostIcon className="w-10 h-10 animate-float" style={{ color: "#2AABEE" } as React.CSSProperties} />
+      </div>
+    )
+  }
+
+  /* ── Mini App в Telegram без tgId (редкий кейс: не прокинули tg_id, initData пустой).
+     Оставляем форму только как аварийный fallback — пользователи из бота всегда приходят
+     с tg_id в URL. ── */
   if (isWeb === false && !tgId) {
     return <TgIdFallbackScreen onContinue={setTgId} />
   }
@@ -902,7 +922,7 @@ export default function MiniAppPage() {
                           </a>
                           {" · "}
                           <a
-                            href="https://play.google.com/store/apps/details?id=com.happ.vpn"
+                            href="https://play.google.com/store/apps/details?id=com.happproxy"
                             target="_blank"
                             rel="noopener noreferrer"
                             className="font-semibold underline"
@@ -1109,13 +1129,10 @@ export default function MiniAppPage() {
             }
           </div>
 
-          {/* 6. CTA Button */}
+          {/* 6. CTA Button — на /mini уже уходят только Telegram-пользователи (веб редиректится на /) */}
           <button
-            onClick={() => {
-              if (isWeb === true) void handlePaySBP()
-              else void handlePay()
-            }}
-            disabled={!email || !isEmailValid || paying || (isWeb === true && payingSBP)}
+            onClick={() => void handlePay()}
+            disabled={!email || !isEmailValid || paying || payingSBP}
             className="w-full font-bold touch-manipulation active:scale-[0.98] transition-transform disabled:opacity-50 disabled:active:scale-100"
             style={{
               background: "#2AABEE",
