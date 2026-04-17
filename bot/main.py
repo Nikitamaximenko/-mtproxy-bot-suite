@@ -576,6 +576,7 @@ async def main() -> None:
 
         if action == "support":
             await state.set_state(SupportStates.chatting)
+            await state.update_data(support_history=[])
             await query.answer()
             await msg.answer(support_invite_html(), parse_mode="HTML", reply_markup=support_chat_kb())
             return
@@ -595,6 +596,7 @@ async def main() -> None:
     @dp.message(Command("support"))
     async def _cmd_support(message: Message, state: FSMContext) -> None:
         await state.set_state(SupportStates.chatting)
+        await state.update_data(support_history=[])
         await message.answer(support_invite_html(), parse_mode="HTML", reply_markup=support_chat_kb())
 
     @dp.message(Command("done"), StateFilter(SupportStates.chatting))
@@ -604,6 +606,15 @@ async def main() -> None:
         await message.answer(
             "Диалог закрыт. Снова нажмите «Поддержка» в меню или /support — снова напомним, что писать нужно в этот чат.",
             reply_markup=main_menu_kb(tg_id),
+        )
+
+    @dp.message(Command("reset"), StateFilter(SupportStates.chatting))
+    async def _cmd_reset(message: Message, state: FSMContext) -> None:
+        """Очищает контекст диалога с ИИ, не выходя из чата поддержки."""
+        await state.update_data(support_history=[])
+        await message.answer(
+            "Контекст очищен. Опишите вопрос заново — продолжаем в этом чате.",
+            reply_markup=support_chat_kb(),
         )
 
     @dp.message(StateFilter(SupportStates.chatting), F.text, _TextNotCommand())
@@ -620,18 +631,33 @@ async def main() -> None:
                 pass
             from support_ai import run_support_reply
 
-            reply = await run_support_reply(session, tg_id, t)
+            data = await state.get_data()
+            history_raw = data.get("support_history") or []
+            history: list[dict[str, Any]] = history_raw if isinstance(history_raw, list) else []
+            try:
+                reply, new_history = await run_support_reply(session, tg_id, t, history)
+            except Exception:
+                _log.exception("support_ai.run_support_reply failed tg_id=%s", tg_id)
+                admin_hint = f" или оператору @{SUPPORT_USERNAME}" if SUPPORT_USERNAME else ""
+                await message.answer(
+                    "Помощник временно недоступен. Попробуйте ещё раз через минуту"
+                    f"{admin_hint}.",
+                    reply_markup=support_chat_kb(),
+                )
+                return
+            await state.update_data(support_history=new_history)
             await message.answer(reply, reply_markup=support_chat_kb())
             return
 
         if SUPPORT_USERNAME:
             await message.answer(
-                f"Сообщение получено. Продолжайте здесь; при необходимости оператор: @{SUPPORT_USERNAME}.",
+                f"Сообщение получено. По возможности ответит оператор: @{SUPPORT_USERNAME}.",
                 reply_markup=support_chat_kb(),
             )
         else:
             await message.answer(
-                "Сообщение получено. Продолжайте описывать ситуацию в этом чате.",
+                "Сообщение получено, но автоматический помощник сейчас не настроен. "
+                "Напишите администратору сервиса или попробуйте позже.",
                 reply_markup=support_chat_kb(),
             )
 
