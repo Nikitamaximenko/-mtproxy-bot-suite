@@ -306,7 +306,6 @@ export default function MiniAppPage() {
   const [vpn, setVpn] = useState<VpnData | null>(null)
   const [vpnLoading, setVpnLoading] = useState(false)
   const [vpnLinkCopied, setVpnLinkCopied] = useState(false)
-  const [vpnPlatform, setVpnPlatform] = useState<"android" | "ios" | "windows" | "mac">("android")
 
   // Free proxy (no subscription needed)
   const [freeProxy, setFreeProxy] = useState<FreeProxyData | null>(null)
@@ -537,52 +536,6 @@ export default function MiniAppPage() {
 
   /* ── Active subscription ── */
   if (isPaid) {
-    const platforms = [
-      { id: "android", label: "Android" },
-      { id: "ios",     label: "iOS" },
-      { id: "windows", label: "Windows" },
-      { id: "mac",     label: "Mac" },
-    ] as const
-
-    const happInstructions: Record<typeof vpnPlatform, { download: string; steps: { t: string; s: string }[] }> = {
-      android: {
-        download: "https://play.google.com/store/apps/details?id=app.happ",
-        steps: [
-          { t: "Скачайте Happ", s: "Google Play → поиск «Happ»" },
-          { t: "Нажмите «Импортировать из буфера»", s: "Скопируйте ссылку кнопкой выше" },
-          { t: "Нажмите «Подключить»", s: "Выберите сервер «Frosty VPN»" },
-          { t: "Дайте разрешение на VPN", s: "Система запросит один раз" },
-        ],
-      },
-      ios: {
-        download: "https://apps.apple.com/app/happ-proxy-utility/id6504287215",
-        steps: [
-          { t: "Скачайте Happ", s: "App Store → поиск «Happ»" },
-          { t: "Нажмите «+» → «Из буфера обмена»", s: "Скопируйте ссылку кнопкой выше" },
-          { t: "Нажмите «Подключить»", s: "iOS попросит добавить конфигурацию VPN — разрешите" },
-          { t: "Готово", s: "Значок VPN появится в статусной строке" },
-        ],
-      },
-      windows: {
-        download: "https://github.com/hiddify/hiddify-next/releases/latest",
-        steps: [
-          { t: "Скачайте Hiddify (для Windows)", s: "github.com/hiddify → последний релиз" },
-          { t: "Нажмите «+» → «Добавить из буфера»", s: "Скопируйте ссылку кнопкой выше" },
-          { t: "Нажмите «Подключить»", s: "Выберите сервер «Frosty VPN»" },
-          { t: "Системный прокси включится автоматически", s: "Индикатор в трее станет зелёным" },
-        ],
-      },
-      mac: {
-        download: "https://github.com/hiddify/hiddify-next/releases/latest",
-        steps: [
-          { t: "Скачайте Hiddify (для macOS)", s: "github.com/hiddify → последний релиз" },
-          { t: "Нажмите «+» → «Добавить из буфера»", s: "Скопируйте ссылку кнопкой выше" },
-          { t: "Нажмите «Подключить»", s: "Выберите сервер «Frosty VPN»" },
-          { t: "Готово", s: "Индикатор в меню-баре подсветится" },
-        ],
-      },
-    }
-
     return (
       <div className={`${manrope.className} min-h-screen px-4 py-6`} style={{ background: "#FFFFFF" }}>
         <div className="max-w-sm mx-auto">
@@ -798,58 +751,45 @@ export default function MiniAppPage() {
                     </div>
                   </div>
 
-                  {/* Platform instructions */}
-                  <div style={{ background: "#F7F8FA", borderRadius: "16px", overflow: "hidden" }}>
-                    {/* Platform selector */}
-                    <div className="flex p-1 gap-1" style={{ borderBottom: "1px solid #E5E7EB" }}>
-                      {platforms.map(({ id, label }) => (
-                        <button
-                          key={id}
-                          onClick={() => setVpnPlatform(id)}
-                          className="flex-1 py-2 text-xs font-semibold touch-manipulation transition-all"
-                          style={{
-                            borderRadius: "8px",
-                            background: vpnPlatform === id ? "#FFFFFF" : "transparent",
-                            color: vpnPlatform === id ? "#111827" : "#9CA3AF",
-                            boxShadow: vpnPlatform === id ? "0 1px 3px rgba(0,0,0,0.08)" : "none",
-                          }}
-                        >
-                          {label}
-                        </button>
-                      ))}
+                  {/* Step-by-step instructions */}
+                  <div style={{ background: "#F7F8FA", borderRadius: "16px", padding: "20px" }}>
+                    <p style={{ fontSize: "14px", fontWeight: 700, color: "#111827", marginBottom: "16px" }}>
+                      Как подключить VPN:
+                    </p>
+
+                    <div style={{ display: "flex", gap: "12px", marginBottom: "12px", alignItems: "flex-start" }}>
+                      <div style={{ width: "28px", height: "28px", borderRadius: "50%", background: "#2AABEE", color: "white", fontSize: "13px", fontWeight: 700, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>1</div>
+                      <div>
+                        <p style={{ fontSize: "14px", fontWeight: 600, color: "#111827", margin: "0 0 4px" }}>Скачайте Happ</p>
+                        <div style={{ display: "flex", gap: "8px" }}>
+                          <a href="https://play.google.com/store/apps/details?id=com.happ.vpn" target="_blank" rel="noopener noreferrer" style={{ fontSize: "13px", color: "#2AABEE", textDecoration: "none" }}>📥 Android</a>
+                          <a href="https://apps.apple.com/app/happ-proxy-utility/id6504287215" target="_blank" rel="noopener noreferrer" style={{ fontSize: "13px", color: "#2AABEE", textDecoration: "none" }}>📥 iOS</a>
+                        </div>
+                      </div>
                     </div>
 
-                    {/* Steps */}
-                    <div className="p-4 space-y-3">
-                      <p className="text-xs font-semibold" style={{ color: "#6B7280" }}>
-                        Инструкция для {platforms.find(p => p.id === vpnPlatform)?.label}
-                      </p>
-                      {happInstructions[vpnPlatform].steps.map(({ t, s }, i) => (
-                        <div key={i} className="flex gap-3">
-                          <span
-                            className="flex-shrink-0 w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold"
-                            style={{ background: "#2AABEE", color: "#FFF" }}
-                          >
-                            {i + 1}
-                          </span>
-                          <div>
-                            <p className="text-sm font-medium" style={{ color: "#111827" }}>{t}</p>
-                            <p className="text-xs mt-0.5" style={{ color: "#6B7280" }}>{s}</p>
-                          </div>
-                        </div>
-                      ))}
+                    <div style={{ display: "flex", gap: "12px", marginBottom: "12px", alignItems: "flex-start" }}>
+                      <div style={{ width: "28px", height: "28px", borderRadius: "50%", background: "#2AABEE", color: "white", fontSize: "13px", fontWeight: 700, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>2</div>
+                      <div>
+                        <p style={{ fontSize: "14px", fontWeight: 600, color: "#111827", margin: "0 0 4px" }}>Скопируйте ссылку</p>
+                        <p style={{ fontSize: "13px", color: "#6B7280", margin: 0 }}>Нажмите «Скопировать» выше</p>
+                      </div>
+                    </div>
 
-                      {/* Download link */}
-                      <a
-                        href={happInstructions[vpnPlatform].download}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="flex items-center justify-center gap-2 w-full font-semibold text-sm touch-manipulation active:scale-95 transition-all mt-2"
-                        style={{ background: "#111827", color: "#FFFFFF", height: "44px", borderRadius: "10px" }}
-                      >
-                        <ExternalLink className="w-3.5 h-3.5" />
-                        Скачать Happ для {platforms.find(p => p.id === vpnPlatform)?.label}
-                      </a>
+                    <div style={{ display: "flex", gap: "12px", marginBottom: "12px", alignItems: "flex-start" }}>
+                      <div style={{ width: "28px", height: "28px", borderRadius: "50%", background: "#2AABEE", color: "white", fontSize: "13px", fontWeight: 700, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>3</div>
+                      <div>
+                        <p style={{ fontSize: "14px", fontWeight: 600, color: "#111827", margin: "0 0 4px" }}>Вставьте в Happ</p>
+                        <p style={{ fontSize: "13px", color: "#6B7280", margin: 0 }}>«+» → «Из буфера обмена» → Подключить</p>
+                      </div>
+                    </div>
+
+                    <div style={{ display: "flex", gap: "12px", alignItems: "flex-start" }}>
+                      <div style={{ width: "28px", height: "28px", borderRadius: "50%", background: "#10B981", color: "white", fontSize: "13px", fontWeight: 700, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>✓</div>
+                      <div>
+                        <p style={{ fontSize: "14px", fontWeight: 600, color: "#10B981", margin: "0 0 4px" }}>Готово — нажмите «Подключить» в Happ</p>
+                        <p style={{ fontSize: "13px", color: "#6B7280", margin: 0 }}>VPN включится за 5 секунд</p>
+                      </div>
                     </div>
                   </div>
                 </>

@@ -760,15 +760,30 @@ def _send_tg(tg_id: int, text: str, keyboard: dict | None = None) -> bool:
 
 
 def _notify_payment_success(tg_id: int, proxy_link: str) -> None:
-    kb = {"inline_keyboard": [
-        [{"text": "🔌 Подключить прокси", "url": proxy_link}],
-        [{"text": "📋 Скопировать ссылку", "callback_data": "copy_proxy_link"}],
-        [{"text": "📖 Ручная настройка", "callback_data": "manual_setup"}],
-    ]}
+    import time as _t
+    v = int(_t.time())
+    miniapp_url = f"{FRONTEND_URL}/mini?tg_id={tg_id}&v={v}" if FRONTEND_URL else ""
+    buttons: list[list[dict[str, Any]]] = [
+        [{"text": "🔌 Подключить прокси Telegram", "url": proxy_link}],
+    ]
+    if miniapp_url:
+        buttons.append([{"text": "🛡 Открыть личный кабинет (VPN)", "web_app": {"url": miniapp_url}}])
+    buttons.append([{"text": "📥 Скачать Happ для Android", "url": "https://play.google.com/store/apps/details?id=com.happ.vpn"}])
+    buttons.append([{"text": "📥 Скачать Happ для iOS", "url": "https://apps.apple.com/app/happ-proxy-utility/id6504287215"}])
+    kb = {"inline_keyboard": buttons}
     _send_tg(tg_id, (
-        "✅ Оплата прошла!\n\n"
-        "Ваша подписка активна 30 дней.\n"
-        "Нажмите кнопку ниже, чтобы подключить прокси."
+        "🎉 <b>Подписка активирована!</b>\n\n"
+        "Теперь у тебя есть:\n"
+        "📡 MTProxy — Telegram работает без ограничений\n"
+        "🛡 VPN — Instagram, TikTok, YouTube и всё остальное\n\n"
+        "<b>Ша�� 1 — Подключи прокси Telegram:</b>\n"
+        "Нажми кнопку «🔌 Подключить прокси» ниже\n\n"
+        "<b>Шаг 2 — Подключи VPN:</b>\n"
+        '1. Скачай <a href="https://play.google.com/store/apps/details?id=com.happ.vpn">Happ</a> (Android)'
+        ' ��ли <a href="https://apps.apple.com/app/happ-proxy-utility/id6504287215">Happ</a> (iOS)\n'
+        "2. Открой «Личный кабинет» → вкладка «🛡 VPN»\n"
+        "3. На��ми «Открыть в Happ» — подключение за 10 секунд\n\n"
+        "Если возникли вопросы — напиши в поддержку 👇"
     ), kb)
 
 
@@ -789,8 +804,11 @@ def _notify_expiring(tg_id: int, expires_at: datetime) -> None:
         [{"text": "💳 Продлить подписку", "callback_data": "menu:subscribe"}],
     ]
     _send_tg(tg_id, (
-        f"⏳ Подписка заканчивается <b>{date_str}</b>\n\n"
-        "Продлите, чтобы прокси продолжал работать."
+        f"⏳ <b>Подписка заканчивается {date_str}</b>\n\n"
+        "После истечения:\n"
+        "• VPN перестанет работать\n"
+        "• ��рокси для Telegram отключится\n\n"
+        "Продлите чтобы всё продолжало работать 👇"
     ), {"inline_keyboard": buttons})
 
 
@@ -799,9 +817,9 @@ def _notify_expired(tg_id: int) -> None:
         [{"text": "💳 Оформить подписку", "callback_data": "menu:subscribe"}],
     ]
     _send_tg(tg_id, (
-        "❌ Подписка истекла\n\n"
-        "Прокси больше не работает.\n"
-        "Оформите подписку заново — подключение займёт 10 секунд."
+        "❌ <b>Подписка истекла</b>\n\n"
+        "VPN и прокси больше не работают.\n\n"
+        "Оформите заново — подключение займёт 2 минуты."
     ), {"inline_keyboard": buttons})
 
 

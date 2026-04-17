@@ -221,41 +221,63 @@ export default function SuccessPage() {
             <p style={{ color: "#6B7280", fontSize: "14px", marginBottom: "20px" }}>📡 Прокси для Telegram + 🛡 VPN для всего остального</p>
             {proxyLink ? (
               <>
-                <a
-                  href={proxyLink}
-                  style={{
-                    display: "block", background: "#2AABEE", color: "#FFFFFF",
-                    height: "56px", borderRadius: "14px", fontSize: "17px", fontWeight: 700,
-                    textDecoration: "none", lineHeight: "56px", marginBottom: "10px",
-                  }}
-                >
-                  📡 Подключить прокси в Telegram →
-                </a>
-                <button
-                  onClick={copy}
-                  style={{
-                    width: "100%", background: "#F7F8FA", color: "#374151",
-                    height: "44px", borderRadius: "14px", fontSize: "15px",
-                    border: "1px solid #E5E7EB", cursor: "pointer", marginBottom: "16px",
-                  }}
-                >
-                  {copied ? "✅ Скопировано!" : "Скопировать ссылку"}
-                </button>
-                <div style={{ background: "#F7F8FA", borderRadius: "16px", padding: "16px", marginBottom: "12px", textAlign: "left" }}>
-                  <p style={{ fontSize: "13px", fontWeight: 600, color: "#111827", marginBottom: "8px" }}>📡 Шаг 1 — Telegram прокси:</p>
-                  <p style={{ fontSize: "13px", color: "#6B7280", lineHeight: "1.7" }}>
-                    1. Нажмите «Подключить прокси в Telegram»<br />
-                    2. Telegram откроется автоматически<br />
-                    3. Нажмите «Добавить» — готово
+                <div style={{ textAlign: "left", marginBottom: "24px" }}>
+                  <p style={{ fontSize: "15px", fontWeight: 700, color: "#111827", marginBottom: "8px" }}>
+                    📡 Шаг 1 — Подключите Telegram прокси
+                  </p>
+                  <a
+                    href={proxyLink}
+                    style={{
+                      display: "block", background: "#2AABEE", color: "#FFFFFF",
+                      height: "52px", borderRadius: "14px", fontSize: "16px", fontWeight: 700,
+                      textDecoration: "none", lineHeight: "52px", textAlign: "center", marginBottom: "8px",
+                    }}
+                  >
+                    Подключить прокси в Telegram →
+                  </a>
+                  <p style={{ fontSize: "13px", color: "#6B7280" }}>
+                    Telegram откроется и предложит добавить прокси — нажмите «Добавить»
                   </p>
                 </div>
-                <div style={{ background: "#F0FDF4", borderRadius: "16px", padding: "16px", marginBottom: "24px", textAlign: "left" }}>
-                  <p style={{ fontSize: "13px", fontWeight: 600, color: "#16A34A", marginBottom: "8px" }}>🛡 Шаг 2 — VPN (Instagram, TikTok и др.):</p>
-                  <p style={{ fontSize: "13px", color: "#6B7280", lineHeight: "1.7" }}>
-                    1. Откройте бота @FrostyBot<br />
-                    2. Нажмите «Личный кабинет» → вкладка «VPN»<br />
-                    3. Выберите платформу и следуйте инструкции
+
+                <div style={{ textAlign: "left" }}>
+                  <p style={{ fontSize: "15px", fontWeight: 700, color: "#111827", marginBottom: "8px" }}>
+                    🛡 Шаг 2 — Подключите VPN через Happ
                   </p>
+                  <div style={{ background: "#F7F8FA", borderRadius: "14px", padding: "16px", marginBottom: "12px" }}>
+                    <p style={{ fontSize: "14px", color: "#374151", marginBottom: "12px", lineHeight: "1.6" }}>
+                      1. Скачайте приложение Happ:<br />
+                      &nbsp;&nbsp;• <a href="https://play.google.com/store/apps/details?id=com.happ.vpn" style={{ color: "#2AABEE" }}>Android — Google Play</a><br />
+                      &nbsp;&nbsp;• <a href="https://apps.apple.com/app/happ-proxy-utility/id6504287215" style={{ color: "#2AABEE" }}>iOS — App Store</a>
+                    </p>
+                    <p style={{ fontSize: "14px", color: "#374151", lineHeight: "1.6" }}>
+                      2. Откройте бота @frostytg_bot<br />
+                      3. Нажмите «Личный кабинет» → вкладка «🛡 VPN»<br />
+                      4. Нажмите «Открыть в Happ» — подключение за 10 секунд ✅
+                    </p>
+                  </div>
+                  <div style={{ display: "flex", gap: "8px", marginBottom: "16px" }}>
+                    <a
+                      href="https://play.google.com/store/apps/details?id=com.happ.vpn"
+                      style={{
+                        flex: 1, display: "block", background: "#111827", color: "#FFFFFF",
+                        height: "48px", borderRadius: "12px", fontSize: "14px", fontWeight: 600,
+                        textDecoration: "none", lineHeight: "48px", textAlign: "center",
+                      }}
+                    >
+                      📥 Happ Android
+                    </a>
+                    <a
+                      href="https://apps.apple.com/app/happ-proxy-utility/id6504287215"
+                      style={{
+                        flex: 1, display: "block", background: "#111827", color: "#FFFFFF",
+                        height: "48px", borderRadius: "12px", fontSize: "14px", fontWeight: 600,
+                        textDecoration: "none", lineHeight: "48px", textAlign: "center",
+                      }}
+                    >
+                      📥 Happ iOS
+                    </a>
+                  </div>
                 </div>
               </>
             ) : (
@@ -263,16 +285,18 @@ export default function SuccessPage() {
                 Подписка активирована. Откройте бота @FrostyBot и нажмите /start — появится ссылка на прокси и доступ к VPN.
               </p>
             )}
-            <a
-              href={`https://t.me/frostytg_bot?start=sub_${token || ""}`}
-              style={{
-                display: "block", background: "#F7F8FA", color: "#374151",
-                height: "48px", borderRadius: "14px", fontSize: "15px",
-                textDecoration: "none", lineHeight: "48px", border: "1px solid #E5E7EB",
-              }}
-            >
-              Перейти в бот @FrostyBot →
-            </a>
+            <div style={{ textAlign: "center" }}>
+              <a
+                href={`https://t.me/frostytg_bot?start=sub_${token || ""}`}
+                style={{
+                  display: "inline-block", background: "#F7F8FA", color: "#374151",
+                  padding: "12px 24px", borderRadius: "12px", fontSize: "14px",
+                  textDecoration: "none", border: "1px solid #E5E7EB",
+                }}
+              >
+                Перейти в бот @frostytg_bot →
+              </a>
+            </div>
           </>
         )}
 
