@@ -86,9 +86,27 @@ export function openTelegramLink(url: string) {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const wa = (window as any)?.Telegram?.WebApp
 
-  // WebApp.openTelegramLink only accepts https://t.me/ links,
-  // so convert tg:// protocol to https://t.me/ equivalent.
+  // WebApp.openTelegramLink only accepts https://t.me/ links, so other tg:// hosts
+  // are converted to https://t.me/<path>. Exception: tg://proxy?server=... must NOT
+  // become https://t.me/proxy?... — that opens the @proxy profile/chat, not MTProxy.
   let resolved = normalizePaymentUrl(url)
+  if (/^tg:\/\/proxy(\?|#|$)/i.test(resolved)) {
+    try {
+      wa?.ready?.()
+    } catch {
+      /* ignore */
+    }
+    try {
+      window.location.assign(resolved)
+    } catch {
+      try {
+        window.location.href = resolved
+      } catch {
+        /* ignore */
+      }
+    }
+    return
+  }
   if (resolved.startsWith("tg://")) {
     const stripped = resolved.slice("tg://".length)
     resolved = `https://t.me/${stripped}`
