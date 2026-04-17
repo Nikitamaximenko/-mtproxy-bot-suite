@@ -81,6 +81,50 @@ function isCustomAppDeepLink(url: string): boolean {
   return /^(happ|vless|vmess|trojan|ss|socks|hy2):\/\//i.test(url.trim())
 }
 
+/**
+ * Платёжные ссылки (Lava / Prodamus) мы открываем НЕ через WebApp.openLink,
+ * потому что в новых клиентах Telegram (iOS/Android/Desktop) он уводит юзера
+ * в системный Safari/Chrome — мини-аппа «выплёвывает» оплату наружу.
+ *
+ * Правильный способ «оплата внутри TMA» — навигировать сам WebView мини-аппы
+ * через window.location. Страница Lava открывается прямо на месте мини-аппа,
+ * юзер остаётся внутри Telegram; после успеха Lava делает редирект на
+ * successUrl (/success?token=…), и мы возвращаемся в своё приложение уже как
+ * обычный next-роут.
+ */
+export function openPaymentLink(url: string) {
+  if (typeof window === "undefined") return
+  const resolved = normalizePaymentUrl(url)
+  if (!resolved) return
+  // Telegram WebApp должен узнать, что мы «уходим» — иначе на iOS бывают
+  // артефакты с хедером. ready() безопасно вызывать повторно.
+  try {
+    window?.Telegram?.WebApp?.ready?.()
+  } catch {
+    /* ignore */
+  }
+  try {
+    window.location.assign(resolved)
+    return
+  } catch {
+    /* fall through */
+  }
+  try {
+    window.location.href = resolved
+    return
+  } catch {
+    /* fall through */
+  }
+  // Фолбэк: если WebView вдруг запрещает навигацию (очень редкий кейс), пробуем openLink.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const wa = (window as any)?.Telegram?.WebApp
+  try {
+    wa?.openLink?.(resolved)
+  } catch {
+    /* ignore */
+  }
+}
+
 export function openTelegramLink(url: string) {
   if (typeof window === "undefined") return
   // eslint-disable-next-line @typescript-eslint/no-explicit-any

@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { Manrope } from "next/font/google"
 import { Check, Copy, ExternalLink, RefreshCw, Shield, X } from "lucide-react"
-import { getTelegramInitData, getTelegramInitDataAsync, getTelegramUser, openTelegramLink } from "@/lib/telegram"
+import { getTelegramInitData, getTelegramInitDataAsync, getTelegramUser, openPaymentLink, openTelegramLink } from "@/lib/telegram"
 
 const manrope = Manrope({ subsets: ["latin", "cyrillic"], weight: ["400", "500", "600", "700"] })
 
@@ -171,7 +171,7 @@ function PaymentModal({
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
   const handleOpenPayment = useCallback(() => {
-    openTelegramLink(url)
+    openPaymentLink(url)
     setOpened(true)
   }, [url])
 
@@ -532,7 +532,10 @@ export default function MiniAppPage() {
         window.location.href = payUrl
         return
       }
-      openTelegramLink(payUrl)
+      // В Telegram Mini App оплату открываем прямо внутри WebView мини-аппа (навигация самой страницы),
+      // а не через WebApp.openLink — иначе новые клиенты Telegram выбрасывают юзера в системный браузер.
+      // После оплаты Lava редиректит на {FRONTEND_URL}/success?token=…, и юзер возвращается в мини-апп.
+      openPaymentLink(payUrl)
       setPaymentUrl(payUrl)
     } catch (e) {
       setError(e instanceof Error ? e.message : "Что-то пошло не так")
@@ -566,7 +569,7 @@ export default function MiniAppPage() {
         window.location.href = payUrl
         return
       }
-      openTelegramLink(payUrl)
+      openPaymentLink(payUrl)
       setPaymentUrl(payUrl)
     } catch (e) {
       setError(e instanceof Error ? e.message : "Что-то пошло не так")
