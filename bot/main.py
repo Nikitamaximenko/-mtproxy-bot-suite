@@ -30,12 +30,29 @@ BOT_TOKEN = os.getenv("BOT_TOKEN", "").strip()
 BACKEND_BASE_URL = (os.getenv("BACKEND_BASE_URL") or "http://localhost:8000").rstrip("/")
 FRONTEND_URL = (os.getenv("FRONTEND_URL") or "http://localhost:3000").strip()
 SUPPORT_USERNAME = os.getenv("SUPPORT_USERNAME", "").lstrip("@").strip()
-SUPPORT_AI_ENABLED = os.getenv("SUPPORT_AI_ENABLED", "").strip().lower() in ("1", "true", "yes")
 INTERNAL_API_TOKEN = os.getenv("INTERNAL_API_TOKEN", "").strip()
 PRICE_RUB = int(os.getenv("PRICE_RUB", "299") or "299")
 MINIAPP_PATH = (os.getenv("MINIAPP_PATH") or "/mini").strip() or "/mini"
 
 _log = logging.getLogger(__name__)
+
+# После load_dotenv: ключ для авто-включения ИИ-поддержки
+try:
+    from support_ai import LLM_API_KEY
+except ImportError:
+    LLM_API_KEY = ""
+
+
+def _ai_support_enabled() -> bool:
+    """
+    ИИ в этом чате: SUPPORT_AI_ENABLED=false — выкл.; true — вкл.; не задано — вкл., если есть OPENROUTER_API_KEY / OPENAI_API_KEY.
+    """
+    raw = os.getenv("SUPPORT_AI_ENABLED", "").strip().lower()
+    if raw in ("0", "false", "no"):
+        return False
+    if raw in ("1", "true", "yes"):
+        return True
+    return bool(LLM_API_KEY)
 
 
 class SupportStates(StatesGroup):
@@ -67,11 +84,11 @@ def _miniapp_url(tg_id: int) -> str:
 
 
 def main_menu_kb(tg_id: int) -> InlineKeyboardMarkup:
-    row3 = [InlineKeyboardButton(text="✅ Статус", callback_data="menu:status")]
-    if SUPPORT_AI_ENABLED:
-        row3.append(InlineKeyboardButton(text="🆘 Поддержка", callback_data="menu:support"))
-    elif SUPPORT_USERNAME:
-        row3.append(InlineKeyboardButton(text="🆘 Поддержка", url=f"https://t.me/{SUPPORT_USERNAME}"))
+    row3 = [
+        InlineKeyboardButton(text="✅ Статус", callback_data="menu:status"),
+        # Всегда чат в боте — не открываем личку по url (t.me)
+        InlineKeyboardButton(text="🆘 Поддержка", callback_data="menu:support"),
+    ]
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="🚀 Прокси + VPN за 299 ₽", web_app=WebAppInfo(url=_miniapp_url(tg_id)))],
         [InlineKeyboardButton(text="ℹ️ Как это работает", callback_data="menu:help")],
@@ -90,17 +107,9 @@ def proxy_kb(proxy_link: str) -> InlineKeyboardMarkup:
 
 
 def support_kb() -> InlineKeyboardMarkup | None:
-    if SUPPORT_AI_ENABLED:
-        return InlineKeyboardMarkup(
-            inline_keyboard=[[InlineKeyboardButton(text="🆘 Поддержка", callback_data="menu:support")]]
-        )
-    if SUPPORT_USERNAME:
-        return InlineKeyboardMarkup(
-            inline_keyboard=[
-                [InlineKeyboardButton(text="🆘 Поддержка", url=f"https://t.me/{SUPPORT_USERNAME}")]
-            ]
-        )
-    return None
+    return InlineKeyboardMarkup(
+        inline_keyboard=[[InlineKeyboardButton(text="🆘 Поддержка", callback_data="menu:support")]]
+    )
 
 
 def support_chat_kb() -> InlineKeyboardMarkup:
@@ -111,14 +120,29 @@ def support_chat_kb() -> InlineKeyboardMarkup:
     )
 
 
-# Приглашение в режим поддержки: сначала объясняем, что писать нужно прямо в бот — затем следующие сообщения уходит ИИ.
-SUPPORT_CHAT_INVITE_HTML = (
-    "✨ <b>Поддержка</b>\n\n"
-    "Пишите <b>прямо в этот чат</b> — мы на связи и готовы помочь.\n\n"
-    "Отправьте <b>следующим сообщением</b> свой вопрос: оплата, настройка VPN (Happ), прокси для Telegram — дальше ответит помощник, "
-    "и вы сможете продолжить с ним обычный диалог.\n\n"
-    "<i>Закончить: кнопка ниже или /done</i>"
-)
+def support_invite_html() -> str:
+    """Текст после нажатия «Поддержка»: всегда диалог в боте; при наличии ключа — ИИ."""
+    if _ai_support_enabled():
+        return (
+            "✨ <b>Поддержка</b>\n\n"
+            "Пишите <b>прямо в этот чат</b> — мы на связи и готовы помочь.\n\n"
+            "Отправьте <b>следующим сообщением</b> свой вопрос: оплата, настройка VPN (Happ), прокси для Telegram — дальше ответит помощник, "
+            "и вы сможете продолжить с ним обычный диалог.\n\n"
+            "<i>Закончить: кнопка ниже или /done</i>"
+        )
+    if SUPPORT_USERNAME:
+        return (
+            "✨ <b>Поддержка</b>\n\n"
+            "Пишите <b>прямо в этот чат</b> — мы на связи и готовы помочь.\n\n"
+            f"Сообщения обрабатываются здесь. При необходимости оператор: @{SUPPORT_USERNAME}.\n\n"
+            "<i>Закончить: кнопка ниже или /done</i>"
+        )
+    return (
+        "✨ <b>Поддержка</b>\n\n"
+        "Пишите <b>прямо в этот чат</b> — мы на связи и готовы помочь.\n\n"
+        "Отправьте <b>следующим сообщением</b> свой вопрос.\n\n"
+        "<i>Закончить: кнопка ниже или /done</i>"
+    )
 
 
 def format_dt(dt_str: str | None) -> str:
@@ -551,12 +575,9 @@ async def main() -> None:
             return
 
         if action == "support":
-            if not SUPPORT_AI_ENABLED:
-                await query.answer("Поддержка ИИ выключена", show_alert=True)
-                return
             await state.set_state(SupportStates.chatting)
             await query.answer()
-            await msg.answer(SUPPORT_CHAT_INVITE_HTML, parse_mode="HTML", reply_markup=support_chat_kb())
+            await msg.answer(support_invite_html(), parse_mode="HTML", reply_markup=support_chat_kb())
             return
 
         if action == "exit_support":
@@ -573,14 +594,8 @@ async def main() -> None:
 
     @dp.message(Command("support"))
     async def _cmd_support(message: Message, state: FSMContext) -> None:
-        if not SUPPORT_AI_ENABLED:
-            if SUPPORT_USERNAME:
-                await message.answer(f"Напишите в поддержку: @{SUPPORT_USERNAME}")
-            else:
-                await message.answer("Поддержка через бота не настроена.")
-            return
         await state.set_state(SupportStates.chatting)
-        await message.answer(SUPPORT_CHAT_INVITE_HTML, parse_mode="HTML", reply_markup=support_chat_kb())
+        await message.answer(support_invite_html(), parse_mode="HTML", reply_markup=support_chat_kb())
 
     @dp.message(Command("done"), StateFilter(SupportStates.chatting))
     async def _cmd_done(message: Message, state: FSMContext) -> None:
@@ -593,21 +608,32 @@ async def main() -> None:
 
     @dp.message(StateFilter(SupportStates.chatting), F.text, _TextNotCommand())
     async def _support_ai_message(message: Message, state: FSMContext) -> None:
-        if not SUPPORT_AI_ENABLED:
-            return
         t = (message.text or "").strip()
         tg_id = message.from_user.id if message.from_user else 0
         if not tg_id:
             return
-        session = _get_session(dp)
-        try:
-            await message.bot.send_chat_action(message.chat.id, "typing")
-        except Exception:
-            pass
-        from support_ai import run_support_reply
+        if _ai_support_enabled():
+            session = _get_session(dp)
+            try:
+                await message.bot.send_chat_action(message.chat.id, "typing")
+            except Exception:
+                pass
+            from support_ai import run_support_reply
 
-        reply = await run_support_reply(session, tg_id, t)
-        await message.answer(reply, reply_markup=support_chat_kb())
+            reply = await run_support_reply(session, tg_id, t)
+            await message.answer(reply, reply_markup=support_chat_kb())
+            return
+
+        if SUPPORT_USERNAME:
+            await message.answer(
+                f"Сообщение получено. Продолжайте здесь; при необходимости оператор: @{SUPPORT_USERNAME}.",
+                reply_markup=support_chat_kb(),
+            )
+        else:
+            await message.answer(
+                "Сообщение получено. Продолжайте описывать ситуацию в этом чате.",
+                reply_markup=support_chat_kb(),
+            )
 
     @dp.message(StateFilter(SupportStates.chatting))
     async def _support_non_text(message: Message) -> None:
