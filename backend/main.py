@@ -43,7 +43,9 @@ from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column, sess
 
 load_dotenv()
 
-DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./app.db").strip()
+# Пустая строка в env ломает весь импорт: create_engine("") → "Could not parse SQLAlchemy URL"
+_db_url_raw = (os.getenv("DATABASE_URL") or "").strip()
+DATABASE_URL = _db_url_raw if _db_url_raw else "sqlite:///./app.db"
 
 # Payments (lava.top Public API)
 # Docs: https://developers.lava.top/en and Swagger https://gate.lava.top/docs
@@ -346,8 +348,21 @@ def _migrate() -> None:
 
 @asynccontextmanager
 async def lifespan(application: FastAPI) -> AsyncGenerator[None, None]:
-    Base.metadata.create_all(bind=engine)
-    _migrate()
+    logger.info(
+        "DB: dialect=%s sqlite=%s",
+        engine.dialect.name,
+        DATABASE_URL.startswith("sqlite:"),
+    )
+    if os.getenv("RAILWAY_ENVIRONMENT") and DATABASE_URL.startswith("sqlite:"):
+        logger.warning(
+            "RAILWAY: DATABASE_URL missing/empty — using bundled sqlite; set Postgres DATABASE_URL in Railway Variables."
+        )
+    try:
+        Base.metadata.create_all(bind=engine)
+        _migrate()
+    except Exception:
+        logger.exception("Startup failed during create_all / _migrate — check DATABASE_URL and DB reachability")
+        raise
     task = asyncio.create_task(_expiration_loop())
     vpn_task = asyncio.create_task(_vpn_maintenance_loop())
     yield
