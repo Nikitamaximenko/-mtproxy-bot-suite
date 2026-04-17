@@ -93,7 +93,7 @@ function TgIdFallbackScreen({ onContinue }: { onContinue: (id: number) => void }
       <div className="w-full max-w-sm space-y-6 text-center">
         <FrostIcon className="w-14 h-14 mx-auto" style={{ color: "#2AABEE" } as React.CSSProperties} />
         <div>
-          <h1 className="text-xl font-bold" style={{ color: "#111827" }}>Frosty — оплата</h1>
+          <h1 className="text-xl font-bold" style={{ color: "#111827" }}>Frosty — 2 в 1, оплата</h1>
           <p className="text-sm mt-2 leading-relaxed" style={{ color: "#6B7280" }}>
             Из Telegram страница откроется сама. В браузере укажите свой{" "}
             <span className="font-medium" style={{ color: "#111827" }}>Telegram ID</span> — тот же, к которому привяжется подписка.
@@ -624,7 +624,7 @@ export default function MiniAppPage() {
           {/* Logo */}
           <div className="flex items-center justify-center gap-2 mb-6">
             <FrostIcon className="w-6 h-6" style={{ color: "#2AABEE" } as React.CSSProperties} />
-            <span className="text-base font-bold" style={{ color: "#111827" }}>Frosty</span>
+            <span className="text-base font-bold" style={{ color: "#111827" }}>Frosty — 2 в 1</span>
           </div>
 
           {justPaid && (
@@ -634,12 +634,12 @@ export default function MiniAppPage() {
             </div>
           )}
 
-          {/* Status card — акцент на VPN: он главный продукт, MTProxy идёт бонусом */}
+          {/* Status card — подписка 2 в 1 */}
           <div className="p-4 mb-5" style={{ background: "#F7F8FA", borderRadius: "16px" }}>
             <div className="flex items-center justify-between mb-2">
               <div>
-                <span className="text-sm font-semibold" style={{ color: "#111827" }}>VPN-подписка активна</span>
-                <p className="text-xs mt-0.5" style={{ color: "#6B7280" }}>Instagram, TikTok, YouTube и прокси для Telegram</p>
+                <span className="text-sm font-semibold" style={{ color: "#111827" }}>Подписка 2 в 1 активна</span>
+                <p className="text-xs mt-0.5" style={{ color: "#6B7280" }}>Прокси для Telegram и VPN для Instagram, TikTok, YouTube</p>
               </div>
               <span className="flex items-center gap-1.5 text-sm font-semibold" style={{ color: "#16A34A" }}>
                 <span className="w-2 h-2 rounded-full animate-pulse" style={{ background: "#16A34A" }} />
@@ -659,7 +659,7 @@ export default function MiniAppPage() {
             </div>
           </div>
 
-          {/* Tabs — VPN первым (это то, за чем пришли). Telegram — бонусом */}
+          {/* Tabs — VPN и Telegram (2 в 1) */}
           <div className="flex mb-5 p-1" style={{ background: "#F7F8FA", borderRadius: "14px" }}>
             {(["vpn", "proxy"] as const).map((tab) => (
               <button
@@ -1002,7 +1002,7 @@ export default function MiniAppPage() {
           {/* 1. Logo */}
           <div className="flex items-center justify-center gap-2 mb-8">
             <FrostIcon className="w-6 h-6" style={{ color: "#2AABEE" } as React.CSSProperties} />
-            <span className="text-base font-bold" style={{ color: "#111827" }}>Frosty</span>
+            <span className="text-base font-bold" style={{ color: "#111827" }}>Frosty — 2 в 1</span>
           </div>
 
           {suspendedButPaid && expiresAt && (
@@ -1024,7 +1024,7 @@ export default function MiniAppPage() {
 
           {/* 3. Heading */}
           <h1 className="text-center font-bold leading-tight mb-3" style={{ fontSize: "30px", color: "#111827" }}>
-            Работает всё — Telegram,<br />Instagram, TikTok и другие.
+            2 в 1: Telegram и всё остальное<br />— Instagram, TikTok и другие.
           </h1>
 
           {/* 4. Subtitle */}

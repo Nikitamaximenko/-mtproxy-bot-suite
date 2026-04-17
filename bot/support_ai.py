@@ -73,13 +73,14 @@ def _miniapp_url(tg_id: int) -> str | None:
     return f"{base}{path}?tg_id={tg_id}&v={v}"
 
 
-SYSTEM_PROMPT = f"""Ты — служба поддержки сервиса Frosty VPN: подписка VLESS Reality за {PRICE_RUB} ₽/мес.
+SYSTEM_PROMPT = f"""Ты — служба поддержки сервиса Frosty: подписка «2 в 1» — MTProxy для Telegram + VPN (VLESS Reality) за {PRICE_RUB} ₽/мес.
 
 Правила:
 - Пиши по-русски, кратко и по делу, без воды и лишних извинений. 2–5 предложений — норма.
 - Не выдумывай факты. Даты подписки и ссылки бери ТОЛЬКО через get_subscription_status.
-- Оплата: мини-приложение Telegram (кнопка «VPN» в боте), карта или СБП. Для ссылки — get_payment_instructions.
-- VPN: приложение Happ (Android/iOS). Конфиг и кнопка «Открыть в Happ» — в мини-приложении, вкладка VPN.
+- Оплата: мини-приложение Telegram (кнопка «2 в 1 — Прокси + VPN» в боте), карта или СБП. Для ссылки — get_payment_instructions.
+- Прокси Telegram: в мини-приложении вкладка «Telegram», кнопка подключения MTProxy.
+- VPN: приложение Happ (Android/iOS). Конфиг — в мини-приложении, вкладка «VPN».
 - Если пользователь жалуется, что у него уже есть подписка, но кнопок нет — попроси открыть «Статус» в боте; если всё равно пусто — предложи написать админу.
 - grant_complimentary_access вызывай ТОЛЬКО когда пользователь явно описал техническую невозможность оплаты (банк не пропускает, нет карты/СБП/Apple Pay). Запрашивай короткое подтверждение и пиши чёткую причину в reason. Никогда не выдавай доступ «за жалобу» или «на пробу»."""
 
@@ -153,12 +154,12 @@ async def _call_tool(
         pay_url = _miniapp_url(tg_id)
         if pay_url:
             text = (
-                f"Цена {PRICE_RUB} ₽/мес. Откройте в боте кнопку «VPN — от {PRICE_RUB} ₽» "
+                f"Цена {PRICE_RUB} ₽/мес. Откройте в боте кнопку «2 в 1 — Прокси + VPN» "
                 f"или мини-приложение по ссылке: {pay_url}"
             )
             return json.dumps({"instructions": text, "mini_app_url": pay_url}, ensure_ascii=False)
         text = (
-            f"Цена {PRICE_RUB} ₽/мес. Откройте в боте кнопку «VPN — от {PRICE_RUB} ₽» — "
+            f"Цена {PRICE_RUB} ₽/мес. Откройте в боте кнопку «2 в 1 — Прокси + VPN» — "
             "откроется мини-приложение Telegram с оплатой по карте или СБП."
         )
         return json.dumps({"instructions": text}, ensure_ascii=False)
@@ -399,7 +400,7 @@ def _fallback_from_tool_result(raw: str) -> str:
             )
         if data.get("suspended"):
             return "Доступ временно приостановлен. Напишите администратору для разблокировки."
-        return f"Активной подписки нет. Оплатить — кнопка «VPN — от {PRICE_RUB} ₽» в меню бота."
+        return f"Активной подписки нет. Оплатить — кнопка «2 в 1 — Прокси + VPN» в меню бота."
     if data.get("ok") is True:
         return str(data.get("message") or "Готово.")
     if "instructions" in data:

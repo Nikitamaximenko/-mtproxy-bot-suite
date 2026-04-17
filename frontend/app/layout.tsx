@@ -17,12 +17,12 @@ export const viewport: Viewport = {
 }
 
 export const metadata: Metadata = {
-  title: "Frosty — личный прокси для Telegram",
-  description: "Персональный MTProxy только для вас. Telegram работает даже когда заблокирован. 299 ₽/мес, подключение за 10 секунд.",
-  keywords: "telegram прокси, mtproxy, телеграм прокси россия, обход блокировки telegram, frosty proxy",
+  title: "Frosty — 2 в 1: прокси для Telegram + VPN",
+  description: "Подписка 2 в 1: персональный MTProxy для Telegram и VPN для сайтов. 299 ₽/мес, подключение за пару минут.",
+  keywords: "telegram прокси, mtproxy, vpn, телеграм прокси россия, обход блокировки telegram, frosty",
   openGraph: {
-    title: "Frosty — личный прокси для Telegram",
-    description: "Персональный MTProxy только для вас. 299 ₽/мес.",
+    title: "Frosty — 2 в 1: прокси для Telegram + VPN",
+    description: "Персональный MTProxy + VPN. 299 ₽/мес.",
     url: "https://frostybot.ru",
     siteName: "Frosty",
     locale: "ru_RU",
