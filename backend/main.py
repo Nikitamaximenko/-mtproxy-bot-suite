@@ -2320,6 +2320,128 @@ def internal_support_activate(
     return OkResponse(ok=True)
 
 
+class InternalDiagSubscriptionResponse(BaseModel):
+    telegram_id: int
+    user_exists: bool
+    username: str | None = None
+    now: datetime
+    latest: dict | None = None
+    paid_active_latest: dict | None = None
+    get_subscription_would_return: dict
+    env: dict
+
+
+@app.get(
+    "/internal/diag/subscription/{telegram_id}",
+    response_model=InternalDiagSubscriptionResponse,
+)
+def internal_diag_subscription(
+    telegram_id: int, req: Request, db: Session = Depends(get_db)
+) -> InternalDiagSubscriptionResponse:
+    """
+    Диагностика для бота (/bdb). Показывает:
+    - существует ли юзер;
+    - последняя запись в subscriptions;
+    - лучшая подходящая под /subscription/{tg_id} (paid + expires в будущем);
+    - что именно вернул бы /subscription/{tg_id} прямо сейчас;
+    - булевые флаги окружения (MT_PROXY_*).
+    Без секретов — только факт наличия.
+    """
+    _require_internal_token(req)
+    now = utcnow()
+
+    user = db.execute(
+        select(User).where(User.telegram_id == int(telegram_id))
+    ).scalar_one_or_none()
+
+    latest = (
+        db.execute(
+            select(Subscription)
+            .where(Subscription.telegram_id == int(telegram_id))
+            .order_by(Subscription.created_at.desc())
+            .limit(1)
+        )
+        .scalars()
+        .first()
+    )
+
+    paid_active = (
+        db.execute(
+            select(Subscription)
+            .where(
+                Subscription.telegram_id == int(telegram_id),
+                Subscription.payment_status == "paid",
+                Subscription.expires_at.is_not(None),
+                Subscription.expires_at > now,
+            )
+            .order_by(Subscription.expires_at.desc())
+            .limit(1)
+        )
+        .scalars()
+        .first()
+    )
+
+    def _dump(s: Subscription | None) -> dict | None:
+        if s is None:
+            return None
+        return {
+            "id": s.id,
+            "payment_status": s.payment_status,
+            "created_at": s.created_at.isoformat() if s.created_at else None,
+            "expires_at": s.expires_at.isoformat() if s.expires_at else None,
+            "access_suspended": bool(s.access_suspended),
+            "has_proxy_server": bool(s.proxy_server),
+            "has_proxy_port": bool(s.proxy_port),
+            "has_proxy_secret": bool(s.proxy_secret),
+            "lava_contract_id": s.lava_contract_id,
+        }
+
+    would: dict
+    if paid_active is None:
+        would = {"active": False, "suspended": False, "proxy_link": None, "expires_at": None}
+    elif paid_active.access_suspended:
+        would = {
+            "active": False,
+            "suspended": True,
+            "proxy_link": None,
+            "expires_at": paid_active.expires_at.isoformat() if paid_active.expires_at else None,
+        }
+    elif not (paid_active.proxy_server and paid_active.proxy_port and paid_active.proxy_secret):
+        would = {
+            "active": True,
+            "suspended": False,
+            "proxy_link": None,
+            "expires_at": paid_active.expires_at.isoformat() if paid_active.expires_at else None,
+        }
+    else:
+        would = {
+            "active": True,
+            "suspended": False,
+            "proxy_link": "tg://proxy?server=***&port=***&secret=***",
+            "expires_at": paid_active.expires_at.isoformat() if paid_active.expires_at else None,
+        }
+
+    env_flags = {
+        "MT_PROXY_SERVER_set": bool(MT_PROXY_SERVER),
+        "MT_PROXY_SECRET_set": bool(MT_PROXY_SECRET),
+        "MT_PROXY_PORT": int(MT_PROXY_PORT),
+        "DATABASE_URL_dialect": engine.dialect.name,
+        "DATABASE_URL_is_sqlite": DATABASE_URL.startswith("sqlite:"),
+        "INTERNAL_API_TOKEN_set": bool((os.getenv("INTERNAL_API_TOKEN") or "").strip()),
+    }
+
+    return InternalDiagSubscriptionResponse(
+        telegram_id=int(telegram_id),
+        user_exists=user is not None,
+        username=user.username if user else None,
+        now=now,
+        latest=_dump(latest),
+        paid_active_latest=_dump(paid_active),
+        get_subscription_would_return=would,
+        env=env_flags,
+    )
+
+
 # ── Admin Dashboard API ──
 
 

@@ -216,6 +216,14 @@ HELP_GENERAL = (
 )
 
 
+class BackendError(RuntimeError):
+    def __init__(self, status: int, body: str, path: str) -> None:
+        super().__init__(f"backend {path} -> {status}: {body[:240]}")
+        self.status = status
+        self.body = body
+        self.path = path
+
+
 async def backend_get(session: aiohttp.ClientSession, path: str) -> dict[str, Any]:
     url = f"{BACKEND_BASE_URL}{path}"
     async with session.get(
@@ -223,11 +231,17 @@ async def backend_get(session: aiohttp.ClientSession, path: str) -> dict[str, An
         headers=_internal_headers(),
         timeout=aiohttp.ClientTimeout(total=10),
     ) as resp:
-        data = await resp.json(content_type=None)
+        raw = await resp.text()
         if resp.status >= 400:
-            raise RuntimeError(f"Backend error {resp.status}: {data}")
+            _log.warning("backend_get %s -> %s body=%s", path, resp.status, raw[:240])
+            raise BackendError(resp.status, raw, path)
+        try:
+            import json as _json
+            data = _json.loads(raw) if raw else {}
+        except Exception as exc:
+            raise BackendError(resp.status, raw, path) from exc
         if not isinstance(data, dict):
-            raise RuntimeError("Unexpected backend response")
+            raise BackendError(resp.status, raw, path)
         return data
 
 
@@ -442,8 +456,30 @@ async def cmd_stop(message: Message, session: aiohttp.ClientSession) -> None:
 async def cmd_status(message: Message, session: aiohttp.ClientSession, tg_id: int) -> None:
     try:
         data = await backend_get(session, f"/subscription/{tg_id}")
+    except BackendError as exc:
+        hint = ""
+        if exc.status in (401, 403):
+            hint = "Сервис временно в обслуживании (auth). Мы уже чиним."
+        elif 500 <= exc.status < 600:
+            hint = "Сервер подписок недоступен. Попробуйте через минуту."
+        else:
+            hint = "Не удалось получить статус. Попробуйте позже."
+        _log.warning("cmd_status: tg_id=%s backend %s (%s)", tg_id, exc.status, exc.path)
+        await message.answer(hint, reply_markup=support_kb())
+        return
     except Exception:
+        _log.exception("cmd_status: tg_id=%s unexpected error", tg_id)
         await message.answer("Не удалось получить статус. Попробуйте позже.", reply_markup=support_kb())
+        return
+
+    if data.get("suspended"):
+        await message.answer(
+            "⏸ <b>Доступ приостановлен</b>\n\n"
+            "Оплата прошла, но доступ временно снят администратором. "
+            "Напиши в поддержку — восстановим по оплаченному периоду без сдвига дат.",
+            parse_mode="HTML",
+            reply_markup=support_kb(),
+        )
         return
 
     if not data.get("active"):
@@ -482,7 +518,14 @@ async def cmd_status(message: Message, session: aiohttp.ClientSession, tg_id: in
     if proxy_link:
         await message.answer(status_text, parse_mode="HTML", reply_markup=proxy_kb(proxy_link))
     else:
-        await message.answer(status_text, parse_mode="HTML")
+        await message.answer(
+            status_text
+            + "\n\n"
+            + "⚠️ Прокси-ключи пока не выданы на этом сервере. "
+            + "Напиши в поддержку — выдадим по оплаченному периоду.",
+            parse_mode="HTML",
+            reply_markup=support_kb(),
+        )
 
 
 async def main() -> None:
@@ -563,6 +606,55 @@ async def main() -> None:
         if not admins or uid not in admins:
             return
         text = _support_ai_diagnostic_text()
+        await message.answer(f"<pre>{html.escape(text)}</pre>", parse_mode="HTML")
+
+    @dp.message(Command("bdb"))
+    async def _bdb(message: Message) -> None:
+        """
+        Диагностика подписки через бот (только BOT_ADMIN_TELEGRAM_IDS).
+        /bdb           — по себе
+        /bdb <tg_id>   — по конкретному пользователю
+        """
+        uid = message.from_user.id if message.from_user else 0
+        admins = _bot_admin_ids()
+        if not admins or uid not in admins:
+            return
+        parts = (message.text or "").split(maxsplit=1)
+        target = uid
+        if len(parts) > 1:
+            raw = parts[1].strip()
+            try:
+                target = int(raw.lstrip("@"))
+            except ValueError:
+                await message.answer("Нужен числовой telegram_id: <code>/bdb 123456789</code>", parse_mode="HTML")
+                return
+
+        session = _get_session(dp)
+        lines: list[str] = [
+            f"BACKEND_BASE_URL={BACKEND_BASE_URL}",
+            f"INTERNAL_API_TOKEN set={bool(INTERNAL_API_TOKEN)}",
+            f"target_tg_id={target}",
+        ]
+
+        try:
+            sub = await backend_get(session, f"/subscription/{target}")
+            lines.append(f"/subscription -> {sub}")
+        except BackendError as e:
+            lines.append(f"/subscription FAILED {e.status}: {e.body[:200]}")
+        except Exception as e:
+            lines.append(f"/subscription EXC {e!r}")
+
+        try:
+            diag = await backend_get(session, f"/internal/diag/subscription/{target}")
+            lines.append(f"/internal/diag -> {diag}")
+        except BackendError as e:
+            lines.append(f"/internal/diag FAILED {e.status}: {e.body[:200]}")
+        except Exception as e:
+            lines.append(f"/internal/diag EXC {e!r}")
+
+        text = "\n\n".join(lines)
+        if len(text) > 3800:
+            text = text[:3800] + "\n…(truncated)"
         await message.answer(f"<pre>{html.escape(text)}</pre>", parse_mode="HTML")
 
     @dp.message(Command("stop"))
