@@ -96,6 +96,53 @@ export function openTelegramLink(url: string) {
     } catch {
       /* ignore */
     }
+    // В Mini App WebView прямой assign на tg:// часто ничего не делает (особенно в iframe).
+    // Сначала бридж Telegram — клиент открывает tg:// внутри приложения.
+    if (typeof wa?.openLink === "function") {
+      try {
+        wa.openLink(resolved, { try_instant_view: false })
+        return
+      } catch {
+        /* try next */
+      }
+      try {
+        wa.openLink(resolved)
+        return
+      } catch {
+        /* try next */
+      }
+    }
+    if (typeof wa?.openTelegramLink === "function") {
+      try {
+        wa.openTelegramLink(resolved)
+        return
+      } catch {
+        /* try next */
+      }
+    }
+    try {
+      const a = document.createElement("a")
+      a.href = resolved
+      a.target = "_top"
+      a.rel = "noreferrer noopener"
+      a.style.position = "fixed"
+      a.style.left = "-9999px"
+      document.body.appendChild(a)
+      a.click()
+      document.body.removeChild(a)
+      return
+    } catch {
+      /* try next */
+    }
+    try {
+      const topWin = window.top
+      if (topWin && topWin !== window) {
+        topWin.location.href = resolved
+        return
+      }
+    } catch {
+      /* cross-origin top — ignore */
+    }
     try {
       window.location.assign(resolved)
     } catch {
