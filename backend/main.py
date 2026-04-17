@@ -108,12 +108,17 @@ def _analytics_scope() -> set[int] | None:
 
 PRODAMUS_SECRET_KEY = (os.getenv("PRODAMUS_SECRET_KEY") or "").strip()
 PRODAMUS_PAYMENT_URL = (os.getenv("PRODAMUS_PAYMENT_URL") or "https://admaster.payform.ru/").strip()
-# Второй поток оплаты (Prodamus / СБП). Пока выключен — не создаём чекаут; вебхук остаётся для уже начатых оплат.
-ENABLE_PRODAMUS_CHECKOUT = (os.getenv("ENABLE_PRODAMUS_CHECKOUT") or "").strip().lower() in (
-    "1",
-    "true",
-    "yes",
-)
+# Второй поток оплаты (Prodamus / СБП).
+# Включается автоматически, когда задан PRODAMUS_SECRET_KEY — иначе принудительно выключен,
+# чтобы /checkout/create-prodamus не создавал «битые» неподписанные инвойсы.
+# Явное значение ENABLE_PRODAMUS_CHECKOUT (1/true/yes или 0/false/no) имеет приоритет над авто-режимом.
+_enable_prodamus_raw = (os.getenv("ENABLE_PRODAMUS_CHECKOUT") or "").strip().lower()
+if _enable_prodamus_raw in ("1", "true", "yes"):
+    ENABLE_PRODAMUS_CHECKOUT = True
+elif _enable_prodamus_raw in ("0", "false", "no"):
+    ENABLE_PRODAMUS_CHECKOUT = False
+else:
+    ENABLE_PRODAMUS_CHECKOUT = bool(PRODAMUS_SECRET_KEY)
 # Короткая ссылка с do=link иногда приходит отдельным URL без контекста urlSuccess; по умолчанию отдаём полную ссылку.
 PRODAMUS_USE_SHORT_LINK = (os.getenv("PRODAMUS_USE_SHORT_LINK") or "false").strip().lower() in (
     "1",

@@ -8,8 +8,6 @@ const manrope = Manrope({ subsets: ["latin", "cyrillic"], weight: ["400", "500",
 
 const TELEGRAM_BOT = "https://t.me/frostytg_bot?start=site"
 const PRICE_RUB = 299
-// Prodamus (СБП) включается флагом. Когда выключен — кнопка оплаты всё равно работает через Lava (карты/СБП).
-const ENABLE_SBP = process.env.NEXT_PUBLIC_ENABLE_PRODAMUS_CHECKOUT === "true"
 
 type VpnPing = { online: boolean; latency_ms: number | null }
 
@@ -48,6 +46,7 @@ function PaymentCard({ ping }: { ping: VpnPing | null }) {
   const [email, setEmail] = useState("")
   const [touched, setTouched] = useState(false)
   const [paying, setPaying] = useState(false)
+  const [method, setMethod] = useState<"sbp" | "card">("sbp")
   const [error, setError] = useState<string | null>(null)
   const [detail, setDetail] = useState<string | null>(null)
 
@@ -65,7 +64,7 @@ function PaymentCard({ ping }: { ping: VpnPing | null }) {
       } catch {
         /* ignore */
       }
-      const endpoint = ENABLE_SBP ? "/api/checkout-sbp" : "/api/checkout"
+      const endpoint = method === "sbp" ? "/api/checkout-sbp" : "/api/checkout"
       const res = await fetch(endpoint, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -91,7 +90,7 @@ function PaymentCard({ ping }: { ping: VpnPing | null }) {
     } finally {
       setPaying(false)
     }
-  }, [email, valid])
+  }, [email, valid, method])
 
   return (
     <div
@@ -154,6 +153,80 @@ function PaymentCard({ ping }: { ping: VpnPing | null }) {
         </p>
       )}
 
+      <div className="mt-3 mb-1">
+        <span className="block text-xs font-medium mb-1.5" style={{ color: "#6B7280" }}>
+          Способ оплаты
+        </span>
+        <div className="grid grid-cols-2 gap-2">
+          <button
+            type="button"
+            onClick={() => setMethod("sbp")}
+            className="p-3 text-left transition-all active:scale-[0.98]"
+            style={{
+              background: method === "sbp" ? "#EFF6FF" : "#F7F8FA",
+              border: method === "sbp" ? "1.5px solid #2AABEE" : "1.5px solid transparent",
+              borderRadius: 14,
+            }}
+          >
+            <div className="flex items-center justify-between mb-1">
+              <span
+                className="text-xs font-bold"
+                style={{ color: method === "sbp" ? "#1D4ED8" : "#111827" }}
+              >
+                СБП / СберПей
+              </span>
+              <span
+                style={{
+                  width: 16,
+                  height: 16,
+                  borderRadius: "50%",
+                  border: method === "sbp" ? "5px solid #2AABEE" : "1.5px solid #D1D5DB",
+                  background: "#FFFFFF",
+                  boxSizing: "border-box",
+                  display: "inline-block",
+                }}
+              />
+            </div>
+            <p className="text-[11px] leading-snug" style={{ color: "#6B7280" }}>
+              QR или номер телефона · быстрее всего
+            </p>
+          </button>
+          <button
+            type="button"
+            onClick={() => setMethod("card")}
+            className="p-3 text-left transition-all active:scale-[0.98]"
+            style={{
+              background: method === "card" ? "#EFF6FF" : "#F7F8FA",
+              border: method === "card" ? "1.5px solid #2AABEE" : "1.5px solid transparent",
+              borderRadius: 14,
+            }}
+          >
+            <div className="flex items-center justify-between mb-1">
+              <span
+                className="text-xs font-bold"
+                style={{ color: method === "card" ? "#1D4ED8" : "#111827" }}
+              >
+                Банковская карта
+              </span>
+              <span
+                style={{
+                  width: 16,
+                  height: 16,
+                  borderRadius: "50%",
+                  border: method === "card" ? "5px solid #2AABEE" : "1.5px solid #D1D5DB",
+                  background: "#FFFFFF",
+                  boxSizing: "border-box",
+                  display: "inline-block",
+                }}
+              />
+            </div>
+            <p className="text-[11px] leading-snug" style={{ color: "#6B7280" }}>
+              Visa / Mastercard / МИР
+            </p>
+          </button>
+        </div>
+      </div>
+
       <button
         type="button"
         disabled={!valid || paying}
@@ -165,10 +238,14 @@ function PaymentCard({ ping }: { ping: VpnPing | null }) {
           height: 56,
           borderRadius: 14,
           fontSize: 16,
-          marginTop: 8,
+          marginTop: 12,
         }}
       >
-        {paying ? "Готовим оплату…" : `Оплатить ${PRICE_RUB} ₽`}
+        {paying
+          ? "Готовим оплату…"
+          : method === "sbp"
+            ? `Оплатить ${PRICE_RUB} ₽ через СБП`
+            : `Оплатить ${PRICE_RUB} ₽ картой`}
       </button>
 
       <div className="flex items-center justify-center gap-2 mt-3 text-[11px]" style={{ color: "#9CA3AF" }}>

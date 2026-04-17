@@ -7,9 +7,6 @@ import { getTelegramInitData, getTelegramInitDataAsync, getTelegramUser, openPay
 
 const manrope = Manrope({ subsets: ["latin", "cyrillic"], weight: ["400", "500", "600", "700"] })
 
-/** Второй поток оплаты (Prodamus / СБП). По умолчанию скрыт — см. NEXT_PUBLIC_ENABLE_PRODAMUS_CHECKOUT и backend ENABLE_PRODAMUS_CHECKOUT. */
-const ENABLE_PRODAMUS_SBP = process.env.NEXT_PUBLIC_ENABLE_PRODAMUS_CHECKOUT === "true"
-
 type SubscriptionData = {
   active: boolean
   expires_at?: string | null
@@ -286,6 +283,9 @@ export default function MiniAppPage() {
   const [emailTouched, setEmailTouched] = useState(false)
   const [paying, setPaying] = useState(false)
   const [payingSBP, setPayingSBP] = useState(false)
+  // Метод оплаты: sbp → Prodamus (СБП/СберПей), card → Lava.top (Visa/Mastercard).
+  // СБП выбран по умолчанию — он быстрее (QR в любом банке) и часто дешевле для юзера.
+  const [paymentMethod, setPaymentMethod] = useState<"sbp" | "card">("sbp")
   const [paymentUrl, setPaymentUrl] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [errorDetail, setErrorDetail] = useState<string | null>(null)
@@ -1132,9 +1132,79 @@ export default function MiniAppPage() {
             }
           </div>
 
+          {/* Payment method selector — SBP (Prodamus) / Card (Lava) */}
+          <label className="block text-xs font-medium mb-1.5" style={{ color: "#6B7280" }}>
+            Способ оплаты
+          </label>
+          <div className="grid grid-cols-2 gap-2 mb-4">
+            <button
+              type="button"
+              onClick={() => setPaymentMethod("sbp")}
+              className="p-3 text-left touch-manipulation transition-all active:scale-[0.98]"
+              style={{
+                background: paymentMethod === "sbp" ? "#EFF6FF" : "#F7F8FA",
+                border: paymentMethod === "sbp" ? "1.5px solid #2AABEE" : "1.5px solid transparent",
+                borderRadius: "14px",
+              }}
+            >
+              <div className="flex items-center justify-between mb-1">
+                <span className="text-xs font-bold" style={{ color: paymentMethod === "sbp" ? "#1D4ED8" : "#111827" }}>
+                  СБП / СберПей
+                </span>
+                <span
+                  className="flex items-center justify-center"
+                  style={{
+                    width: 16,
+                    height: 16,
+                    borderRadius: "50%",
+                    border: paymentMethod === "sbp" ? "5px solid #2AABEE" : "1.5px solid #D1D5DB",
+                    background: "#FFFFFF",
+                    boxSizing: "border-box",
+                  }}
+                />
+              </div>
+              <p className="text-[11px] leading-snug" style={{ color: "#6B7280" }}>
+                QR или номер телефона · быстрее всего
+              </p>
+            </button>
+            <button
+              type="button"
+              onClick={() => setPaymentMethod("card")}
+              className="p-3 text-left touch-manipulation transition-all active:scale-[0.98]"
+              style={{
+                background: paymentMethod === "card" ? "#EFF6FF" : "#F7F8FA",
+                border: paymentMethod === "card" ? "1.5px solid #2AABEE" : "1.5px solid transparent",
+                borderRadius: "14px",
+              }}
+            >
+              <div className="flex items-center justify-between mb-1">
+                <span className="text-xs font-bold" style={{ color: paymentMethod === "card" ? "#1D4ED8" : "#111827" }}>
+                  Банковская карта
+                </span>
+                <span
+                  className="flex items-center justify-center"
+                  style={{
+                    width: 16,
+                    height: 16,
+                    borderRadius: "50%",
+                    border: paymentMethod === "card" ? "5px solid #2AABEE" : "1.5px solid #D1D5DB",
+                    background: "#FFFFFF",
+                    boxSizing: "border-box",
+                  }}
+                />
+              </div>
+              <p className="text-[11px] leading-snug" style={{ color: "#6B7280" }}>
+                Visa / Mastercard / МИР
+              </p>
+            </button>
+          </div>
+
           {/* 6. CTA Button — на /mini уже уходят только Telegram-пользователи (веб редиректится на /) */}
           <button
-            onClick={() => void handlePay()}
+            onClick={() => {
+              if (paymentMethod === "sbp") void handlePaySBP()
+              else void handlePay()
+            }}
             disabled={!email || !isEmailValid || paying || payingSBP}
             className="w-full font-bold touch-manipulation active:scale-[0.98] transition-transform disabled:opacity-50 disabled:active:scale-100"
             style={{
@@ -1145,7 +1215,11 @@ export default function MiniAppPage() {
               fontSize: "17px",
             }}
           >
-            Получить Прокси + VPN за 299 ₽ →
+            {paying || payingSBP
+              ? "Готовим оплату…"
+              : paymentMethod === "sbp"
+                ? "Оплатить 299 ₽ через СБП →"
+                : "Оплатить 299 ₽ картой →"}
           </button>
 
           {error && (
