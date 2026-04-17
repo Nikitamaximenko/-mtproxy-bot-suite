@@ -61,6 +61,11 @@ type SubInfo = {
   created_at: string
   has_proxy: boolean
   access_suspended?: boolean
+  // Реальное состояние VPN в 3X-UI (главный показатель доступа). null = записи
+  // vpn_clients ещё нет (провижининг не сработал), true/false = клиент есть
+  // и активен/деактивирован.
+  vpn_active?: boolean | null
+  vpn_uuid?: string | null
 }
 
 type SelfTestUserState = {
@@ -70,6 +75,7 @@ type SelfTestUserState = {
   expires_at: string | null
   access_suspended: boolean | null
   has_proxy: boolean | null
+  vpn_active: boolean | null
 }
 
 type SelfTestUserResult = {
@@ -89,6 +95,7 @@ type SelfTestResponse = {
   passed: number
   failed: number
   mt_proxy_configured: boolean
+  xray_configured: boolean
   results: SelfTestUserResult[]
 }
 
@@ -1259,6 +1266,13 @@ export default function AdminPage() {
                   >
                     {selfTestResult.mt_proxy_configured ? "ok" : "не настроен"}
                   </span>
+                  {" · "}
+                  3X-UI:{" "}
+                  <span
+                    className={selfTestResult.xray_configured ? "text-emerald-400" : "text-red-400"}
+                  >
+                    {selfTestResult.xray_configured ? "ok" : "не настроен"}
+                  </span>
                 </span>
               )}
             </div>
@@ -1278,12 +1292,18 @@ export default function AdminPage() {
                   <tbody>
                     {selfTestResult.results.map((r) => {
                       const fmt = (s: SelfTestUserState): string => {
-                        if (!s.exists) return "—"
-                        const bits: string[] = [s.payment_status ?? "?"]
-                        if (s.access_suspended) bits.push("suspended")
-                        else bits.push("active")
-                        if (s.has_proxy) bits.push("+proxy")
-                        else bits.push("-proxy")
+                        if (!s.exists && s.vpn_active === null) return "—"
+                        const bits: string[] = []
+                        if (s.exists) {
+                          bits.push(s.payment_status ?? "?")
+                          bits.push(s.access_suspended ? "suspended" : "active")
+                          bits.push(s.has_proxy ? "+proxy" : "-proxy")
+                        } else {
+                          bits.push("no-sub")
+                        }
+                        if (s.vpn_active === true) bits.push("+vpn")
+                        else if (s.vpn_active === false) bits.push("vpn:off")
+                        else bits.push("no-vpn")
                         return bits.join(" · ")
                       }
                       return (
@@ -1432,12 +1452,14 @@ export default function AdminPage() {
                       <th className="px-4 py-3 font-medium">Истекает</th>
                       <th className="px-4 py-3 font-medium">Создана</th>
                       <th className="px-4 py-3 font-medium">Прокси</th>
+                      <th className="px-4 py-3 font-medium">VPN</th>
                       <th className="px-4 py-3 font-medium text-right">Доступ</th>
                     </tr>
                   </thead>
                   <tbody>
                     {subscribers.map((s) => {
                       const accessOn = isSubAccessActive(s)
+                      const vpn = s.vpn_active
                       return (
                         <tr
                           key={s.id}
@@ -1460,6 +1482,30 @@ export default function AdminPage() {
                               <span className="text-gray-600">—</span>
                             )}
                           </td>
+                          <td className="px-4 py-3">
+                            {vpn === true ? (
+                              <span
+                                className="text-emerald-400"
+                                title={s.vpn_uuid ? `UUID: ${s.vpn_uuid}` : "VLESS-клиент активен в 3X-UI"}
+                              >
+                                ✓ активен
+                              </span>
+                            ) : vpn === false ? (
+                              <span
+                                className="text-orange-400"
+                                title="Клиент есть в 3X-UI, но помечен inactive (toggle off или превышен трафик)"
+                              >
+                                ⏸ выкл
+                              </span>
+                            ) : (
+                              <span
+                                className="text-rose-400"
+                                title="В vpn_clients нет записи — оплата прошла, но provisioning не сработал. Щёлкни тумблер, чтобы пересоздать."
+                              >
+                                ✗ нет
+                              </span>
+                            )}
+                          </td>
                           <td className="px-4 py-3 text-right">
                             <AccessToggle
                               active={accessOn}
@@ -1474,7 +1520,7 @@ export default function AdminPage() {
                     })}
                     {subscribers.length === 0 && (
                       <tr>
-                        <td colSpan={8} className="px-4 py-8 text-center text-gray-500">
+                        <td colSpan={9} className="px-4 py-8 text-center text-gray-500">
                           Нет платных подписчиков
                         </td>
                       </tr>

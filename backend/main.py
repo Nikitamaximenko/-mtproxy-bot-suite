@@ -847,6 +847,45 @@ def _notify_admin_payment(tg_id: int) -> None:
     _send_tg(chat_id, f"💰 Оплата получена от пользователя <code>{tg_id}</code>")
 
 
+def _notify_admin_vpn_provisioning_failed(tg_id: int, reason: str) -> None:
+    """Оплата прошла, но создать VPN-клиента в 3X-UI не удалось — админ должен увидеть это сразу,
+    иначе пользователь платит, а VPN у него не работает, и никто об этом не знает."""
+    logger.error(
+        "VPN provisioning FAILED for paid tg_id=%s: %s — manual intervention required",
+        tg_id, reason,
+    )
+    if not ADMIN_NOTIFY_CHAT_ID or not BOT_TOKEN:
+        return
+    try:
+        chat_id = int(ADMIN_NOTIFY_CHAT_ID)
+    except ValueError:
+        return
+    _send_tg(
+        chat_id,
+        (
+            "⚠️ <b>Оплата прошла, но VPN не провижился</b>\n"
+            f"tg_id: <code>{tg_id}</code>\n"
+            f"Причина: <code>{reason[:300]}</code>\n\n"
+            "Открой админку → «Пользователи из БД» → жми тумблер доступа (он пересоздаст клиента в 3X-UI)."
+        ),
+    )
+
+
+def _provision_vpn_after_payment(tg_id: int, db: Session) -> None:
+    """Создать/восстановить VLESS-клиента после успешной оплаты. Если не получилось —
+    громко логируем и стреляем в админа в Telegram. Не кидаем исключение наверх,
+    чтобы провайдер платежей получил 200 OK и не ретраил webhook."""
+    if not XRAY_API_URL or int(tg_id) <= 0:
+        return
+    try:
+        result = _ensure_xray_client(int(tg_id), db)
+        if result is None:
+            _notify_admin_vpn_provisioning_failed(int(tg_id), "_ensure_xray_client returned None (3X-UI addClient failed)")
+    except Exception as e:
+        logger.exception("VPN provisioning crashed for tg_id=%s", tg_id)
+        _notify_admin_vpn_provisioning_failed(int(tg_id), f"{type(e).__name__}: {e}")
+
+
 def _notify_expiring(tg_id: int, expires_at: datetime) -> None:
     date_str = expires_at.strftime("%d.%m.%Y")
     buttons: list[list[dict[str, str]]] = [
@@ -1013,12 +1052,7 @@ async def lava_webhook(req: Request, db: Session = Depends(get_db)) -> OkRespons
     db.commit()
     logger.info("Subscription activated for tg_id=%s contract=%s", sub.telegram_id, contract_id)
 
-    # Auto-create VLESS client (best effort — don't fail the webhook on error)
-    if XRAY_API_URL and int(sub.telegram_id) > 0:
-        try:
-            _ensure_xray_client(int(sub.telegram_id), db)
-        except Exception:
-            logger.exception("Failed to auto-create VLESS client for tg_id=%s", sub.telegram_id)
+    _provision_vpn_after_payment(int(sub.telegram_id), db)
 
     proxy_link = f"tg://proxy?server={sub.proxy_server}&port={sub.proxy_port}&secret={sub.proxy_secret}"
     _notify_payment_success(sub.telegram_id, proxy_link)
@@ -1213,11 +1247,7 @@ async def prodamus_webhook(req: Request, db: Session = Depends(get_db)) -> Plain
     db.commit()
     logger.info("Prodamus subscription activated tg_id=%s token=%s", sub.telegram_id, sub.payment_token)
 
-    if XRAY_API_URL and int(sub.telegram_id) > 0:
-        try:
-            _ensure_xray_client(int(sub.telegram_id), db)
-        except Exception:
-            logger.exception("Failed to auto-create VLESS client for tg_id=%s (prodamus)", sub.telegram_id)
+    _provision_vpn_after_payment(int(sub.telegram_id), db)
 
     proxy_link = f"tg://proxy?server={sub.proxy_server}&port={sub.proxy_port}&secret={sub.proxy_secret}"
     _notify_payment_success(sub.telegram_id, proxy_link)
@@ -1547,11 +1577,7 @@ def claim_web_subscription(
 
         db.commit()
 
-        if XRAY_API_URL:
-            try:
-                _ensure_xray_client(new_tg_id, db)
-            except Exception:
-                logger.exception("claim_web_subscription: xray client creation failed for tg_id=%s", new_tg_id)
+        _provision_vpn_after_payment(new_tg_id, db)
 
         return ClaimWebSubscriptionResponse(ok=True, proxy_link=proxy_link)
 
@@ -2198,9 +2224,15 @@ def admin_broadcast_status(req: Request) -> BroadcastStatusResponse:
     return BroadcastStatusResponse(**s)
 
 
-@app.post("/admin/deactivate/{telegram_id}", response_model=OkResponse)
-def admin_deactivate(telegram_id: int, req: Request, db: Session = Depends(get_db)) -> OkResponse:
-    _require_admin(req)
+def _admin_deactivate_user(telegram_id: int, db: Session) -> int:
+    """Главный тумблер «Выкл», инлайн-реализация. Используется и HTTP-эндпойнтом,
+    и self-test'ом (чтобы тест проверял ровно ту же логику, что кликает админ).
+
+    Реально отрубает доступ:
+      1) access_suspended=True + обнуление прокси-кредов у всех paid-подписок,
+      2) _deactivate_vpn_client_no_commit → удаление клиента из 3X-UI и active=False.
+    Всё в одной транзакции. Возвращает количество обработанных paid-подписок.
+    """
     subs = db.execute(
         select(Subscription).where(
             Subscription.telegram_id == telegram_id,
@@ -2208,13 +2240,24 @@ def admin_deactivate(telegram_id: int, req: Request, db: Session = Depends(get_d
         )
     ).scalars().all()
     for sub in subs:
-        # Не трогаем expires_at и payment_status — только снимаем доступ (оплаченный период сохраняется).
         sub.access_suspended = True
         sub.proxy_server = None
         sub.proxy_port = None
         sub.proxy_secret = None
+
+    _deactivate_vpn_client_no_commit(int(telegram_id), db)
     db.commit()
-    logger.info("Admin suspended access for tg_id=%s (%d row(s))", telegram_id, len(subs))
+    return len(subs)
+
+
+@app.post("/admin/deactivate/{telegram_id}", response_model=OkResponse)
+def admin_deactivate(telegram_id: int, req: Request, db: Session = Depends(get_db)) -> OkResponse:
+    _require_admin(req)
+    n = _admin_deactivate_user(telegram_id, db)
+    logger.info(
+        "Admin suspended access for tg_id=%s (subscriptions=%d, vpn_client deactivated)",
+        telegram_id, n,
+    )
     return OkResponse(ok=True)
 
 
@@ -2252,10 +2295,16 @@ def admin_user_debug(telegram_id: int, req: Request, db: Session = Depends(get_d
 
 
 def _admin_activate_user(telegram_id: int, db: Session) -> None:
-    """
-    Восстановить доступ к прокси. Если подписка уже оплачена и срок ещё не вышел — только снимаем
-    access_suspended и выдаём прокси, без сдвига expires_at (даты привязаны к оплате).
-    Иначе — полная активация на 30 дней (тестовый грант / истёкший период).
+    """Главный тумблер «Вкл». Гарантирует что у пользователя есть:
+      * активная paid-подписка (restored или свежая на 30 дней),
+      * снятый access_suspended,
+      * прокси-креды в БД (ссылка будет отдаваться),
+      * активный клиент в 3X-UI (VLESS Reality реально работает).
+
+    Раньше VLESS создавался ТОЛЬКО в ветке full-activation — из-за этого у уже
+    платящих пользователей при toggle-on не перепровижинился клиент, если его
+    по какой-то причине не было в 3X-UI. Теперь _ensure_xray_client вызывается
+    в обеих ветках, так что админка реально синхронна с VPN-инфраструктурой.
     """
     now = utcnow()
 
@@ -2288,22 +2337,23 @@ def _admin_activate_user(telegram_id: int, db: Session) -> None:
             raise HTTPException(status_code=503, detail=str(e))
         sub.access_suspended = False
         db.commit()
-        logger.info("Admin restored proxy for paid tg_id=%s (expires_at unchanged)", telegram_id)
-        return
-
-    try:
-        activate_subscription(sub)
-    except RuntimeError as e:
-        raise HTTPException(status_code=503, detail=str(e))
-
-    db.commit()
-    logger.info("Admin granted full activation for tg_id=%s", telegram_id)
+        logger.info("Admin restored access for paid tg_id=%s (expires_at unchanged)", telegram_id)
+    else:
+        try:
+            activate_subscription(sub)
+        except RuntimeError as e:
+            raise HTTPException(status_code=503, detail=str(e))
+        db.commit()
+        logger.info("Admin granted full activation for tg_id=%s", telegram_id)
 
     if XRAY_API_URL and int(telegram_id) > 0:
         try:
             _ensure_xray_client(int(telegram_id), db)
         except Exception:
-            logger.exception("Failed to auto-create VLESS client for tg_id=%s (admin activate)", telegram_id)
+            logger.exception(
+                "Failed to auto-create/restore VLESS client for tg_id=%s (admin activate)",
+                telegram_id,
+            )
 
 
 @app.post("/admin/activate/{telegram_id}", response_model=OkResponse)
@@ -2329,6 +2379,10 @@ class SelfTestUserState(BaseModel):
     expires_at: datetime | None = None
     access_suspended: bool | None = None
     has_proxy: bool | None = None
+    # Реальное состояние VPN-клиента в 3X-UI (None = записи нет, True/False =
+    # есть и активен/деактивирован). ЭТО главное поле — подписка в БД paid,
+    # но если VPN-клиента нет или он inactive, реально VPN не работает.
+    vpn_active: bool | None = None
 
 
 class SelfTestUserResult(BaseModel):
@@ -2348,11 +2402,12 @@ class SelfTestResponse(BaseModel):
     passed: int
     failed: int
     mt_proxy_configured: bool
+    xray_configured: bool
     results: list[SelfTestUserResult]
 
 
 def _snapshot_latest_sub(telegram_id: int, db: Session) -> SelfTestUserState:
-    """Снапшот последней подписки пользователя (по created_at desc)."""
+    """Снапшот последней подписки + реального состояния VPN-клиента в 3X-UI."""
     sub = (
         db.execute(
             select(Subscription)
@@ -2363,8 +2418,13 @@ def _snapshot_latest_sub(telegram_id: int, db: Session) -> SelfTestUserState:
         .scalars()
         .first()
     )
+    vpn_client = db.execute(
+        select(VpnClient).where(VpnClient.telegram_id == int(telegram_id))
+    ).scalar_one_or_none()
+    vpn_active: bool | None = bool(vpn_client.active) if vpn_client is not None else None
+
     if sub is None:
-        return SelfTestUserState(exists=False)
+        return SelfTestUserState(exists=False, vpn_active=vpn_active)
     return SelfTestUserState(
         exists=True,
         sub_id=sub.id,
@@ -2372,6 +2432,7 @@ def _snapshot_latest_sub(telegram_id: int, db: Session) -> SelfTestUserState:
         expires_at=sub.expires_at,
         access_suspended=bool(sub.access_suspended),
         has_proxy=bool(sub.proxy_server and sub.proxy_port and sub.proxy_secret),
+        vpn_active=vpn_active,
     )
 
 
@@ -2405,33 +2466,26 @@ def admin_self_test_toggle(
         activate_ok = False
 
         try:
-            # Шаг 1: deactivate. Снимает access_suspended=True и нули прокси
-            # для всех paid-подписок юзера. Для пользователя без paid — no-op.
-            subs = db.execute(
-                select(Subscription).where(
-                    Subscription.telegram_id == tg_id,
-                    Subscription.payment_status == "paid",
-                )
-            ).scalars().all()
-            for s in subs:
-                s.access_suspended = True
-                s.proxy_server = None
-                s.proxy_port = None
-                s.proxy_secret = None
-            db.commit()
+            # Шаг 1: deactivate через ту же функцию, что вызывает HTTP-эндпойнт.
+            # Так тест реально проверяет что клик «Выкл» делает в проде:
+            # снимает подписку и удаляет клиента из 3X-UI.
+            _admin_deactivate_user(tg_id, db)
             after_deact = _snapshot_latest_sub(tg_id, db)
 
-            # deactivate считается ок если:
-            #  — до этого у юзера не было paid (нечего деактивировать, фолс-пас)
-            #  — или сейчас у последней подписки suspended=True и no proxy
+            # deactivate ок если:
+            #  — до этого у юзера не было paid (нечего деактивировать),
+            #  — или сейчас подписка suspended=True, no proxy,
+            #    И VPN-клиент либо отсутствует, либо помечен inactive.
             if not before.exists or before.payment_status != "paid":
                 deactivate_ok = True
             else:
-                deactivate_ok = (
+                sub_ok = (
                     after_deact.exists is True
                     and after_deact.access_suspended is True
                     and after_deact.has_proxy is False
                 )
+                vpn_ok = after_deact.vpn_active is not True  # None или False — оба ок
+                deactivate_ok = sub_ok and vpn_ok
         except Exception as exc:
             err = f"deactivate: {exc!r}"
             logger.exception("self-test: deactivate failed tg_id=%s", tg_id)
@@ -2439,12 +2493,10 @@ def admin_self_test_toggle(
 
         if err is None:
             try:
-                # Шаг 2: activate. Для paid-подписок с не истёкшим сроком —
-                # возврат доступа без сдвига expires_at. Иначе — 30 дней.
                 _admin_activate_user(tg_id, db)
                 after_act = _snapshot_latest_sub(tg_id, db)
                 now = utcnow()
-                activate_ok = (
+                sub_ok = (
                     after_act.exists is True
                     and after_act.payment_status == "paid"
                     and after_act.access_suspended is False
@@ -2452,11 +2504,19 @@ def admin_self_test_toggle(
                     and after_act.expires_at is not None
                     and after_act.expires_at > now
                 )
+                # VPN обязан быть активен, если сконфигурирован 3X-UI. Если xray
+                # не настроен в окружении вообще (dev), None допустим.
+                if XRAY_API_URL:
+                    vpn_ok = after_act.vpn_active is True
+                else:
+                    vpn_ok = True
+                activate_ok = sub_ok and vpn_ok
                 if not activate_ok:
                     err = (
                         "activate: state mismatch "
                         f"(status={after_act.payment_status}, suspended={after_act.access_suspended}, "
-                        f"has_proxy={after_act.has_proxy}, expires_at={after_act.expires_at})"
+                        f"has_proxy={after_act.has_proxy}, vpn_active={after_act.vpn_active}, "
+                        f"expires_at={after_act.expires_at})"
                     )
             except HTTPException as exc:
                 err = f"activate: HTTP {exc.status_code}: {exc.detail}"
@@ -2487,6 +2547,7 @@ def admin_self_test_toggle(
         passed=passed,
         failed=len(results) - passed,
         mt_proxy_configured=mt_ok,
+        xray_configured=bool(XRAY_API_URL),
         results=results,
     )
 
@@ -3055,11 +3116,43 @@ class SubInfo(BaseModel):
     created_at: datetime
     has_proxy: bool
     access_suspended: bool = False
+    # Реальное состояние VPN-клиента в 3X-UI (VLESS Reality) — главный показатель
+    # доступа. None = записи vpn_clients вообще нет (provisioning не сработал
+    # или юзер ни разу не клеймил VPN); False = есть, но помечен inactive (толкали
+    # «выкл» или превышен лимит трафика); True = клиент живой и активный.
+    vpn_active: bool | None = None
+    vpn_uuid: str | None = None
 
 
 class AdminSubsResponse(BaseModel):
     subscriptions: list[SubInfo]
     total: int
+
+
+def _vpn_state_map(telegram_ids: list[int], db: Session) -> dict[int, VpnClient]:
+    """Return {telegram_id: VpnClient} for the given tg_ids (only rows that exist)."""
+    if not telegram_ids:
+        return {}
+    clients = db.execute(
+        select(VpnClient).where(VpnClient.telegram_id.in_(telegram_ids))
+    ).scalars().all()
+    return {int(c.telegram_id): c for c in clients}
+
+
+def _sub_info(s: Subscription, username: str | None, vpn_map: dict[int, VpnClient]) -> SubInfo:
+    vc = vpn_map.get(int(s.telegram_id))
+    return SubInfo(
+        id=s.id,
+        telegram_id=s.telegram_id,
+        username=username,
+        payment_status=s.payment_status,
+        expires_at=s.expires_at,
+        created_at=s.created_at,
+        has_proxy=bool(s.proxy_server and s.proxy_port and s.proxy_secret),
+        access_suspended=bool(s.access_suspended),
+        vpn_active=bool(vc.active) if vc is not None else None,
+        vpn_uuid=vc.uuid if vc is not None else None,
+    )
 
 
 @app.get("/admin/subscriptions", response_model=AdminSubsResponse)
@@ -3076,20 +3169,9 @@ def admin_subscriptions(
     subs = db.execute(
         select(Subscription).order_by(Subscription.created_at.desc()).limit(limit).offset(offset)
     ).scalars().all()
+    vpn_map = _vpn_state_map([int(s.telegram_id) for s in subs], db)
 
-    items = [
-        SubInfo(
-            id=s.id,
-            telegram_id=s.telegram_id,
-            username=None,
-            payment_status=s.payment_status,
-            expires_at=s.expires_at,
-            created_at=s.created_at,
-            has_proxy=bool(s.proxy_server and s.proxy_port and s.proxy_secret),
-            access_suspended=bool(s.access_suspended),
-        )
-        for s in subs
-    ]
+    items = [_sub_info(s, None, vpn_map) for s in subs]
     return AdminSubsResponse(subscriptions=items, total=total)
 
 
@@ -3123,20 +3205,9 @@ def admin_users(req: Request, db: Session = Depends(get_db)) -> AdminSubsRespons
         .order_by(Subscription.created_at.desc())
         .limit(5000)
     ).all()
+    vpn_map = _vpn_state_map([int(s.telegram_id) for s, _ in rows], db)
 
-    items = [
-        SubInfo(
-            id=s.id,
-            telegram_id=s.telegram_id,
-            username=uname,
-            payment_status=s.payment_status,
-            expires_at=s.expires_at,
-            created_at=s.created_at,
-            has_proxy=bool(s.proxy_server and s.proxy_port and s.proxy_secret),
-            access_suspended=bool(s.access_suspended),
-        )
-        for s, uname in rows
-    ]
+    items = [_sub_info(s, uname, vpn_map) for s, uname in rows]
     return AdminSubsResponse(subscriptions=items, total=len(items))
 
 
@@ -3215,20 +3286,9 @@ def admin_users_overview(
         .order_by(Subscription.created_at.desc())
         .limit(limit)
     ).all()
+    vpn_map = _vpn_state_map([int(s.telegram_id) for s, _ in sub_rows], db)
 
-    subscribers = [
-        SubInfo(
-            id=s.id,
-            telegram_id=s.telegram_id,
-            username=uname,
-            payment_status=s.payment_status,
-            expires_at=s.expires_at,
-            created_at=s.created_at,
-            has_proxy=bool(s.proxy_server and s.proxy_port and s.proxy_secret),
-            access_suspended=bool(s.access_suspended),
-        )
-        for s, uname in sub_rows
-    ]
+    subscribers = [_sub_info(s, uname, vpn_map) for s, uname in sub_rows]
 
     subscribers_total = db.execute(select(func.count()).select_from(paid_ids_subq)).scalar() or 0
 
