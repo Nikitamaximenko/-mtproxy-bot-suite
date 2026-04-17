@@ -1007,32 +1007,6 @@ export default function MiniAppPage() {
             </div>
           )}
 
-          {/* Free proxy section */}
-          {freeProxy && (
-            <div className="mt-5 p-4" style={{ background: "#F7F8FA", borderRadius: "16px", border: "1px solid #E5E7EB" }}>
-              <div className="flex items-center justify-between mb-2">
-                <p className="text-xs font-semibold" style={{ color: "#374151" }}>📡 Бесплатный MTProxy для Telegram</p>
-                <button
-                  onClick={handleCopyFreeProxy}
-                  className="flex items-center gap-1 text-xs touch-manipulation"
-                  style={{ color: freeProxyCopied ? "#16A34A" : "#6B7280" }}
-                >
-                  {freeProxyCopied ? <><Check className="w-3 h-3" />Скопировано</> : <><Copy className="w-3 h-3" />Копировать</>}
-                </button>
-              </div>
-              <button
-                onClick={() => openTelegramLink(freeProxy.proxy_link)}
-                className="w-full flex items-center justify-center gap-2 text-sm font-semibold touch-manipulation active:scale-95 transition-all"
-                style={{ background: "#FFFFFF", color: "#374151", height: "44px", borderRadius: "12px", border: "1px solid #E5E7EB" }}
-              >
-                Подключить прокси бесплатно
-              </button>
-              <p className="text-xs mt-2 text-center" style={{ color: "#9CA3AF" }}>
-                Только Telegram · без VPN · без регистрации
-              </p>
-            </div>
-          )}
-
           {/* Payment note */}
           <p className="text-center text-xs mt-3" style={{ color: "#6B7280" }}>
             Оплата картой или СБП · Прокси включается сразу · VPN — после установки приложения
