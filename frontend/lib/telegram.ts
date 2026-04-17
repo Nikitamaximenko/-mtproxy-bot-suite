@@ -29,6 +29,11 @@ export function getTelegramUser(): TelegramWebAppUser | null {
   return null
 }
 
+/** Non-http(s) links: Telegram WebApp.openLink often no-ops here; use direct navigation. */
+function isCustomAppDeepLink(url: string): boolean {
+  return /^(happ|vless|vmess|trojan|ss|socks|hy2):\/\//i.test(url.trim())
+}
+
 export function openTelegramLink(url: string) {
   if (typeof window === "undefined") return
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -40,6 +45,25 @@ export function openTelegramLink(url: string) {
   if (resolved.startsWith("tg://")) {
     const stripped = resolved.slice("tg://".length)
     resolved = `https://t.me/${stripped}`
+  }
+
+  // Happ / VLESS и др.: openLink не открывает кастомные схемы в WebView — только прямой assign
+  if (isCustomAppDeepLink(resolved)) {
+    try {
+      wa?.ready?.()
+    } catch {
+      /* ignore */
+    }
+    try {
+      window.location.assign(resolved)
+    } catch {
+      try {
+        window.location.href = resolved
+      } catch {
+        /* ignore */
+      }
+    }
+    return
   }
 
   const isTgLink = resolved.startsWith("https://t.me/")
