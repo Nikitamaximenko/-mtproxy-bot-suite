@@ -2295,6 +2295,184 @@ def admin_activate(telegram_id: int, req: Request, db: Session = Depends(get_db)
     return OkResponse(ok=True)
 
 
+# ── Self-test: прогнать deactivate→activate по списку пользователей ──────────
+# Нужен, чтобы одним кликом подтвердить что тумблер в админке действительно
+# корректно снимает и выдаёт доступ для реальных платящих пользователей, и
+# заодно привести их к целевому состоянию (paid + not suspended + proxy выдан).
+
+class SelfTestInput(BaseModel):
+    telegram_ids: list[int] = Field(..., min_length=1, max_length=50)
+
+
+class SelfTestUserState(BaseModel):
+    exists: bool
+    sub_id: int | None = None
+    payment_status: str | None = None
+    expires_at: datetime | None = None
+    access_suspended: bool | None = None
+    has_proxy: bool | None = None
+
+
+class SelfTestUserResult(BaseModel):
+    telegram_id: int
+    username: str | None = None
+    before: SelfTestUserState
+    after_deactivate: SelfTestUserState
+    after_activate: SelfTestUserState
+    deactivate_ok: bool
+    activate_ok: bool
+    ok: bool
+    error: str | None = None
+
+
+class SelfTestResponse(BaseModel):
+    total: int
+    passed: int
+    failed: int
+    mt_proxy_configured: bool
+    results: list[SelfTestUserResult]
+
+
+def _snapshot_latest_sub(telegram_id: int, db: Session) -> SelfTestUserState:
+    """Снапшот последней подписки пользователя (по created_at desc)."""
+    sub = (
+        db.execute(
+            select(Subscription)
+            .where(Subscription.telegram_id == int(telegram_id))
+            .order_by(Subscription.created_at.desc())
+            .limit(1)
+        )
+        .scalars()
+        .first()
+    )
+    if sub is None:
+        return SelfTestUserState(exists=False)
+    return SelfTestUserState(
+        exists=True,
+        sub_id=sub.id,
+        payment_status=sub.payment_status,
+        expires_at=sub.expires_at,
+        access_suspended=bool(sub.access_suspended),
+        has_proxy=bool(sub.proxy_server and sub.proxy_port and sub.proxy_secret),
+    )
+
+
+def _get_username(telegram_id: int, db: Session) -> str | None:
+    user = db.execute(
+        select(User).where(User.telegram_id == int(telegram_id))
+    ).scalar_one_or_none()
+    return user.username if user else None
+
+
+@app.post("/admin/self-test-toggle", response_model=SelfTestResponse)
+def admin_self_test_toggle(
+    body: SelfTestInput, req: Request, db: Session = Depends(get_db)
+) -> SelfTestResponse:
+    """
+    Для каждого telegram_id: снимок состояния → deactivate → снимок →
+    activate → снимок. Возвращает отчёт. Конечное состояние — активный
+    платящий с выданным прокси (если admin_activate отработал чисто).
+    """
+    _require_admin(req)
+    mt_ok = bool(MT_PROXY_SERVER and MT_PROXY_SECRET)
+    results: list[SelfTestUserResult] = []
+
+    for tg_id in body.telegram_ids:
+        username = _get_username(tg_id, db)
+        before = _snapshot_latest_sub(tg_id, db)
+        err: str | None = None
+        after_deact = SelfTestUserState(exists=before.exists)
+        after_act = SelfTestUserState(exists=before.exists)
+        deactivate_ok = False
+        activate_ok = False
+
+        try:
+            # Шаг 1: deactivate. Снимает access_suspended=True и нули прокси
+            # для всех paid-подписок юзера. Для пользователя без paid — no-op.
+            subs = db.execute(
+                select(Subscription).where(
+                    Subscription.telegram_id == tg_id,
+                    Subscription.payment_status == "paid",
+                )
+            ).scalars().all()
+            for s in subs:
+                s.access_suspended = True
+                s.proxy_server = None
+                s.proxy_port = None
+                s.proxy_secret = None
+            db.commit()
+            after_deact = _snapshot_latest_sub(tg_id, db)
+
+            # deactivate считается ок если:
+            #  — до этого у юзера не было paid (нечего деактивировать, фолс-пас)
+            #  — или сейчас у последней подписки suspended=True и no proxy
+            if not before.exists or before.payment_status != "paid":
+                deactivate_ok = True
+            else:
+                deactivate_ok = (
+                    after_deact.exists is True
+                    and after_deact.access_suspended is True
+                    and after_deact.has_proxy is False
+                )
+        except Exception as exc:
+            err = f"deactivate: {exc!r}"
+            logger.exception("self-test: deactivate failed tg_id=%s", tg_id)
+            db.rollback()
+
+        if err is None:
+            try:
+                # Шаг 2: activate. Для paid-подписок с не истёкшим сроком —
+                # возврат доступа без сдвига expires_at. Иначе — 30 дней.
+                _admin_activate_user(tg_id, db)
+                after_act = _snapshot_latest_sub(tg_id, db)
+                now = utcnow()
+                activate_ok = (
+                    after_act.exists is True
+                    and after_act.payment_status == "paid"
+                    and after_act.access_suspended is False
+                    and after_act.has_proxy is True
+                    and after_act.expires_at is not None
+                    and after_act.expires_at > now
+                )
+                if not activate_ok:
+                    err = (
+                        "activate: state mismatch "
+                        f"(status={after_act.payment_status}, suspended={after_act.access_suspended}, "
+                        f"has_proxy={after_act.has_proxy}, expires_at={after_act.expires_at})"
+                    )
+            except HTTPException as exc:
+                err = f"activate: HTTP {exc.status_code}: {exc.detail}"
+                logger.warning("self-test: activate HTTP tg_id=%s err=%s", tg_id, err)
+                db.rollback()
+            except Exception as exc:
+                err = f"activate: {exc!r}"
+                logger.exception("self-test: activate failed tg_id=%s", tg_id)
+                db.rollback()
+
+        results.append(
+            SelfTestUserResult(
+                telegram_id=tg_id,
+                username=username,
+                before=before,
+                after_deactivate=after_deact,
+                after_activate=after_act,
+                deactivate_ok=deactivate_ok,
+                activate_ok=activate_ok,
+                ok=(deactivate_ok and activate_ok and err is None),
+                error=err,
+            )
+        )
+
+    passed = sum(1 for r in results if r.ok)
+    return SelfTestResponse(
+        total=len(results),
+        passed=passed,
+        failed=len(results) - passed,
+        mt_proxy_configured=mt_ok,
+        results=results,
+    )
+
+
 class InternalSupportActivateBody(BaseModel):
     reason: str | None = Field(None, max_length=500)
 

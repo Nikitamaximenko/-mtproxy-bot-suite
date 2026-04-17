@@ -63,6 +63,35 @@ type SubInfo = {
   access_suspended?: boolean
 }
 
+type SelfTestUserState = {
+  exists: boolean
+  sub_id: number | null
+  payment_status: string | null
+  expires_at: string | null
+  access_suspended: boolean | null
+  has_proxy: boolean | null
+}
+
+type SelfTestUserResult = {
+  telegram_id: number
+  username: string | null
+  before: SelfTestUserState
+  after_deactivate: SelfTestUserState
+  after_activate: SelfTestUserState
+  deactivate_ok: boolean
+  activate_ok: boolean
+  ok: boolean
+  error: string | null
+}
+
+type SelfTestResponse = {
+  total: number
+  passed: number
+  failed: number
+  mt_proxy_configured: boolean
+  results: SelfTestUserResult[]
+}
+
 type RegistryUser = {
   id: number
   telegram_id: number
@@ -261,6 +290,8 @@ export default function AdminPage() {
   const [cleanupBusy, setCleanupBusy] = useState(false)
   const [cleanupResult, setCleanupResult] = useState<{ deleted_users: number; deleted_pending_subscriptions: number; kept_paid_subscriptions: number } | null>(null)
   const [purgeBusy, setPurgeBusy] = useState(false)
+  const [selfTestBusy, setSelfTestBusy] = useState(false)
+  const [selfTestResult, setSelfTestResult] = useState<SelfTestResponse | null>(null)
   const [purgeResult, setPurgeResult] = useState<{
     deleted_users: number
     deleted_subscriptions: number
@@ -561,6 +592,38 @@ export default function AdminPage() {
       setError(e instanceof Error ? e.message : "Не удалось выполнить очистку")
     } finally {
       setPurgeBusy(false)
+    }
+  }, [fetchAll, headers])
+
+  const runSelfTest = useCallback(async () => {
+    setSelfTestBusy(true)
+    setSelfTestResult(null)
+    setError("")
+    try {
+      const res = await fetch("/api/admin/self-test-toggle", {
+        method: "POST",
+        headers: { ...headers(), "Content-Type": "application/json" },
+        body: JSON.stringify({ telegram_ids: [...PRODUCTION_TELEGRAM_IDS] }),
+        cache: "no-store",
+      })
+      const data = (await res.json().catch(() => ({}))) as Partial<SelfTestResponse> & {
+        detail?: string
+      }
+      if (!res.ok) {
+        let msg = typeof data.detail === "string" ? data.detail : `Ошибка ${res.status}`
+        if (res.status === 503) {
+          msg = `${msg} · Проверь MT_PROXY_SERVER/PORT/SECRET на бекенде.`
+        } else if (res.status === 403) {
+          msg = `${msg} · Неверный админ-ключ.`
+        }
+        throw new Error(msg)
+      }
+      setSelfTestResult(data as SelfTestResponse)
+      await fetchAll()
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Не удалось запустить самотест")
+    } finally {
+      setSelfTestBusy(false)
     }
   }, [fetchAll, headers])
 
@@ -1156,6 +1219,123 @@ export default function AdminPage() {
                 </div>
               )}
             </div>
+          </div>
+        </section>
+
+        <section>
+          <h2 className="text-lg font-semibold mb-1 text-gray-300">Самотест тумблера доступа</h2>
+          <p className="text-xs text-gray-500 mb-4">
+            Для каждого из {PRODUCTION_TELEGRAM_IDS.length} prod-юзеров прогоняется:{" "}
+            <strong>снимок → выкл → снимок → вкл → снимок</strong>. В конце все они гарантированно в состоянии{" "}
+            <strong>paid + доступ вкл + прокси выдан</strong> (если MT_PROXY_* настроены). Пользователи, которых
+            ещё нет в БД, будут созданы и активированы на 30 дней.
+          </p>
+          <div className="bg-gray-900 border border-gray-800 rounded-2xl p-6 space-y-4">
+            <div className="flex items-center gap-4 flex-wrap">
+              <button
+                type="button"
+                onClick={() => void runSelfTest()}
+                disabled={selfTestBusy}
+                className="px-5 py-2.5 text-sm font-semibold rounded-xl bg-emerald-700 text-white hover:bg-emerald-600 disabled:opacity-50 transition-colors"
+              >
+                {selfTestBusy
+                  ? "Выполняется…"
+                  : `Запустить самотест (${PRODUCTION_TELEGRAM_IDS.length} prod)`}
+              </button>
+              {selfTestResult && (
+                <span className="text-sm text-gray-400">
+                  Результат:{" "}
+                  <span className="text-emerald-400 font-semibold">{selfTestResult.passed} ok</span>
+                  {selfTestResult.failed > 0 && (
+                    <>
+                      {" · "}
+                      <span className="text-red-400 font-semibold">{selfTestResult.failed} fail</span>
+                    </>
+                  )}
+                  {" · "}
+                  MT_PROXY env:{" "}
+                  <span
+                    className={selfTestResult.mt_proxy_configured ? "text-emerald-400" : "text-red-400"}
+                  >
+                    {selfTestResult.mt_proxy_configured ? "ok" : "не настроен"}
+                  </span>
+                </span>
+              )}
+            </div>
+
+            {selfTestResult && selfTestResult.results.length > 0 && (
+              <div className="overflow-x-auto">
+                <table className="w-full text-xs">
+                  <thead>
+                    <tr className="border-b border-gray-800 text-gray-400 text-left">
+                      <th className="px-2 py-2 font-medium">Юзер</th>
+                      <th className="px-2 py-2 font-medium">Было</th>
+                      <th className="px-2 py-2 font-medium">После «выкл»</th>
+                      <th className="px-2 py-2 font-medium">После «вкл»</th>
+                      <th className="px-2 py-2 font-medium text-right">Итог</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {selfTestResult.results.map((r) => {
+                      const fmt = (s: SelfTestUserState): string => {
+                        if (!s.exists) return "—"
+                        const bits: string[] = [s.payment_status ?? "?"]
+                        if (s.access_suspended) bits.push("suspended")
+                        else bits.push("active")
+                        if (s.has_proxy) bits.push("+proxy")
+                        else bits.push("-proxy")
+                        return bits.join(" · ")
+                      }
+                      return (
+                        <tr
+                          key={r.telegram_id}
+                          className="border-b border-gray-800/50 align-top"
+                        >
+                          <td className="px-2 py-2">
+                            <div className="font-mono text-gray-300">{r.telegram_id}</div>
+                            <div className="text-gray-500">
+                              {r.username ? `@${r.username}` : "—"}
+                            </div>
+                          </td>
+                          <td className="px-2 py-2 font-mono text-gray-400">{fmt(r.before)}</td>
+                          <td className="px-2 py-2 font-mono">
+                            <span className={r.deactivate_ok ? "text-gray-300" : "text-red-400"}>
+                              {fmt(r.after_deactivate)}
+                            </span>
+                          </td>
+                          <td className="px-2 py-2 font-mono">
+                            <span className={r.activate_ok ? "text-emerald-300" : "text-red-400"}>
+                              {fmt(r.after_activate)}
+                            </span>
+                          </td>
+                          <td className="px-2 py-2 text-right">
+                            {r.ok ? (
+                              <span className="text-emerald-400 font-semibold">OK</span>
+                            ) : (
+                              <span className="text-red-400 font-semibold" title={r.error ?? ""}>
+                                FAIL
+                              </span>
+                            )}
+                          </td>
+                        </tr>
+                      )
+                    })}
+                  </tbody>
+                </table>
+                {selfTestResult.results.some((r) => !r.ok) && (
+                  <div className="mt-3 space-y-1">
+                    {selfTestResult.results
+                      .filter((r) => !r.ok)
+                      .map((r) => (
+                        <div key={r.telegram_id} className="text-xs text-red-300">
+                          <span className="font-mono">{r.telegram_id}</span>{" "}
+                          {r.username ? `(@${r.username})` : ""}: {r.error ?? "unknown error"}
+                        </div>
+                      ))}
+                  </div>
+                )}
+              </div>
+            )}
           </div>
         </section>
 
