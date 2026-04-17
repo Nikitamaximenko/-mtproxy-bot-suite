@@ -2219,14 +2219,12 @@ def admin_user_debug(telegram_id: int, req: Request, db: Session = Depends(get_d
     )
 
 
-@app.post("/admin/activate/{telegram_id}", response_model=OkResponse)
-def admin_activate(telegram_id: int, req: Request, db: Session = Depends(get_db)) -> OkResponse:
+def _admin_activate_user(telegram_id: int, db: Session) -> None:
     """
     Восстановить доступ к прокси. Если подписка уже оплачена и срок ещё не вышел — только снимаем
     access_suspended и выдаём прокси, без сдвига expires_at (даты привязаны к оплате).
     Иначе — полная активация на 30 дней (тестовый грант / истёкший период).
     """
-    _require_admin(req)
     now = utcnow()
 
     sub = (
@@ -2259,7 +2257,7 @@ def admin_activate(telegram_id: int, req: Request, db: Session = Depends(get_db)
         sub.access_suspended = False
         db.commit()
         logger.info("Admin restored proxy for paid tg_id=%s (expires_at unchanged)", telegram_id)
-        return OkResponse(ok=True)
+        return
 
     try:
         activate_subscription(sub)
@@ -2275,6 +2273,35 @@ def admin_activate(telegram_id: int, req: Request, db: Session = Depends(get_db)
         except Exception:
             logger.exception("Failed to auto-create VLESS client for tg_id=%s (admin activate)", telegram_id)
 
+
+@app.post("/admin/activate/{telegram_id}", response_model=OkResponse)
+def admin_activate(telegram_id: int, req: Request, db: Session = Depends(get_db)) -> OkResponse:
+    _require_admin(req)
+    _admin_activate_user(telegram_id, db)
+    return OkResponse(ok=True)
+
+
+class InternalSupportActivateBody(BaseModel):
+    reason: str | None = Field(None, max_length=500)
+
+
+@app.post("/internal/support/activate/{telegram_id}", response_model=OkResponse)
+def internal_support_activate(
+    telegram_id: int,
+    req: Request,
+    db: Session = Depends(get_db),
+    body: InternalSupportActivateBody | None = None,
+) -> OkResponse:
+    """
+    Тот же сценарий, что /admin/activate, но по X-Internal-Token (бот / ИИ-поддержка).
+    """
+    _require_internal_token(req)
+    _admin_activate_user(telegram_id, db)
+    logger.info(
+        "Internal support activate tg_id=%s reason=%s",
+        telegram_id,
+        (body.reason if body else None),
+    )
     return OkResponse(ok=True)
 
 

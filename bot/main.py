@@ -8,9 +8,10 @@ from typing import Any
 from uuid import UUID
 
 import aiohttp
-from aiogram import Bot, Dispatcher
-from aiogram.filters import Command, CommandStart
+from aiogram import Bot, Dispatcher, F
+from aiogram.filters import BaseFilter, Command, CommandStart, StateFilter
 from aiogram.fsm.context import FSMContext
+from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.types import (
     CallbackQuery,
@@ -29,10 +30,30 @@ BOT_TOKEN = os.getenv("BOT_TOKEN", "").strip()
 BACKEND_BASE_URL = (os.getenv("BACKEND_BASE_URL") or "http://localhost:8000").rstrip("/")
 FRONTEND_URL = (os.getenv("FRONTEND_URL") or "http://localhost:3000").strip()
 SUPPORT_USERNAME = os.getenv("SUPPORT_USERNAME", "").lstrip("@").strip()
+SUPPORT_AI_ENABLED = os.getenv("SUPPORT_AI_ENABLED", "").strip().lower() in ("1", "true", "yes")
+INTERNAL_API_TOKEN = os.getenv("INTERNAL_API_TOKEN", "").strip()
 PRICE_RUB = int(os.getenv("PRICE_RUB", "299") or "299")
 MINIAPP_PATH = (os.getenv("MINIAPP_PATH") or "/mini").strip() or "/mini"
 
 _log = logging.getLogger(__name__)
+
+
+class SupportStates(StatesGroup):
+    chatting = State()
+
+
+class _TextNotCommand(BaseFilter):
+    """Текст не является командой (/...) — чтобы в чате поддержки работали /status и др."""
+
+    async def __call__(self, message: Message) -> bool:
+        t = message.text
+        if not t:
+            return False
+        return not t.startswith("/")
+
+
+def _internal_headers() -> dict[str, str]:
+    return {"X-Internal-Token": INTERNAL_API_TOKEN} if INTERNAL_API_TOKEN else {}
 
 
 def _miniapp_url(tg_id: int) -> str:
@@ -47,7 +68,9 @@ def _miniapp_url(tg_id: int) -> str:
 
 def main_menu_kb(tg_id: int) -> InlineKeyboardMarkup:
     row3 = [InlineKeyboardButton(text="✅ Статус", callback_data="menu:status")]
-    if SUPPORT_USERNAME:
+    if SUPPORT_AI_ENABLED:
+        row3.append(InlineKeyboardButton(text="🆘 Поддержка", callback_data="menu:support"))
+    elif SUPPORT_USERNAME:
         row3.append(InlineKeyboardButton(text="🆘 Поддержка", url=f"https://t.me/{SUPPORT_USERNAME}"))
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="🚀 Прокси + VPN за 299 ₽", web_app=WebAppInfo(url=_miniapp_url(tg_id)))],
@@ -67,11 +90,23 @@ def proxy_kb(proxy_link: str) -> InlineKeyboardMarkup:
 
 
 def support_kb() -> InlineKeyboardMarkup | None:
-    if not SUPPORT_USERNAME:
-        return None
+    if SUPPORT_AI_ENABLED:
+        return InlineKeyboardMarkup(
+            inline_keyboard=[[InlineKeyboardButton(text="🆘 Поддержка", callback_data="menu:support")]]
+        )
+    if SUPPORT_USERNAME:
+        return InlineKeyboardMarkup(
+            inline_keyboard=[
+                [InlineKeyboardButton(text="🆘 Поддержка", url=f"https://t.me/{SUPPORT_USERNAME}")]
+            ]
+        )
+    return None
+
+
+def support_chat_kb() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
-            [InlineKeyboardButton(text="🆘 Поддержка", url=f"https://t.me/{SUPPORT_USERNAME}")]
+            [InlineKeyboardButton(text="✖️ Закрыть чат", callback_data="menu:exit_support")],
         ]
     )
 
@@ -113,13 +148,17 @@ HELP_GENERAL = (
     "<b>Сколько устройств?</b> До 10 на одном аккаунте\n"
     "<b>Лимит трафика?</b> Нет — скорость и трафик не ограничены\n"
     "<b>Работают одновременно?</b> Да — прокси и VPN не мешают друг другу\n"
-    "<b>Как отменить?</b> Напишите в поддержку"
+    "<b>Как отменить?</b> Напишите в поддержку через бота (кнопка «Поддержка»)"
 )
 
 
 async def backend_get(session: aiohttp.ClientSession, path: str) -> dict[str, Any]:
     url = f"{BACKEND_BASE_URL}{path}"
-    async with session.get(url, timeout=aiohttp.ClientTimeout(total=10)) as resp:
+    async with session.get(
+        url,
+        headers=_internal_headers(),
+        timeout=aiohttp.ClientTimeout(total=10),
+    ) as resp:
         data = await resp.json(content_type=None)
         if resp.status >= 400:
             raise RuntimeError(f"Backend error {resp.status}: {data}")
@@ -131,7 +170,8 @@ async def backend_get(session: aiohttp.ClientSession, path: str) -> dict[str, An
 async def backend_post(session: aiohttp.ClientSession, path: str, payload: dict[str, Any]) -> None:
     url = f"{BACKEND_BASE_URL}{path}"
     try:
-        async with session.post(url, json=payload, timeout=aiohttp.ClientTimeout(total=5)):
+        headers = {**_internal_headers(), "Content-Type": "application/json"}
+        async with session.post(url, json=payload, headers=headers, timeout=aiohttp.ClientTimeout(total=5)):
             pass
     except Exception as exc:
         # FIX: Log failures instead of silently swallowing them — makes backend issues diagnosable
@@ -140,7 +180,8 @@ async def backend_post(session: aiohttp.ClientSession, path: str, payload: dict[
 
 async def backend_post_json(session: aiohttp.ClientSession, path: str, payload: dict[str, Any]) -> dict[str, Any]:
     url = f"{BACKEND_BASE_URL}{path}"
-    async with session.post(url, json=payload, timeout=aiohttp.ClientTimeout(total=10)) as resp:
+    headers = {**_internal_headers(), "Content-Type": "application/json"}
+    async with session.post(url, json=payload, headers=headers, timeout=aiohttp.ClientTimeout(total=10)) as resp:
         data = await resp.json(content_type=None)
         if not isinstance(data, dict):
             raise RuntimeError("Unexpected backend response")
@@ -371,7 +412,7 @@ async def cmd_status(message: Message, session: aiohttp.ClientSession, tg_id: in
         f"📅 Действует до: {expires_at}\n"
         f"💳 Тариф: {PRICE_RUB} ₽/мес · 10 ₽/день\n"
         f"🖥 Устройств: до 10 на аккаунте\n"
-        f"❓ Отмена — напиши в поддержку"
+        f"❓ Отмена — через кнопку «Поддержка» в боте"
     )
 
     if proxy_link:
@@ -499,7 +540,83 @@ async def main() -> None:
             await query.answer()
             return
 
+        if action == "support":
+            if not SUPPORT_AI_ENABLED:
+                await query.answer("Поддержка ИИ выключена", show_alert=True)
+                return
+            await state.set_state(SupportStates.chatting)
+            await query.answer()
+            await msg.answer(
+                "👋 <b>Чат с поддержкой</b>\n\n"
+                "Опишите проблему: оплата, VPN (Happ), прокси для Telegram.\n\n"
+                "<i>/done — выйти из чата</i>",
+                parse_mode="HTML",
+                reply_markup=support_chat_kb(),
+            )
+            return
+
+        if action == "exit_support":
+            await state.clear()
+            await query.answer("Чат закрыт")
+            tg_id = query.from_user.id
+            await msg.answer(
+                "Если снова понадобится помощь — кнопка «Поддержка» или /support.",
+                reply_markup=main_menu_kb(tg_id),
+            )
+            return
+
         await query.answer()
+
+    @dp.message(Command("support"))
+    async def _cmd_support(message: Message, state: FSMContext) -> None:
+        if not SUPPORT_AI_ENABLED:
+            if SUPPORT_USERNAME:
+                await message.answer(f"Напишите в поддержку: @{SUPPORT_USERNAME}")
+            else:
+                await message.answer("Поддержка через бота не настроена.")
+            return
+        await state.set_state(SupportStates.chatting)
+        await message.answer(
+            "👋 <b>Чат с поддержкой</b>\n\n"
+            "Опишите проблему: оплата, VPN (Happ), прокси для Telegram.\n\n"
+            "<i>/done — выйти из чата</i>",
+            parse_mode="HTML",
+            reply_markup=support_chat_kb(),
+        )
+
+    @dp.message(Command("done"), StateFilter(SupportStates.chatting))
+    async def _cmd_done(message: Message, state: FSMContext) -> None:
+        await state.clear()
+        tg_id = message.from_user.id if message.from_user else 0
+        await message.answer(
+            "Чат закрыт. Снова: /support или кнопка «Поддержка».",
+            reply_markup=main_menu_kb(tg_id),
+        )
+
+    @dp.message(StateFilter(SupportStates.chatting), F.text, _TextNotCommand())
+    async def _support_ai_message(message: Message, state: FSMContext) -> None:
+        if not SUPPORT_AI_ENABLED:
+            return
+        t = (message.text or "").strip()
+        tg_id = message.from_user.id if message.from_user else 0
+        if not tg_id:
+            return
+        session = _get_session(dp)
+        try:
+            await message.bot.send_chat_action(message.chat.id, "typing")
+        except Exception:
+            pass
+        from support_ai import run_support_reply
+
+        reply = await run_support_reply(session, tg_id, t)
+        await message.answer(reply, reply_markup=support_chat_kb())
+
+    @dp.message(StateFilter(SupportStates.chatting))
+    async def _support_non_text(message: Message) -> None:
+        await message.answer(
+            "Пока принимаем только текст. Опишите проблему сообщением.",
+            reply_markup=support_chat_kb(),
+        )
 
     @dp.callback_query(lambda c: c.data == "copy_proxy_link")
     async def _copy(query: CallbackQuery) -> None:
