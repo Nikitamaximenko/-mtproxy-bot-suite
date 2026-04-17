@@ -1422,6 +1422,13 @@ class SubscriptionResponse(BaseModel):
 @app.get("/subscription/{telegram_id}", response_model=SubscriptionResponse)
 def get_subscription(telegram_id: int, req: Request, db: Session = Depends(get_db)) -> SubscriptionResponse:
     _require_internal_token(req)
+    # region agent log
+    _dbg_tok_header = (req.headers.get("X-Internal-Token") or "").strip()
+    logger.info(
+        "DBG5F0AD3 get_subscription.enter tg_id=%s caller_tok_len=%s MT_PROXY_SERVER_set=%s",
+        telegram_id, len(_dbg_tok_header), bool(MT_PROXY_SERVER),
+    )
+    # endregion
     now = utcnow()
     sub = (
         db.execute(
@@ -1440,15 +1447,36 @@ def get_subscription(telegram_id: int, req: Request, db: Session = Depends(get_d
     )
 
     if not sub:
+        # region agent log
+        logger.info("DBG5F0AD3 get_subscription.exit tg_id=%s branch=no_paid_active", telegram_id)
+        # endregion
         return SubscriptionResponse(active=False, expires_at=None, proxy_link=None, suspended=False)
 
     if sub.access_suspended:
+        # region agent log
+        logger.info(
+            "DBG5F0AD3 get_subscription.exit tg_id=%s branch=suspended sub_id=%s expires_at=%s",
+            telegram_id, sub.id, sub.expires_at.isoformat() if sub.expires_at else None,
+        )
+        # endregion
         return SubscriptionResponse(active=False, expires_at=sub.expires_at, proxy_link=None, suspended=True)
 
     if not (sub.proxy_server and sub.proxy_port and sub.proxy_secret):
+        # region agent log
+        logger.info(
+            "DBG5F0AD3 get_subscription.exit tg_id=%s branch=active_no_proxy_creds sub_id=%s",
+            telegram_id, sub.id,
+        )
+        # endregion
         return SubscriptionResponse(active=True, expires_at=sub.expires_at, proxy_link=None, suspended=False)
 
     proxy_link = f"tg://proxy?server={sub.proxy_server}&port={sub.proxy_port}&secret={sub.proxy_secret}"
+    # region agent log
+    logger.info(
+        "DBG5F0AD3 get_subscription.exit tg_id=%s branch=active_with_proxy sub_id=%s",
+        telegram_id, sub.id,
+    )
+    # endregion
     return SubscriptionResponse(active=True, expires_at=sub.expires_at, proxy_link=proxy_link, suspended=False)
 
 
@@ -1999,10 +2027,23 @@ class VpnConfigResponse(BaseModel):
 def _require_internal_token(req: Request) -> None:
     """Verify X-Internal-Token header for frontend-to-backend calls."""
     if not INTERNAL_API_TOKEN:
+        # region agent log
+        logger.warning("DBG5F0AD3 _require_internal_token path=%s INTERNAL_API_TOKEN_UNSET_on_backend", req.url.path)
+        # endregion
         return  # not configured — allow (dev mode)
     got = (req.headers.get("X-Internal-Token") or "").strip()
     if not hmac.compare_digest(got, INTERNAL_API_TOKEN):
+        # region agent log
+        logger.warning(
+            "DBG5F0AD3 _require_internal_token.REJECT path=%s got_len=%s expected_len=%s got_prefix=%s",
+            req.url.path, len(got), len(INTERNAL_API_TOKEN),
+            (got[:6] + "…") if got else "(empty)",
+        )
+        # endregion
         raise HTTPException(status_code=403, detail="Forbidden")
+    # region agent log
+    logger.info("DBG5F0AD3 _require_internal_token.OK path=%s", req.url.path)
+    # endregion
 
 
 @app.get("/vpn/config/{telegram_id}", response_model=VpnConfigResponse)
@@ -2184,6 +2225,12 @@ def admin_broadcast_status(req: Request) -> BroadcastStatusResponse:
 @app.post("/admin/deactivate/{telegram_id}", response_model=OkResponse)
 def admin_deactivate(telegram_id: int, req: Request, db: Session = Depends(get_db)) -> OkResponse:
     _require_admin(req)
+    # region agent log
+    logger.info(
+        "DBG5F0AD3 admin_deactivate.enter tg_id=%s MT_PROXY_SERVER_set=%s MT_PROXY_SECRET_set=%s",
+        telegram_id, bool(MT_PROXY_SERVER), bool(MT_PROXY_SECRET),
+    )
+    # endregion
     subs = db.execute(
         select(Subscription).where(
             Subscription.telegram_id == telegram_id,
@@ -2198,6 +2245,9 @@ def admin_deactivate(telegram_id: int, req: Request, db: Session = Depends(get_d
         sub.proxy_secret = None
     db.commit()
     logger.info("Admin suspended access for tg_id=%s (%d row(s))", telegram_id, len(subs))
+    # region agent log
+    logger.info("DBG5F0AD3 admin_deactivate.exit tg_id=%s rows=%s", telegram_id, len(subs))
+    # endregion
     return OkResponse(ok=True)
 
 
@@ -2242,6 +2292,13 @@ def _admin_activate_user(telegram_id: int, db: Session) -> None:
     """
     now = utcnow()
 
+    # region agent log
+    logger.info(
+        "DBG5F0AD3 _admin_activate_user.enter tg_id=%s MT_PROXY_SERVER_set=%s MT_PROXY_PORT=%s MT_PROXY_SECRET_set=%s",
+        telegram_id, bool(MT_PROXY_SERVER), MT_PROXY_PORT, bool(MT_PROXY_SECRET),
+    )
+    # endregion
+
     sub = (
         db.execute(
             select(Subscription)
@@ -2252,6 +2309,18 @@ def _admin_activate_user(telegram_id: int, db: Session) -> None:
         .scalars()
         .first()
     )
+
+    # region agent log
+    logger.info(
+        "DBG5F0AD3 _admin_activate_user.sub_loaded tg_id=%s sub_id=%s status=%s expires_at=%s suspended=%s has_proxy=%s",
+        telegram_id,
+        (sub.id if sub else None),
+        (sub.payment_status if sub else None),
+        (sub.expires_at.isoformat() if sub and sub.expires_at else None),
+        (bool(sub.access_suspended) if sub else None),
+        (bool(sub and sub.proxy_server and sub.proxy_port and sub.proxy_secret) if sub else None),
+    )
+    # endregion
 
     if sub is None:
         token = uuid4()
@@ -2268,19 +2337,45 @@ def _admin_activate_user(telegram_id: int, db: Session) -> None:
         try:
             _apply_proxy_credentials(sub)
         except RuntimeError as e:
+            # region agent log
+            logger.error(
+                "DBG5F0AD3 _admin_activate_user.apply_proxy_FAILED tg_id=%s err=%s",
+                telegram_id, str(e),
+            )
+            # endregion
             raise HTTPException(status_code=503, detail=str(e))
         sub.access_suspended = False
         db.commit()
         logger.info("Admin restored proxy for paid tg_id=%s (expires_at unchanged)", telegram_id)
+        # region agent log
+        logger.info(
+            "DBG5F0AD3 _admin_activate_user.restored_paid tg_id=%s sub_id=%s expires_at=%s",
+            telegram_id, sub.id,
+            sub.expires_at.isoformat() if sub.expires_at else None,
+        )
+        # endregion
         return
 
     try:
         activate_subscription(sub)
     except RuntimeError as e:
+        # region agent log
+        logger.error(
+            "DBG5F0AD3 _admin_activate_user.full_activate_FAILED tg_id=%s err=%s",
+            telegram_id, str(e),
+        )
+        # endregion
         raise HTTPException(status_code=503, detail=str(e))
 
     db.commit()
     logger.info("Admin granted full activation for tg_id=%s", telegram_id)
+    # region agent log
+    logger.info(
+        "DBG5F0AD3 _admin_activate_user.full_activated tg_id=%s sub_id=%s expires_at=%s",
+        telegram_id, sub.id,
+        sub.expires_at.isoformat() if sub.expires_at else None,
+    )
+    # endregion
 
     if XRAY_API_URL and int(telegram_id) > 0:
         try:

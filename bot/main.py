@@ -36,6 +36,27 @@ MINIAPP_PATH = (os.getenv("MINIAPP_PATH") or "/mini").strip() or "/mini"
 
 _log = logging.getLogger(__name__)
 
+
+# region agent log
+def _dbg_ndjson(location: str, message: str, data: dict[str, Any]) -> None:
+    """Debug-mode NDJSON appender (best-effort, no-op if path unavailable)."""
+    try:
+        import json as _json
+        import time as _time
+        path = os.getenv("DBG_NDJSON_PATH", "/Users/nikitamaximenko/mtproxy-bot-suite/.cursor/debug-5f0ad3.log")
+        payload = {
+            "sessionId": "5f0ad3",
+            "timestamp": int(_time.time() * 1000),
+            "location": location,
+            "message": message,
+            "data": data,
+        }
+        with open(path, "a", encoding="utf-8") as fh:
+            fh.write(_json.dumps(payload, ensure_ascii=False) + "\n")
+    except Exception:
+        pass
+# endregion
+
 def _has_llm_api_key() -> bool:
     """Ключ LLM: только из окружения (Railway Variables), без кэша при импорте support_ai."""
     return bool((os.getenv("OPENROUTER_API_KEY") or os.getenv("OPENAI_API_KEY") or "").strip())
@@ -454,9 +475,31 @@ async def cmd_stop(message: Message, session: aiohttp.ClientSession) -> None:
 
 
 async def cmd_status(message: Message, session: aiohttp.ClientSession, tg_id: int) -> None:
+    # region agent log
+    _log.info(
+        "DBG5F0AD3 cmd_status.enter tg_id=%s BACKEND_BASE_URL=%s INTERNAL_API_TOKEN_set=%s",
+        tg_id, BACKEND_BASE_URL, bool(INTERNAL_API_TOKEN),
+    )
+    _dbg_ndjson(
+        "bot/main.py:cmd_status",
+        "enter",
+        {"tg_id": tg_id, "backend": BACKEND_BASE_URL, "tok_set": bool(INTERNAL_API_TOKEN), "hypothesisId": "H1,H2,H3"},
+    )
+    # endregion
     try:
         data = await backend_get(session, f"/subscription/{tg_id}")
     except BackendError as exc:
+        # region agent log
+        _log.warning(
+            "DBG5F0AD3 cmd_status.backend_error tg_id=%s status=%s body=%s",
+            tg_id, exc.status, exc.body[:200],
+        )
+        _dbg_ndjson(
+            "bot/main.py:cmd_status",
+            "backend_error",
+            {"tg_id": tg_id, "status": exc.status, "body": exc.body[:240], "hypothesisId": "H1"},
+        )
+        # endregion
         hint = ""
         if exc.status in (401, 403):
             hint = "Сервис временно в обслуживании (auth). Мы уже чиним."
@@ -471,6 +514,26 @@ async def cmd_status(message: Message, session: aiohttp.ClientSession, tg_id: in
         _log.exception("cmd_status: tg_id=%s unexpected error", tg_id)
         await message.answer("Не удалось получить статус. Попробуйте позже.", reply_markup=support_kb())
         return
+
+    # region agent log
+    _log.info(
+        "DBG5F0AD3 cmd_status.backend_response tg_id=%s active=%s suspended=%s has_proxy=%s expires_at=%s",
+        tg_id, data.get("active"), data.get("suspended"),
+        bool(data.get("proxy_link")), data.get("expires_at"),
+    )
+    _dbg_ndjson(
+        "bot/main.py:cmd_status",
+        "backend_response",
+        {
+            "tg_id": tg_id,
+            "active": data.get("active"),
+            "suspended": data.get("suspended"),
+            "has_proxy_link": bool(data.get("proxy_link")),
+            "expires_at": data.get("expires_at"),
+            "hypothesisId": "H2,H3,H4",
+        },
+    )
+    # endregion
 
     if data.get("suspended"):
         await message.answer(
