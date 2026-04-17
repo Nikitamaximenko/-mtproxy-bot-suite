@@ -217,6 +217,18 @@ HELP_GENERAL = (
 )
 
 
+def help_kb() -> InlineKeyboardMarkup:
+    """Клавиатура под инструкцией: кнопка возврата в главное меню + быстрый
+    переход в поддержку. Без них экран help был «тупиком» — юзер не мог
+    вернуться назад из инструкции без ручного ввода команды."""
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="🆘 Поддержка", callback_data="menu:support")],
+            [InlineKeyboardButton(text="🏠 Главное меню", callback_data="menu:main")],
+        ]
+    )
+
+
 class BackendError(RuntimeError):
     def __init__(self, status: int, body: str, path: str) -> None:
         super().__init__(f"backend {path} -> {status}: {body[:240]}")
@@ -596,7 +608,7 @@ async def main() -> None:
 
     @dp.message(Command("help"))
     async def _help(message: Message) -> None:
-        await message.answer(HELP_GENERAL, parse_mode="HTML")
+        await message.answer(HELP_GENERAL, parse_mode="HTML", reply_markup=help_kb())
 
     @dp.message(Command("aistatus"))
     async def _aistatus(message: Message) -> None:
@@ -713,7 +725,7 @@ async def main() -> None:
             return
 
         if action == "help":
-            await msg.answer(HELP_GENERAL, parse_mode="HTML")
+            await msg.answer(HELP_GENERAL, parse_mode="HTML", reply_markup=help_kb())
             await query.answer()
             return
 
