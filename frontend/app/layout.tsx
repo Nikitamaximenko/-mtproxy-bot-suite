@@ -30,27 +30,36 @@ export const viewport: Viewport = {
 }
 
 export const metadata: Metadata = {
-  title: 'Frosty — Telegram и интернет без границ',
-  description: 'Личный MTProxy для Telegram и VPN для любимых сервисов — всё в одной подписке. 299 ₽/мес, подключение за минуту.',
-  keywords: 'telegram прокси, mtproxy, vpn, телеграм прокси россия, обход блокировки telegram, frosty',
+  metadataBase: new URL('https://frostybot.ru'),
+  title: {
+    default: 'Frosty — MTProxy + VPN для Telegram, Instagram, YouTube',
+    template: '%s | Frosty',
+  },
+  description: 'Личный MTProxy для Telegram и VPN для Instagram, TikTok, YouTube и ChatGPT — всё в одной подписке. 299 ₽/мес, подключение за минуту.',
+  applicationName: 'Frosty',
+  keywords: 'telegram прокси, mtproxy, vpn, телеграм прокси россия, обход блокировки telegram, vpn для instagram, vpn для youtube, vpn россия 2025, frosty',
   openGraph: {
-    title: 'Frosty — Telegram и интернет без границ',
+    title: 'Frosty — MTProxy + VPN в одной подписке',
     description: 'Личный MTProxy + VPN в одной подписке. 299 ₽/мес.',
-    url: "https://frostybot.ru",
-    siteName: "Frosty",
-    locale: "ru_RU",
-    type: "website",
+    url: 'https://frostybot.ru',
+    siteName: 'Frosty',
+    locale: 'ru_RU',
+    type: 'website',
   },
   robots: {
     index: true,
     follow: true,
-  },
-  alternates: {
-    canonical: "https://frostybot.ru",
+    googleBot: {
+      index: true,
+      follow: true,
+      'max-snippet': -1,
+      'max-image-preview': 'large',
+      'max-video-preview': -1,
+    },
   },
   verification: {
-    google: "Wl2octBZAHk4YmGmnFgdZ0k2vjtLLuc8ZIxei_HAVss",
-    yandex: "46ef654743bdfe9b",
+    google: 'Wl2octBZAHk4YmGmnFgdZ0k2vjtLLuc8ZIxei_HAVss',
+    yandex: '46ef654743bdfe9b',
   },
   icons: {
     icon: [
@@ -90,6 +99,42 @@ export default function RootLayout({
         <Script
           src="https://telegram.org/js/telegram-web-app.js"
           strategy="beforeInteractive"
+        />
+        {/* Organization + WebSite JSON-LD: помогает Google и Яндексу
+            показывать название/лого в сниппетах и включает sitelinks search. */}
+        <Script
+          id="ld-org"
+          type="application/ld+json"
+          strategy="beforeInteractive"
+          dangerouslySetInnerHTML={{
+            __html: JSON.stringify({
+              '@context': 'https://schema.org',
+              '@type': 'Organization',
+              name: 'Frosty',
+              url: 'https://frostybot.ru',
+              logo: 'https://frostybot.ru/icon-light-32x32.png',
+              sameAs: ['https://t.me/frostytg_bot'],
+            }),
+          }}
+        />
+        <Script
+          id="ld-website"
+          type="application/ld+json"
+          strategy="beforeInteractive"
+          dangerouslySetInnerHTML={{
+            __html: JSON.stringify({
+              '@context': 'https://schema.org',
+              '@type': 'WebSite',
+              name: 'Frosty',
+              url: 'https://frostybot.ru',
+              inLanguage: 'ru-RU',
+              potentialAction: {
+                '@type': 'SearchAction',
+                target: 'https://frostybot.ru/blog?q={search_term_string}',
+                'query-input': 'required name=search_term_string',
+              },
+            }),
+          }}
         />
       </head>
       <body className="font-sans antialiased selection:bg-blush-soft">

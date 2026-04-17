@@ -1,21 +1,81 @@
-"use client"
-import Link from "next/link"
+import type { Metadata } from "next"
 import { Manrope } from "next/font/google"
+import Link from "next/link"
 import { articles } from "./articles"
 
 const manrope = Manrope({ subsets: ["latin", "cyrillic"], weight: ["400", "600", "700"] })
 
+const SITE_URL = "https://frostybot.ru"
+
+export const metadata: Metadata = {
+  title: "Блог Frosty — Telegram, MTProxy и VPN в России",
+  description:
+    "Гайды и разборы про обход блокировок Telegram, настройку MTProxy на iOS и Android, VPN для Instagram, YouTube, TikTok и ChatGPT в 2025 году.",
+  keywords: [
+    "блог telegram",
+    "mtproxy гайды",
+    "vpn россия гайд",
+    "настройка прокси телеграм",
+    "обход блокировки instagram",
+    "vpn для youtube",
+  ].join(", "),
+  alternates: { canonical: `${SITE_URL}/blog` },
+  openGraph: {
+    title: "Блог Frosty — Telegram, MTProxy и VPN в России",
+    description: "Гайды и разборы про Telegram, MTProxy и VPN в России.",
+    url: `${SITE_URL}/blog`,
+    siteName: "Frosty",
+    locale: "ru_RU",
+    type: "website",
+  },
+  twitter: { card: "summary_large_image" },
+}
+
 function formatDate(iso: string) {
-  return new Date(iso).toLocaleDateString("ru-RU", { day: "numeric", month: "long", year: "numeric" })
+  return new Date(iso).toLocaleDateString("ru-RU", {
+    day: "numeric",
+    month: "long",
+    year: "numeric",
+  })
 }
 
 export default function BlogPage() {
+  const itemListJsonLd = {
+    "@context": "https://schema.org",
+    "@type": "ItemList",
+    itemListElement: articles.map((a, i) => ({
+      "@type": "ListItem",
+      position: i + 1,
+      url: `${SITE_URL}/blog/${a.slug}`,
+      name: a.title,
+    })),
+  }
+
+  const breadcrumbJsonLd = {
+    "@context": "https://schema.org",
+    "@type": "BreadcrumbList",
+    itemListElement: [
+      { "@type": "ListItem", position: 1, name: "Главная", item: SITE_URL },
+      { "@type": "ListItem", position: 2, name: "Блог", item: `${SITE_URL}/blog` },
+    ],
+  }
+
   return (
     <div
       className={manrope.className}
       style={{ background: "#FFFFFF", minHeight: "100vh" }}
     >
-      {/* Шапка */}
+      <script
+        type="application/ld+json"
+        // eslint-disable-next-line react/no-danger
+        dangerouslySetInnerHTML={{ __html: JSON.stringify(itemListJsonLd) }}
+      />
+      <script
+        type="application/ld+json"
+        // eslint-disable-next-line react/no-danger
+        dangerouslySetInnerHTML={{ __html: JSON.stringify(breadcrumbJsonLd) }}
+      />
+
       <div style={{ borderBottom: "1px solid #F3F4F6", padding: "16px 24px" }}>
         <div
           style={{
@@ -26,14 +86,14 @@ export default function BlogPage() {
             justifyContent: "space-between",
           }}
         >
-          <a
-            href="/mini"
+          <Link
+            href="/"
             style={{ textDecoration: "none", fontWeight: 700, fontSize: "18px", color: "#111827" }}
           >
             ❄️ Frosty
-          </a>
-          <a
-            href="/mini"
+          </Link>
+          <Link
+            href="/"
             style={{
               display: "inline-block",
               background: "#2AABEE",
@@ -46,11 +106,22 @@ export default function BlogPage() {
             }}
           >
             Подключить за 299 ₽ →
-          </a>
+          </Link>
         </div>
       </div>
 
       <div style={{ maxWidth: "800px", margin: "0 auto", padding: "40px 24px" }}>
+        <nav
+          aria-label="breadcrumb"
+          style={{ fontSize: "13px", color: "#9CA3AF", marginBottom: "16px" }}
+        >
+          <Link href="/" style={{ color: "#9CA3AF", textDecoration: "none" }}>
+            Главная
+          </Link>
+          {" → "}
+          <span>Блог</span>
+        </nav>
+
         <h1
           style={{
             fontSize: "32px",
@@ -59,10 +130,11 @@ export default function BlogPage() {
             margin: "0 0 8px",
           }}
         >
-          Статьи о Telegram
+          Блог Frosty — Telegram, прокси и VPN в России
         </h1>
-        <p style={{ color: "#6B7280", fontSize: "16px", margin: "0 0 40px" }}>
-          Полезные руководства по настройке и обходу блокировок
+        <p style={{ color: "#6B7280", fontSize: "16px", margin: "0 0 40px", lineHeight: 1.6 }}>
+          Объясняем как работает MTProxy, какой VPN выбрать в 2025 году, как починить Telegram,
+          Instagram и YouTube в России. Без воды и партнёрских ссылок.
         </p>
 
         <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
@@ -79,15 +151,6 @@ export default function BlogPage() {
                   padding: "24px",
                   transition: "border-color 0.15s, box-shadow 0.15s",
                   cursor: "pointer",
-                }}
-                onMouseEnter={(e) => {
-                  ;(e.currentTarget as HTMLDivElement).style.borderColor = "#2AABEE"
-                  ;(e.currentTarget as HTMLDivElement).style.boxShadow =
-                    "0 4px 16px rgba(42,171,238,0.1)"
-                }}
-                onMouseLeave={(e) => {
-                  ;(e.currentTarget as HTMLDivElement).style.borderColor = "#E5E7EB"
-                  ;(e.currentTarget as HTMLDivElement).style.boxShadow = "none"
                 }}
               >
                 <div style={{ fontSize: "13px", color: "#9CA3AF", marginBottom: "8px" }}>
