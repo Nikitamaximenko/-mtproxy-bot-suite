@@ -1,28 +1,41 @@
 import type { Metadata, Viewport } from 'next'
-import { Inter } from 'next/font/google'
+import { Manrope, Fraunces } from 'next/font/google'
 import Script from 'next/script'
 import { Analytics } from '@vercel/analytics/next'
 import { BackendKeepAlive } from '@/components/BackendKeepAlive'
 import './globals.css'
 
-const _inter = Inter({ subsets: ["latin", "cyrillic"], variable: "--font-inter" });
+const manrope = Manrope({
+  subsets: ['latin', 'cyrillic'],
+  weight: ['400', '500', '600', '700', '800'],
+  variable: '--font-manrope',
+  display: 'swap',
+})
+
+const fraunces = Fraunces({
+  subsets: ['latin', 'cyrillic'],
+  weight: ['400', '500', '600'],
+  style: ['normal', 'italic'],
+  variable: '--font-fraunces',
+  display: 'swap',
+})
 
 export const viewport: Viewport = {
   width: 'device-width',
   initialScale: 1,
   maximumScale: 1,
   userScalable: false,
-  themeColor: '#0066cc',
+  themeColor: '#FBF7F2',
   viewportFit: 'cover',
 }
 
 export const metadata: Metadata = {
-  title: "Frosty — 2 в 1: прокси для Telegram + VPN",
-  description: "Подписка 2 в 1: персональный MTProxy для Telegram и VPN для сайтов. 299 ₽/мес, подключение за пару минут.",
-  keywords: "telegram прокси, mtproxy, vpn, телеграм прокси россия, обход блокировки telegram, frosty",
+  title: 'Frosty — Telegram и интернет без границ',
+  description: 'Личный MTProxy для Telegram и VPN для любимых сервисов — всё в одной подписке. 299 ₽/мес, подключение за минуту.',
+  keywords: 'telegram прокси, mtproxy, vpn, телеграм прокси россия, обход блокировки telegram, frosty',
   openGraph: {
-    title: "Frosty — 2 в 1: прокси для Telegram + VPN",
-    description: "Персональный MTProxy + VPN. 299 ₽/мес.",
+    title: 'Frosty — Telegram и интернет без границ',
+    description: 'Личный MTProxy + VPN в одной подписке. 299 ₽/мес.',
     url: "https://frostybot.ru",
     siteName: "Frosty",
     locale: "ru_RU",
@@ -64,7 +77,7 @@ export default function RootLayout({
   children: React.ReactNode
 }>) {
   return (
-    <html lang="ru">
+    <html lang="ru" className={`${manrope.variable} ${fraunces.variable}`}>
       <head>
         {/*
           Telegram WebApp SDK — обязан быть подключён на странице, которая
@@ -79,7 +92,7 @@ export default function RootLayout({
           strategy="beforeInteractive"
         />
       </head>
-      <body className="font-sans antialiased">
+      <body className="font-sans antialiased selection:bg-blush-soft">
         <BackendKeepAlive />
         {children}
         <Analytics />

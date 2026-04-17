@@ -86,74 +86,54 @@ export function openTelegramLink(url: string) {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const wa = (window as any)?.Telegram?.WebApp
 
-  // WebApp.openTelegramLink only accepts https://t.me/ links, so other tg:// hosts
-  // are converted to https://t.me/<path>. Exception: tg://proxy?server=... must NOT
-  // become https://t.me/proxy?... — that opens the @proxy profile/chat, not MTProxy.
   let resolved = normalizePaymentUrl(url)
-  if (/^tg:\/\/proxy(\?|#|$)/i.test(resolved)) {
+
+  // MTProxy deep-link. В Mini App WebView схема tg:// не доходит до Telegram:
+  // WebApp.openLink принимает только http(s), openTelegramLink — только https://t.me/,
+  // а window.location.assign("tg://…") в iframe Telegram обычно блокируется.
+  // Официальный формат с параметрами — https://t.me/proxy?server=…&port=…&secret=… —
+  // Telegram распознаёт именно как MTProxy и открывает нативный диалог (без параметров
+  // это чат @proxy, поэтому query-строку сохраняем как есть).
+  const proxyTg = resolved.match(/^tg:\/\/proxy(\?.*)?$/i)
+  const proxyTme = resolved.match(/^https?:\/\/t\.me\/proxy(\?.*)?$/i)
+  if (proxyTg || proxyTme) {
+    const qs = (proxyTg?.[1] ?? proxyTme?.[1] ?? "").trim()
+    const tmeLink = `https://t.me/proxy${qs || ""}`
     try {
       wa?.ready?.()
     } catch {
       /* ignore */
     }
-    // В Mini App WebView прямой assign на tg:// часто ничего не делает (особенно в iframe).
-    // Сначала бридж Telegram — клиент открывает tg:// внутри приложения.
-    if (typeof wa?.openLink === "function") {
-      try {
-        wa.openLink(resolved, { try_instant_view: false })
-        return
-      } catch {
-        /* try next */
-      }
-      try {
-        wa.openLink(resolved)
-        return
-      } catch {
-        /* try next */
-      }
-    }
     if (typeof wa?.openTelegramLink === "function") {
       try {
-        wa.openTelegramLink(resolved)
+        wa.openTelegramLink(tmeLink)
         return
       } catch {
-        /* try next */
+        /* fall through */
+      }
+    }
+    if (typeof wa?.openLink === "function") {
+      try {
+        wa.openLink(tmeLink, { try_instant_view: false })
+        return
+      } catch {
+        /* fall through */
       }
     }
     try {
-      const a = document.createElement("a")
-      a.href = resolved
-      a.target = "_top"
-      a.rel = "noreferrer noopener"
-      a.style.position = "fixed"
-      a.style.left = "-9999px"
-      document.body.appendChild(a)
-      a.click()
-      document.body.removeChild(a)
+      window.location.assign(tmeLink)
       return
     } catch {
-      /* try next */
+      /* ignore */
     }
     try {
-      const topWin = window.top
-      if (topWin && topWin !== window) {
-        topWin.location.href = resolved
-        return
-      }
+      window.location.href = tmeLink
     } catch {
-      /* cross-origin top — ignore */
-    }
-    try {
-      window.location.assign(resolved)
-    } catch {
-      try {
-        window.location.href = resolved
-      } catch {
-        /* ignore */
-      }
+      /* ignore */
     }
     return
   }
+
   if (resolved.startsWith("tg://")) {
     const stripped = resolved.slice("tg://".length)
     resolved = `https://t.me/${stripped}`
