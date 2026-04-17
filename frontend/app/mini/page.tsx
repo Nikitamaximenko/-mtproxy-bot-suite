@@ -604,8 +604,11 @@ export default function MiniAppPage() {
                   </button>
                 </div>
               ) : (
-                <div className="p-5 text-center" style={{ background: "#F7F8FA", borderRadius: "16px" }}>
-                  <p className="text-sm" style={{ color: "#6B7280" }}>Прокси настраивается, скоро появится</p>
+                <div className="p-5 text-center space-y-2" style={{ background: "#F7F8FA", borderRadius: "16px" }}>
+                  <p className="text-sm font-semibold" style={{ color: "#111827" }}>Ссылка временно недоступна здесь</p>
+                  <p className="text-xs leading-relaxed" style={{ color: "#6B7280" }}>
+                    Откройте бота и нажмите <strong style={{ color: "#2AABEE" }}>«✅ Статус»</strong> — там вашу персональную ссылку на прокси всегда можно скопировать и подключить одним кликом.
+                  </p>
                 </div>
               )}
               <div className="flex flex-col gap-2">

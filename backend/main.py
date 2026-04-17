@@ -1421,7 +1421,12 @@ class SubscriptionResponse(BaseModel):
 
 @app.get("/subscription/{telegram_id}", response_model=SubscriptionResponse)
 def get_subscription(telegram_id: int, req: Request, db: Session = Depends(get_db)) -> SubscriptionResponse:
-    _require_internal_token(req)
+    # Status fields (active/expires_at/suspended) are low-sensitivity and served publicly
+    # so Mini App on Vercel can render the paid screen even if INTERNAL_API_TOKEN
+    # is not configured there. The sensitive proxy_link is still gated behind the token
+    # (bot on Railway has it, so /status keeps working; an attacker probing by tg_id
+    # cannot extract proxy credentials).
+    has_token = _has_valid_internal_token(req)
     now = utcnow()
     sub = (
         db.execute(
@@ -1448,7 +1453,9 @@ def get_subscription(telegram_id: int, req: Request, db: Session = Depends(get_d
     if not (sub.proxy_server and sub.proxy_port and sub.proxy_secret):
         return SubscriptionResponse(active=True, expires_at=sub.expires_at, proxy_link=None, suspended=False)
 
-    proxy_link = f"tg://proxy?server={sub.proxy_server}&port={sub.proxy_port}&secret={sub.proxy_secret}"
+    proxy_link: str | None = None
+    if has_token:
+        proxy_link = f"tg://proxy?server={sub.proxy_server}&port={sub.proxy_port}&secret={sub.proxy_secret}"
     return SubscriptionResponse(active=True, expires_at=sub.expires_at, proxy_link=proxy_link, suspended=False)
 
 
@@ -2003,6 +2010,17 @@ def _require_internal_token(req: Request) -> None:
     got = (req.headers.get("X-Internal-Token") or "").strip()
     if not hmac.compare_digest(got, INTERNAL_API_TOKEN):
         raise HTTPException(status_code=403, detail="Forbidden")
+
+
+def _has_valid_internal_token(req: Request) -> bool:
+    """Non-raising variant of _require_internal_token — returns True if the request
+    carries a valid INTERNAL_API_TOKEN, False otherwise. Used by endpoints that
+    serve a public-safe subset of data to unauthenticated callers."""
+    if not INTERNAL_API_TOKEN:
+        # Dev mode: any caller is trusted.
+        return True
+    got = (req.headers.get("X-Internal-Token") or "").strip()
+    return bool(got) and hmac.compare_digest(got, INTERNAL_API_TOKEN)
 
 
 @app.get("/vpn/config/{telegram_id}", response_model=VpnConfigResponse)
