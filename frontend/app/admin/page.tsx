@@ -24,6 +24,8 @@ type ProxyStatus = {
   port: number
   online: boolean
   latency_ms: number | null
+  degraded?: boolean
+  handshake?: string
 }
 
 type VpnOnline = {
@@ -195,7 +197,7 @@ const STORAGE_KEY = "frosty_admin_key"
 
 /** Реальные активные подписчики (prod): после purge в БД остаются только эти telegram_id. */
 const PRODUCTION_TELEGRAM_IDS = [
-  231115635, 1760841179, 1759725640, 195699085, 282345092,
+  231115635, 1760841179, 1759725640, 195699085, 282345092, 1069768978,
 ] as const
 
 /** API может отдать неполный объект — без этого рендер падает на funnel.source_stats.length */
@@ -382,6 +384,11 @@ export default function AdminPage() {
             const d = data.detail[0] as { msg?: string }
             if (d.msg) msg = d.msg
           } else if (typeof data.error === "string") msg = data.error
+          if (res.status === 503) {
+            msg = `${msg} · Проверь переменные MT_PROXY_SERVER / MT_PROXY_PORT / MT_PROXY_SECRET на бекенде (Railway).`
+          } else if (res.status === 403) {
+            msg = `${msg} · Неверный админ-ключ или бекенд не знает ADMIN_API_KEY.`
+          }
           throw new Error(msg)
         }
         await fetchAll()
@@ -718,22 +725,67 @@ export default function AdminPage() {
             <div className="bg-gray-900 border border-gray-800 rounded-2xl p-6">
               <div className="text-xs text-gray-400 mb-3 font-medium">📡 MTProxy</div>
               {proxy ? (
-                <div className="flex items-center justify-between flex-wrap gap-4">
-                  <div className="flex items-center gap-3">
-                    <div
-                      className={`w-3 h-3 rounded-full ${proxy.online ? "bg-emerald-400 animate-pulse" : "bg-red-500"}`}
-                    />
-                    <span className="text-base font-medium">
-                      {proxy.server}:{proxy.port}
-                    </span>
-                    <span className={`text-sm font-medium ${proxy.online ? "text-emerald-400" : "text-red-400"}`}>
-                      {proxy.online ? "Online" : "Offline"}
-                    </span>
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between flex-wrap gap-4">
+                    <div className="flex items-center gap-3">
+                      <div
+                        className={`w-3 h-3 rounded-full ${
+                          !proxy.online
+                            ? "bg-red-500"
+                            : proxy.degraded
+                              ? "bg-amber-400 animate-pulse"
+                              : "bg-emerald-400 animate-pulse"
+                        }`}
+                      />
+                      <span className="text-base font-medium">
+                        {proxy.server}:{proxy.port}
+                      </span>
+                      <span
+                        className={`text-sm font-medium ${
+                          !proxy.online
+                            ? "text-red-400"
+                            : proxy.degraded
+                              ? "text-amber-400"
+                              : "text-emerald-400"
+                        }`}
+                      >
+                        {!proxy.online ? "Offline" : proxy.degraded ? "Degraded" : "Online"}
+                      </span>
+                    </div>
+                    {proxy.latency_ms !== null && (
+                      <span className="text-sm text-gray-400">
+                        <span className="text-white font-mono">{proxy.latency_ms}ms</span>
+                      </span>
+                    )}
                   </div>
-                  {proxy.latency_ms !== null && (
-                    <span className="text-sm text-gray-400">
-                      <span className="text-white font-mono">{proxy.latency_ms}ms</span>
-                    </span>
+                  {!proxy.online && (
+                    <div className="text-xs bg-red-950/50 border border-red-900 rounded-lg px-3 py-2 text-red-200">
+                      TCP к <code className="font-mono">{proxy.server}:{proxy.port}</code> не открывается.
+                      MTProxy-процесс не запущен или хост недоступен — проверь Railway/VPS, статус сервиса и
+                      firewall. До исправления ни один пользователь не сможет подключиться, даже с тумблером «Вкл».
+                    </div>
+                  )}
+                  {proxy.online && proxy.degraded && (
+                    <div className="text-xs bg-amber-950/50 border border-amber-900 rounded-lg px-3 py-2 text-amber-200 space-y-1">
+                      <div>
+                        <strong>Порт открыт, но отвечает не MTProxy</strong>
+                        {proxy.handshake ? (
+                          <span className="text-amber-300/80"> ({proxy.handshake})</span>
+                        ) : null}
+                        .
+                      </div>
+                      <div>
+                        Скорее всего: демон MTProxy не запущен и на порту стоит другой сервис, либо секрет
+                        (<code className="font-mono">MT_PROXY_SECRET</code>) не совпадает с тем, что сконфигурирован
+                        на сервере. Telegram-клиенты получают «Не удалось подключиться к прокси». Сначала чини
+                        сервер, потом включай пользователей — иначе тумблер «Вкл» косметический.
+                      </div>
+                    </div>
+                  )}
+                  {proxy.online && !proxy.degraded && (
+                    <div className="text-xs text-gray-500">
+                      Сервер открыл порт и ведёт себя как MTProxy (молчит в ожидании клиентского хендшейка).
+                    </div>
                   )}
                 </div>
               ) : (
