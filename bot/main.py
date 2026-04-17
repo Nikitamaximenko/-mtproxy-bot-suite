@@ -29,7 +29,6 @@ load_dotenv()
 BOT_TOKEN = os.getenv("BOT_TOKEN", "").strip()
 BACKEND_BASE_URL = (os.getenv("BACKEND_BASE_URL") or "http://localhost:8000").rstrip("/")
 FRONTEND_URL = (os.getenv("FRONTEND_URL") or "http://localhost:3000").strip()
-SUPPORT_USERNAME = os.getenv("SUPPORT_USERNAME", "").lstrip("@").strip()
 INTERNAL_API_TOKEN = os.getenv("INTERNAL_API_TOKEN", "").strip()
 PRICE_RUB = int(os.getenv("PRICE_RUB", "299") or "299")
 MINIAPP_PATH = (os.getenv("MINIAPP_PATH") or "/mini").strip() or "/mini"
@@ -129,7 +128,7 @@ def support_chat_kb() -> InlineKeyboardMarkup:
 
 
 def support_invite_html() -> str:
-    """Текст после нажатия «Поддержка»: всегда диалог в боте; при наличии ключа — ИИ."""
+    """Текст после нажатия «Поддержка»: диалог в боте; при наличии ключа LLM — ИИ-ответы."""
     if _ai_support_enabled():
         return (
             "✨ <b>Поддержка</b>\n\n"
@@ -138,17 +137,11 @@ def support_invite_html() -> str:
             "и вы сможете продолжить с ним обычный диалог.\n\n"
             "<i>Закончить: кнопка ниже или /done</i>"
         )
-    if SUPPORT_USERNAME:
-        return (
-            "✨ <b>Поддержка</b>\n\n"
-            "Пишите <b>прямо в этот чат</b> — мы на связи и готовы помочь.\n\n"
-            f"Сообщения обрабатываются здесь. При необходимости оператор: @{SUPPORT_USERNAME}.\n\n"
-            "<i>Закончить: кнопка ниже или /done</i>"
-        )
     return (
         "✨ <b>Поддержка</b>\n\n"
-        "Пишите <b>прямо в этот чат</b> — мы на связи и готовы помочь.\n\n"
-        "Отправьте <b>следующим сообщением</b> свой вопрос.\n\n"
+        "Пишите <b>прямо в этот чат</b>.\n\n"
+        "Автоответ помощника сейчас недоступен — попробуйте чуть позже или проверьте раздел "
+        "<b>«Статус»</b> и мини-приложение для оплаты/настроек.\n\n"
         "<i>Закончить: кнопка ниже или /done</i>"
     )
 
@@ -653,10 +646,8 @@ async def main() -> None:
                 reply, new_history = await run_support_reply(session, tg_id, t, history)
             except Exception:
                 _log.exception("support_ai.run_support_reply failed tg_id=%s", tg_id)
-                admin_hint = f" или оператору @{SUPPORT_USERNAME}" if SUPPORT_USERNAME else ""
                 await message.answer(
-                    "Помощник временно недоступен. Попробуйте ещё раз через минуту"
-                    f"{admin_hint}.",
+                    "Помощник временно недоступен. Попробуйте ещё раз через минуту.",
                     reply_markup=support_chat_kb(),
                 )
                 return
@@ -664,17 +655,11 @@ async def main() -> None:
             await message.answer(reply, reply_markup=support_chat_kb())
             return
 
-        if SUPPORT_USERNAME:
-            await message.answer(
-                f"Сообщение получено. По возможности ответит оператор: @{SUPPORT_USERNAME}.",
-                reply_markup=support_chat_kb(),
-            )
-        else:
-            await message.answer(
-                "Сообщение получено, но автоматический помощник сейчас не настроен. "
-                "Напишите администратору сервиса или попробуйте позже.",
-                reply_markup=support_chat_kb(),
-            )
+        await message.answer(
+            "Сообщение получено. Автоответ помощника сейчас недоступен — "
+            "попробуйте позже или откройте «Статус» и мини-приложение в меню бота.",
+            reply_markup=support_chat_kb(),
+        )
 
     @dp.message(StateFilter(SupportStates.chatting))
     async def _support_non_text(message: Message) -> None:
