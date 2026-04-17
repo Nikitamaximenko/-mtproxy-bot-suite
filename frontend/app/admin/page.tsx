@@ -198,6 +198,52 @@ const PRODUCTION_TELEGRAM_IDS = [
   231115635, 1760841179, 1759725640, 195699085, 282345092,
 ] as const
 
+// #region agent log
+function adminDbg(hypothesisId: string, message: string, data: Record<string, unknown>) {
+  if (typeof window === "undefined") return
+  fetch("http://127.0.0.1:7280/ingest/b7181c25-f78c-4d85-b0bd-4bbec7e46947", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "5f0ad3" },
+    body: JSON.stringify({
+      sessionId: "5f0ad3",
+      hypothesisId,
+      location: "admin/page.tsx",
+      message,
+      data,
+      timestamp: Date.now(),
+      runId: "pre",
+    }),
+  }).catch(() => {})
+}
+// #endregion
+
+/** API может отдать неполный объект — без этого рендер падает на funnel.source_stats.length */
+function safeFunnel(raw: unknown): FunnelStats | null {
+  if (raw == null || typeof raw !== "object") return null
+  const r = raw as Record<string, unknown>
+  const num = (v: unknown) => (typeof v === "number" && Number.isFinite(v) ? v : 0)
+  const source_stats = Array.isArray(r.source_stats) ? (r.source_stats as SourceStat[]) : []
+  return {
+    tg_users: num(r.tg_users),
+    tg_checkout: num(r.tg_checkout),
+    tg_payment_link: num(r.tg_payment_link),
+    tg_paid: num(r.tg_paid),
+    active_now: num(r.active_now),
+    tg_users_7d: num(r.tg_users_7d),
+    tg_checkout_7d: num(r.tg_checkout_7d),
+    tg_paid_7d: num(r.tg_paid_7d),
+    web_users: num(r.web_users),
+    web_paid: num(r.web_paid),
+    source_stats,
+    nudge_1_sent: num(r.nudge_1_sent),
+    nudge_2_sent: num(r.nudge_2_sent),
+    nudge_3_sent: num(r.nudge_3_sent),
+    nudge_converted: num(r.nudge_converted),
+    opted_out: num(r.opted_out),
+    analytics_scoped: Boolean(r.analytics_scoped),
+  }
+}
+
 export default function AdminPage() {
   const [key, setKey] = useState("")
   const [authed, setAuthed] = useState(false)
@@ -316,10 +362,30 @@ export default function AdminPage() {
         setVpnOnline(vData as VpnOnline | null)
         setVpnClients(vcData as VpnClientsData | null)
         setOverview(ovData as UsersOverview)
-        setFunnel(fData as FunnelStats | null)
+        // #region agent log
+        adminDbg("H-funnel-raw", "funnel before normalize", {
+          fOk: fRes.ok,
+          fStatus: fRes.status,
+          rawHasSourceStatsArray:
+            fData != null &&
+            typeof fData === "object" &&
+            Array.isArray((fData as { source_stats?: unknown }).source_stats),
+        })
+        // #endregion
+        const funnelNorm = safeFunnel(fData)
+        // #region agent log
+        adminDbg("H-funnel-safe", "after safeFunnel", {
+          nonNull: funnelNorm != null,
+          sourceStatsLen: funnelNorm?.source_stats?.length ?? -1,
+        })
+        // #endregion
+        setFunnel(funnelNorm)
         setAuthed(true)
         persistKey(activeKey)
-      } catch {
+      } catch (e) {
+        // #region agent log
+        adminDbg("H-fetch-catch", "fetchAll catch", { err: String(e) })
+        // #endregion
         setError("Не удалось загрузить данные")
       } finally {
         setLoading(false)
@@ -529,6 +595,31 @@ export default function AdminPage() {
     }
   }, [fetchAll, headers])
 
+  useEffect(() => {
+    // #region agent log
+    adminDbg("H-mount", "AdminPage mounted", { path: window.location.pathname })
+    const onErr = (e: ErrorEvent) => {
+      adminDbg("H-window-error", e.message || "error", {
+        filename: e.filename,
+        lineno: e.lineno,
+        colno: e.colno,
+        err: e.error != null ? String(e.error) : "",
+      })
+    }
+    const onRej = (e: PromiseRejectionEvent) => {
+      adminDbg("H-unhandledrejection", "unhandledrejection", {
+        reason: e.reason instanceof Error ? e.reason.message : String(e.reason),
+      })
+    }
+    window.addEventListener("error", onErr)
+    window.addEventListener("unhandledrejection", onRej)
+    return () => {
+      window.removeEventListener("error", onErr)
+      window.removeEventListener("unhandledrejection", onRej)
+    }
+    // #endregion
+  }, [])
+
   /** Один раз при монтировании: пробуем ключ из localStorage и не показываем форму входа до проверки */
   useEffect(() => {
     let cancelled = false
@@ -572,6 +663,7 @@ export default function AdminPage() {
     }
     setAuthed(false)
     setOverview(null)
+    setFunnel(null)
     setStats(null)
     setProxy(null)
     setVpnOnline(null)
