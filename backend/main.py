@@ -1453,10 +1453,13 @@ class SubscriptionResponse(BaseModel):
 def get_subscription(telegram_id: int, req: Request, db: Session = Depends(get_db)) -> SubscriptionResponse:
     # Status fields (active/expires_at/suspended) are low-sensitivity and served publicly
     # so Mini App on Vercel can render the paid screen even if INTERNAL_API_TOKEN
-    # is not configured there. The sensitive proxy_link is still gated behind the token
-    # (bot on Railway has it, so /status keeps working; an attacker probing by tg_id
-    # cannot extract proxy credentials).
+    # is not configured there. proxy_link требует либо X-Internal-Token, либо валидный
+    # X-Telegram-Init-Data для этого tg_id (как /vpn/config) — иначе утечки по перебору tg_id.
     has_token = _has_valid_internal_token(req)
+    if INTERNAL_API_TOKEN and not has_token:
+        init_hdr = (req.headers.get("X-Telegram-Init-Data") or "").strip()
+        if init_hdr and _verify_telegram_webapp_init_data(init_hdr, int(telegram_id)):
+            has_token = True
     now = utcnow()
     sub = (
         db.execute(

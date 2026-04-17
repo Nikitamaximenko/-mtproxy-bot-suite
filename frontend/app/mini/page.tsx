@@ -3,15 +3,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { Manrope } from "next/font/google"
 import { Check, Copy, ExternalLink, RefreshCw, Shield, X } from "lucide-react"
-import { getTelegramInitData, getTelegramUser, openTelegramLink } from "@/lib/telegram"
+import { getTelegramInitData, getTelegramInitDataAsync, getTelegramUser, openTelegramLink } from "@/lib/telegram"
 
 const manrope = Manrope({ subsets: ["latin", "cyrillic"], weight: ["400", "500", "600", "700"] })
 
 /** Второй поток оплаты (Prodamus / СБП). По умолчанию скрыт — см. NEXT_PUBLIC_ENABLE_PRODAMUS_CHECKOUT и backend ENABLE_PRODAMUS_CHECKOUT. */
 const ENABLE_PRODAMUS_SBP = process.env.NEXT_PUBLIC_ENABLE_PRODAMUS_CHECKOUT === "true"
-
-/** Ссылка на бота — для fallback, когда proxy_link не пришёл с API (нет INTERNAL_API_TOKEN на Vercel и т.п.). */
-const TELEGRAM_BOT_URL = (process.env.NEXT_PUBLIC_TELEGRAM_BOT_URL || "https://t.me/FrostyProxyBot").replace(/\/+$/, "")
 
 type SubscriptionData = {
   active: boolean
@@ -305,7 +302,7 @@ export default function MiniAppPage() {
   const [vpnLoading, setVpnLoading] = useState(false)
   const [vpnLinkCopied, setVpnLinkCopied] = useState(false)
   const [vpnError, setVpnError] = useState<string | null>(null)
-
+  const [proxyBusy, setProxyBusy] = useState(false)
 
   // VPN server ping
   const [vpnPing, setVpnPing] = useState<{ online: boolean; latency_ms: number | null } | null>(null)
@@ -356,11 +353,17 @@ export default function MiniAppPage() {
   }, [])
 
   const refresh = useCallback(async () => {
-    // Case 1: Telegram user — look up by tg_id
+    // Case 1: Telegram user — POST + init_data, чтобы бэкенд отдал proxy_link без INTERNAL_API_TOKEN на Vercel
     if (tgId) {
       setLoading(true)
       try {
-        const res = await fetch(`/api/subscription?tg_id=${tgId}`, { cache: "no-store" })
+        const initData = await getTelegramInitDataAsync()
+        const res = await fetch("/api/subscription", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ tg_id: tgId, init_data: initData }),
+          cache: "no-store",
+        })
         const data = (await res.json()) as SubscriptionData
         setSub(res.ok ? data : null)
       } finally {
@@ -467,6 +470,34 @@ export default function MiniAppPage() {
   const isPaid = !!sub?.active
   const proxyLink = sub?.proxy_link ?? null
   const expiresAt = sub?.expires_at ?? null
+
+  /** Одна кнопка: открыть tg://proxy или сначала запросить ссылку с подписью Telegram. */
+  const handleConnectProxy = useCallback(async () => {
+    if (!tgId) return
+    if (proxyLink) {
+      openTelegramLink(proxyLink)
+      return
+    }
+    setProxyBusy(true)
+    try {
+      const initData = await getTelegramInitDataAsync()
+      const res = await fetch("/api/subscription", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ tg_id: tgId, init_data: initData }),
+        cache: "no-store",
+      })
+      const data = (await res.json()) as SubscriptionData
+      if (res.ok && data) {
+        setSub(data)
+        if (data.proxy_link) {
+          openTelegramLink(data.proxy_link)
+        }
+      }
+    } finally {
+      setProxyBusy(false)
+    }
+  }, [tgId, proxyLink])
   const suspendedButPaid = !!sub?.suspended && !!sub?.expires_at && !sub?.active
 
   const handlePay = async () => {
@@ -647,114 +678,73 @@ export default function MiniAppPage() {
             ))}
           </div>
 
-          {/* ── Proxy tab — один главный путь: огромная кнопка «подключить прокси» */}
+          {/* ── Proxy tab — одна кнопка «Подключить прокси» → tg://proxy внутри Telegram */}
           {activeTab === "proxy" && (
             <div className="space-y-4">
               <p className="px-1 text-xs leading-relaxed" style={{ color: "#6B7280" }}>
                 MTProxy работает только внутри Telegram — отдельные приложения не нужны.
               </p>
 
-              {proxyLink ? (
-                <>
-                  <div
-                    className="p-5"
-                    style={{
-                      background: "linear-gradient(145deg, #229ED9 0%, #2AABEE 55%, #0088CC 100%)",
-                      borderRadius: "20px",
-                      boxShadow: "0 8px 28px rgba(34,158,217,0.35)",
-                    }}
-                  >
-                    <p className="text-base font-bold" style={{ color: "#FFFFFF" }}>Прокси для Telegram</p>
-                    <p className="text-xs mt-1 mb-5" style={{ color: "rgba(255,255,255,0.92)" }}>
-                      Один тап — Telegram сам добавит ваш персональный MTProxy.
-                    </p>
-                    <button
-                      type="button"
-                      onClick={() => openTelegramLink(proxyLink)}
-                      className="w-full font-extrabold touch-manipulation active:scale-[0.98] transition-all leading-tight px-2"
-                      style={{
-                        background: "#FFFFFF",
-                        color: "#0088CC",
-                        height: "68px",
-                        borderRadius: "16px",
-                        fontSize: "14px",
-                        letterSpacing: "0.04em",
-                      }}
-                    >
-                      ПОДКЛЮЧИТЬ ПРОКСИ В TELEGRAM
-                    </button>
-                  </div>
+              <div
+                className="p-5"
+                style={{
+                  background: "linear-gradient(145deg, #229ED9 0%, #2AABEE 55%, #0088CC 100%)",
+                  borderRadius: "20px",
+                  boxShadow: "0 8px 28px rgba(34,158,217,0.35)",
+                }}
+              >
+                <p className="text-base font-bold" style={{ color: "#FFFFFF" }}>Прокси для Telegram</p>
+                <p className="text-xs mt-1 mb-4" style={{ color: "rgba(255,255,255,0.92)" }}>
+                  Нажмите кнопку — Telegram предложит подключить персональный MTProxy.
+                </p>
+                <button
+                  type="button"
+                  disabled={proxyBusy}
+                  onClick={() => void handleConnectProxy()}
+                  className="w-full font-bold touch-manipulation active:scale-[0.98] transition-all flex items-center justify-center gap-2 disabled:opacity-80"
+                  style={{
+                    background: "#FFFFFF",
+                    color: "#0088CC",
+                    minHeight: "56px",
+                    borderRadius: "16px",
+                    fontSize: "17px",
+                  }}
+                >
+                  {proxyBusy ? <RefreshCw className="w-5 h-5 animate-spin" /> : null}
+                  Подключить прокси
+                </button>
+              </div>
 
-                  <details className="group">
-                    <summary
-                      className="flex items-center justify-between px-4 py-3 cursor-pointer list-none touch-manipulation"
-                      style={{ background: "#F7F8FA", borderRadius: "14px", color: "#111827" }}
-                    >
-                      <span className="text-sm font-semibold">Ссылка или копирование</span>
-                      <span className="text-xs" style={{ color: "#2AABEE" }}>Открыть ↓</span>
-                    </summary>
-                    <div className="mt-2 p-4 space-y-3" style={{ background: "#F7F8FA", borderRadius: "14px" }}>
-                      <div className="p-3 font-mono text-[11px] break-all leading-relaxed" style={{ background: "#FFFFFF", borderRadius: "10px", color: "#6B7280" }}>
-                        {proxyLink}
-                      </div>
-                      <button
-                        type="button"
-                        onClick={handleCopy}
-                        className="w-full flex items-center justify-center gap-2 text-sm font-semibold touch-manipulation active:scale-95 transition-all"
-                        style={{
-                          background: copied ? "#F0FDF4" : "#FFFFFF",
-                          color: copied ? "#16A34A" : "#374151",
-                          height: "48px",
-                          borderRadius: "12px",
-                          border: "1px solid #E5E7EB",
-                        }}
-                      >
-                        {copied ? <><Check className="w-4 h-4" />Скопировано</> : <><Copy className="w-4 h-4" />Скопировать ссылку</>}
-                      </button>
-                    </div>
-                  </details>
-                </>
-              ) : (
-                <div className="space-y-3">
-                  <div
-                    className="p-5 text-center space-y-3"
-                    style={{
-                      background: "linear-gradient(145deg, #E0F2FE 0%, #F7F8FA 100%)",
-                      borderRadius: "20px",
-                      border: "1px solid #BAE6FD",
-                    }}
+              {proxyLink ? (
+                <details className="group">
+                  <summary
+                    className="flex items-center justify-between px-4 py-3 cursor-pointer list-none touch-manipulation"
+                    style={{ background: "#F7F8FA", borderRadius: "14px", color: "#111827" }}
                   >
-                    <p className="text-sm font-semibold" style={{ color: "#0C4A6E" }}>Ссылка ещё не подтянулась</p>
-                    <p className="text-xs leading-relaxed" style={{ color: "#0369A1" }}>
-                      Нажмите «Обновить» — чаще всего сразу появляется большая кнопка подключения. Или откройте бота — там «Статус» тоже даёт ссылку.
-                    </p>
+                    <span className="text-sm font-semibold">Ссылка или копирование</span>
+                    <span className="text-xs" style={{ color: "#2AABEE" }}>Открыть ↓</span>
+                  </summary>
+                  <div className="mt-2 p-4 space-y-3" style={{ background: "#F7F8FA", borderRadius: "14px" }}>
+                    <div className="p-3 font-mono text-[11px] break-all leading-relaxed" style={{ background: "#FFFFFF", borderRadius: "10px", color: "#6B7280" }}>
+                      {proxyLink}
+                    </div>
                     <button
                       type="button"
-                      onClick={() => void refresh()}
-                      className="w-full font-extrabold touch-manipulation active:scale-[0.98] transition-all"
+                      onClick={handleCopy}
+                      className="w-full flex items-center justify-center gap-2 text-sm font-semibold touch-manipulation active:scale-95 transition-all"
                       style={{
-                        background: "#2AABEE",
-                        color: "#FFFFFF",
-                        height: "64px",
-                        borderRadius: "16px",
-                        fontSize: "15px",
-                        letterSpacing: "0.02em",
-                        textTransform: "uppercase",
+                        background: copied ? "#F0FDF4" : "#FFFFFF",
+                        color: copied ? "#16A34A" : "#374151",
+                        height: "48px",
+                        borderRadius: "12px",
+                        border: "1px solid #E5E7EB",
                       }}
                     >
-                      Обновить и подключить
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => openTelegramLink(TELEGRAM_BOT_URL)}
-                      className="w-full text-sm font-semibold touch-manipulation py-3"
-                      style={{ color: "#0369A1" }}
-                    >
-                      Открыть бота Frosty
+                      {copied ? <><Check className="w-4 h-4" />Скопировано</> : <><Copy className="w-4 h-4" />Скопировать ссылку</>}
                     </button>
                   </div>
-                </div>
-              )}
+                </details>
+              ) : null}
 
               <details>
                 <summary

@@ -47,6 +47,24 @@ export function getTelegramInitData(): string {
   return typeof raw === "string" ? raw : ""
 }
 
+/** initData после ready(); двойной rAF — строка иногда появляетcя не на первом тике. */
+export async function getTelegramInitDataAsync(): Promise<string> {
+  if (typeof window === "undefined") return ""
+  try {
+    window?.Telegram?.WebApp?.ready?.()
+  } catch {
+    /* ignore */
+  }
+  let d = getTelegramInitData()
+  if (!d && (window as { Telegram?: { WebApp?: { version?: string } } }).Telegram?.WebApp?.version) {
+    await new Promise<void>((resolve) => {
+      requestAnimationFrame(() => requestAnimationFrame(() => resolve()))
+    })
+    d = getTelegramInitData()
+  }
+  return d
+}
+
 export function getTelegramUser(): TelegramWebAppUser | null {
   if (typeof window === "undefined") return null
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
