@@ -127,20 +127,25 @@ def main_menu_kb(tg_id: int) -> InlineKeyboardMarkup:
         InlineKeyboardButton(text="🆘 Поддержка", callback_data="menu:support"),
     ]
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="🚀 Прокси + VPN за 299 ₽", web_app=WebAppInfo(url=_miniapp_url(tg_id)))],
-        [InlineKeyboardButton(text="ℹ️ Как это работает", callback_data="menu:help")],
+        [InlineKeyboardButton(text="🛡 VPN — от 299 ₽/мес", web_app=WebAppInfo(url=_miniapp_url(tg_id)))],
+        [InlineKeyboardButton(text="ℹ️ Как подключить VPN", callback_data="menu:help")],
         row3,
     ])
 
 
-def proxy_kb(proxy_link: str) -> InlineKeyboardMarkup:
-    buttons: list[list[InlineKeyboardButton]] = [
-        [InlineKeyboardButton(text="🔌 Подключить прокси в Telegram", url=proxy_link)],
-        [InlineKeyboardButton(text="📋 Скопировать ссылку", callback_data="copy_proxy_link")],
-        [InlineKeyboardButton(text="📖 Ручная настройка прокси", callback_data="manual_setup")],
-        [InlineKeyboardButton(text="🏠 Главное меню", callback_data="menu:main")],
-    ]
-    return InlineKeyboardMarkup(inline_keyboard=buttons)
+def status_active_kb(tg_id: int) -> InlineKeyboardMarkup:
+    """Активная подписка: только VPN — настройка в мини-приложении."""
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text="🛡 Открыть VPN — личный кабинет",
+                    web_app=WebAppInfo(url=_miniapp_url(tg_id)),
+                )
+            ],
+            [InlineKeyboardButton(text="🏠 Главное меню", callback_data="menu:main")],
+        ]
+    )
 
 
 def support_kb() -> InlineKeyboardMarkup | None:
@@ -163,7 +168,7 @@ def support_invite_html() -> str:
         return (
             "✨ <b>Поддержка</b>\n\n"
             "Пишите <b>прямо в этот чат</b> — мы на связи и готовы помочь.\n\n"
-            "Отправьте <b>следующим сообщением</b> свой вопрос: оплата, настройка VPN (Happ), прокси для Telegram — дальше ответит помощник, "
+            "Отправьте <b>следующим сообщением</b> свой вопрос: оплата, настройка VPN (Happ) — дальше ответит помощник, "
             "и вы сможете продолжить с ним обычный диалог.\n\n"
             "<i>Закончить: кнопка ниже или /done</i>"
         )
@@ -190,7 +195,7 @@ HELP_GENERAL = (
     "🛡 <b>Как подключить VPN через Happ</b>\n"
     "\n"
     "<b>Шаг 1 — Оплата</b>\n"
-    "Нажми «Получить Прокси + VPN» и оплати картой или СБП.\n"
+    "Нажми «VPN — от 299 ₽» в меню и оплати картой или СБП.\n"
     "Подписка активируется автоматически.\n"
     "\n"
     "<b>Шаг 2 — Скачай Happ</b>\n"
@@ -204,15 +209,11 @@ HELP_GENERAL = (
     "3. В Happ вставь ссылку через «+» → «Из буфера»\n"
     "4. Нажми «Подключить» — готово ✅\n"
     "\n"
-    "<b>Шаг 4 — Прокси для Telegram</b>\n"
-    "Нажми «🔌 Подключить прокси» — Telegram добавит его автоматически.\n"
-    "\n"
     "━━━━━━━━━━━━━━━━\n"
     "❓ <b>Частые вопросы</b>\n"
     "\n"
     "<b>Сколько устройств?</b> До 10 на одном аккаунте\n"
     "<b>Лимит трафика?</b> Нет — скорость и трафик не ограничены\n"
-    "<b>Работают одновременно?</b> Да — прокси и VPN не мешают друг другу\n"
     "<b>Как отменить?</b> Напишите в поддержку через бота (кнопка «Поддержка»)"
 )
 
@@ -395,22 +396,12 @@ async def cmd_start(message: Message, session: aiohttp.ClientSession, state: FSM
             except Exception:
                 data = {}
 
-            if data.get("ok") and data.get("proxy_link"):
+            if data.get("ok"):
                 await message.answer(
-                    "🧊 <b>Frosty — Прокси + VPN активированы!</b>\n\n"
-                    "✅ Подписка 2 в 1 оформлена.\n"
-                    "📡 Нажми кнопку ниже чтобы подключить прокси в Telegram.\n"
-                    "🛡 VPN настраивается в личном кабинете — кнопка «Личный кабинет» в меню.",
+                    "🧊 <b>Frosty — подписка активирована!</b>\n\n"
+                    "✅ VPN доступен в личном кабинете — нажми кнопку ниже и открой вкладку «🛡 VPN».",
                     parse_mode="HTML",
-                    reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
-                        InlineKeyboardButton(text="🔗 Подключить прокси", url=data["proxy_link"])
-                    ]]),
-                )
-                return
-            elif data.get("ok"):
-                await message.answer(
-                    "✅ Подписка найдена, прокси активируется.\n"
-                    "Нажми /status через несколько секунд."
+                    reply_markup=status_active_kb(tg_id),
                 )
                 return
         # Некорректный или чужой токен — показываем обычный стартовый экран
@@ -424,30 +415,19 @@ async def cmd_start(message: Message, session: aiohttp.ClientSession, state: FSM
 
         if data.get("found"):
             expires_at = format_dt(data.get("expires_at"))
-            proxy_link = data.get("proxy_link") or ""
-            if proxy_link:
-                await message.answer(
-                    f"✅ Подписка активна до {expires_at} — персональный прокси готов.\n"
-                    "Нажми «🔌 Подключить прокси» — Telegram добавит его за 10 секунд.",
-                    reply_markup=proxy_kb(proxy_link),
-                )
-                return
-            else:
-                # FIX: Payment found but proxy not yet assigned — inform the user instead
-                # of silently falling through to the welcome screen.
-                await message.answer(
-                    "✅ Оплата прошла — подписка активируется, обычно это занимает несколько секунд.\n"
-                    "Нажми /status чтобы проверить."
-                )
-                return
+            await message.answer(
+                f"✅ Подписка активна до {expires_at}.\n\n"
+                "🛡 VPN — в личном кабинете, нажми кнопку ниже (вкладка «VPN»).",
+                reply_markup=status_active_kb(tg_id),
+            )
+            return
 
     await message.answer(
-        "🧊 <b>Frosty — 2 в 1 за 299 ₽/мес</b>\n"
+        "🧊 <b>Frosty VPN</b> — от 299 ₽/мес\n"
         "\n"
-        "📡 <b>MTProxy</b> — Telegram работает без ограничений, ничего лишнего включать не нужно\n"
-        "🛡 <b>VPN</b> — Instagram, TikTok, YouTube и любые другие сайты\n"
+        "🛡 <b>VLESS Reality</b> — Instagram, TikTok, YouTube и любые сайты без ограничений.\n"
         "\n"
-        "Всё это на <b>персональном сервере</b> — только ты, без чужих пользователей.\n"
+        "<b>Персональный доступ</b> — только ты на своём канале, без чужих пользователей.\n"
         "\n"
         f"<b>10 ₽/день · {PRICE_RUB} ₽/мес · Отмена в любой момент</b>",
         parse_mode="HTML",
@@ -496,17 +476,16 @@ async def cmd_status(message: Message, session: aiohttp.ClientSession, tg_id: in
 
     if not data.get("active"):
         await message.answer(
-            "📡 <b>Подписка не активна</b>\n"
+            "🛡 <b>Подписка не активна</b>\n"
             "\n"
-            "Без Frosty Telegram работает через заблокированные маршруты, а Instagram и TikTok — не работают вовсе.\n"
+            "С Frosty VPN открываются Instagram, TikTok, YouTube и другие сервисы — "
+            "на персональном канале, без лимита трафика.\n"
             "\n"
-            f"Frosty решает обе проблемы за <b>10 ₽/день</b>:\n"
-            "📡 MTProxy — Telegram без ограничений\n"
-            "🛡 VPN — Instagram, TikTok, YouTube",
+            f"<b>От {PRICE_RUB} ₽/мес</b> · 10 ₽/день · отмена через поддержку",
             parse_mode="HTML",
             reply_markup=InlineKeyboardMarkup(
                 inline_keyboard=[
-                    [InlineKeyboardButton(text="🚀 Прокси + VPN за 299 ₽", web_app=WebAppInfo(url=_miniapp_url(tg_id)))],
+                    [InlineKeyboardButton(text="🛡 Оформить VPN", web_app=WebAppInfo(url=_miniapp_url(tg_id)))],
                     [InlineKeyboardButton(text="🏠 Главное меню", callback_data="menu:main")],
                 ]
             ),
@@ -516,28 +495,22 @@ async def cmd_status(message: Message, session: aiohttp.ClientSession, tg_id: in
     expires_at = format_dt(data.get("expires_at"))
     proxy_link = data.get("proxy_link")
     status_text = (
-        f"✅ <b>Подписка 2 в 1 активна</b>\n"
+        f"✅ <b>Подписка VPN активна</b>\n"
         f"\n"
-        f"📡 MTProxy для Telegram — подключён\n"
-        f"🛡 VPN для всего остального — в личном кабинете\n"
+        f"🛡 Подключение — в <b>личном кабинете</b> (кнопка ниже), вкладка «VPN»\n"
         f"\n"
         f"📅 Действует до: {expires_at}\n"
         f"💳 Тариф: {PRICE_RUB} ₽/мес · 10 ₽/день\n"
         f"🖥 Устройств: до 10 на аккаунте\n"
         f"❓ Отмена — через кнопку «Поддержка» в боте"
     )
-
-    if proxy_link:
-        await message.answer(status_text, parse_mode="HTML", reply_markup=proxy_kb(proxy_link))
-    else:
-        await message.answer(
-            status_text
-            + "\n\n"
-            + "⚠️ Прокси-ключи пока не выданы на этом сервере. "
-            + "Напиши в поддержку — выдадим по оплаченному периоду.",
-            parse_mode="HTML",
-            reply_markup=support_kb(),
+    if not proxy_link:
+        status_text += (
+            "\n\n"
+            "⚠️ Конфигурация VPN на сервере ещё подгружается. "
+            "Если в кабинете нет ссылки на подключение — напиши в поддержку."
         )
+    await message.answer(status_text, parse_mode="HTML", reply_markup=status_active_kb(tg_id))
 
 
 async def main() -> None:
@@ -574,14 +547,13 @@ async def main() -> None:
         try:
             await bot.set_my_description(
                 description=(
-                    "Frosty — VPN + Прокси за 299 ₽/мес. "
-                    "🛡 VLESS Reality VPN открывает Instagram, TikTok, YouTube. "
-                    "📡 MTProxy включает Telegram. "
-                    "Только твой персональный сервер."
+                    "Frosty VPN — от 299 ₽/мес. "
+                    "VLESS Reality: Instagram, TikTok, YouTube без ограничений. "
+                    "Персональный канал, до 10 устройств."
                 )
             )
             await bot.set_my_short_description(
-                short_description="Прокси для Telegram + VPN для всего остального. 299 ₽/мес."
+                short_description="VPN для Instagram, TikTok, YouTube. От 299 ₽/мес."
             )
         except Exception:
             pass
@@ -705,16 +677,15 @@ async def main() -> None:
             tg_id = query.from_user.id
             await query.answer()
             await msg.answer(
-                f"<b>Frosty — 2 в 1</b> за <b>10 ₽/день</b> ({PRICE_RUB} ₽/мес).\n\n"
-                "📡 <b>MTProxy</b> — Telegram без блокировок, ничего лишнего включать не нужно\n"
-                "🛡 <b>VPN</b> — Instagram, TikTok, YouTube и любые другие сайты\n\n"
+                f"<b>Frosty VPN</b> — <b>10 ₽/день</b> ({PRICE_RUB} ₽/мес).\n\n"
+                "🛡 <b>VLESS Reality</b> — Instagram, TikTok, YouTube и любые сайты.\n\n"
                 "Нажми кнопку — оплата откроется прямо в Telegram.",
                 parse_mode="HTML",
                 reply_markup=InlineKeyboardMarkup(
                     inline_keyboard=[
                         [
                             InlineKeyboardButton(
-                                text="💳 Оформить подписку",
+                                text="💳 Оформить VPN",
                                 web_app=WebAppInfo(url=_miniapp_url(tg_id)),
                             )
                         ],
