@@ -781,7 +781,7 @@ export default function MiniAppPage() {
             </div>
           )}
 
-          {/* ── VPN tab ── Супер-простой путь: одна кнопка → импорт в Happ → работает */}
+          {/* ── VPN tab: пошаговая инструкция + копирование ссылки в Happ */}
           {activeTab === "vpn" && (
             <div className="space-y-4">
               {/* Стейт 1: первичная загрузка */}
@@ -878,139 +878,119 @@ export default function MiniAppPage() {
                 </div>
               )}
 
-              {/* Стейт 5: всё готово — главный экран «СУПЕР ПРОСТО подключиться» */}
+              {/* Стейт 5: готово — пошаговая инструкция + копирование ссылки (надёжнее deep link happ:// в WebView) */}
               {vpn?.available && vpn.vless_link && (
                 <>
-                  {/* Главный CTA — одна огромная кнопка. Нажал → Happ открылся → конфиг импортирован. */}
-                  <div
-                    className="p-5"
-                    style={{
-                      background: "linear-gradient(135deg, #0EA5E9 0%, #2AABEE 100%)",
-                      borderRadius: "20px",
-                      boxShadow: "0 8px 24px rgba(14,165,233,0.25)",
-                    }}
-                  >
+                  <div className="p-5" style={{ background: "#F7F8FA", borderRadius: "16px" }}>
                     <div className="flex items-center gap-3 mb-4">
                       <div
                         className="flex items-center justify-center flex-shrink-0"
-                        style={{ width: "44px", height: "44px", background: "rgba(255,255,255,0.2)", borderRadius: "12px" }}
+                        style={{ width: "44px", height: "44px", background: "#E0F2FE", borderRadius: "12px" }}
                       >
-                        <Shield className="w-6 h-6" style={{ color: "#FFFFFF" }} />
+                        <Shield className="w-6 h-6" style={{ color: "#0284C7" }} />
                       </div>
                       <div>
-                        <p className="text-sm font-bold" style={{ color: "#FFFFFF" }}>Ваш VPN готов</p>
-                        <p className="text-xs" style={{ color: "rgba(255,255,255,0.85)" }}>Сервер Finland · VLESS Reality</p>
+                        <p className="text-sm font-bold" style={{ color: "#111827" }}>Ваш VPN готов</p>
+                        <p className="text-xs" style={{ color: "#6B7280" }}>Finland · VLESS Reality</p>
                       </div>
                     </div>
 
-                    <button
-                      onClick={() => openTelegramLink(`happ://import/${encodeURIComponent(vpn.vless_link!)}`)}
-                      className="w-full flex items-center justify-center gap-2 font-bold touch-manipulation active:scale-[0.98] transition-all"
-                      style={{
-                        background: "#FFFFFF",
-                        color: "#0EA5E9",
-                        height: "64px",
-                        borderRadius: "16px",
-                        fontSize: "18px",
-                      }}
-                    >
-                      Подключить VPN в один тап
-                    </button>
-                    <p className="text-xs text-center mt-3" style={{ color: "rgba(255,255,255,0.9)" }}>
-                      Нажмите и конфиг импортируется в Happ автоматически
-                    </p>
+                    <p className="text-sm font-semibold mb-3" style={{ color: "#111827" }}>Как подключить (4 шага)</p>
+                    <ol className="space-y-3 text-[13px] leading-snug pl-0 list-none">
+                      <li className="flex gap-2">
+                        <span className="font-bold flex-shrink-0 w-5" style={{ color: "#2AABEE" }}>1</span>
+                        <span style={{ color: "#374151" }}>
+                          Установите приложение <strong>Happ</strong> (бесплатно):{" "}
+                          <a
+                            href="https://apps.apple.com/app/happ-proxy-utility/id6504287215"
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="font-semibold underline"
+                            style={{ color: "#2563EB" }}
+                          >
+                            iPhone
+                          </a>
+                          {" · "}
+                          <a
+                            href="https://play.google.com/store/apps/details?id=com.happ.vpn"
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="font-semibold underline"
+                            style={{ color: "#2563EB" }}
+                          >
+                            Android
+                          </a>
+                        </span>
+                      </li>
+                      <li className="flex gap-2">
+                        <span className="font-bold flex-shrink-0 w-5" style={{ color: "#2AABEE" }}>2</span>
+                        <span style={{ color: "#374151" }}>
+                          Нажмите большую кнопку <strong>«Скопировать ссылку для Happ»</strong> ниже — длинная строка попадёт в буфер обмена.
+                        </span>
+                      </li>
+                      <li className="flex gap-2">
+                        <span className="font-bold flex-shrink-0 w-5" style={{ color: "#2AABEE" }}>3</span>
+                        <span style={{ color: "#374151" }}>
+                          Откройте Happ → нажмите <strong>+</strong> → выберите <strong>«Вставить из буфера обмена»</strong> (или «Импорт из буфера» — название может немного отличаться).
+                        </span>
+                      </li>
+                      <li className="flex gap-2">
+                        <span className="font-bold flex-shrink-0 w-5" style={{ color: "#2AABEE" }}>4</span>
+                        <span style={{ color: "#374151" }}>
+                          В списке появится профиль Frosty — включите переключатель <strong>VPN</strong> рядом с ним.
+                        </span>
+                      </li>
+                    </ol>
                   </div>
 
-                  {/* Если Happ ещё не установлен — блок установки. Сворачиваемо по tap */}
-                  <details className="group">
-                    <summary
-                      className="flex items-center justify-between px-4 py-3 cursor-pointer list-none touch-manipulation"
-                      style={{ background: "#F7F8FA", borderRadius: "14px", color: "#111827" }}
-                    >
-                      <span className="text-sm font-semibold">Happ ещё не установлен?</span>
-                      <span className="text-xs" style={{ color: "#2AABEE" }}>
-                        Открыть ↓
-                      </span>
-                    </summary>
-                    <div className="mt-2 p-4 space-y-3" style={{ background: "#F7F8FA", borderRadius: "14px" }}>
-                      <p className="text-xs" style={{ color: "#6B7280" }}>
-                        Happ — бесплатное приложение-клиент для VLESS. Установите и вернитесь сюда, нажмите кнопку выше ещё раз.
-                      </p>
-                      <div className="flex gap-2">
-                        <a
-                          href="https://apps.apple.com/app/happ-proxy-utility/id6504287215"
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="flex-1 flex items-center justify-center gap-1.5 text-sm font-semibold touch-manipulation active:scale-95 transition-all"
-                          style={{ background: "#FFFFFF", color: "#111827", height: "44px", borderRadius: "12px", border: "1px solid #E5E7EB" }}
-                        >
-                          iPhone
-                        </a>
-                        <a
-                          href="https://play.google.com/store/apps/details?id=com.happ.vpn"
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="flex-1 flex items-center justify-center gap-1.5 text-sm font-semibold touch-manipulation active:scale-95 transition-all"
-                          style={{ background: "#FFFFFF", color: "#111827", height: "44px", borderRadius: "12px", border: "1px solid #E5E7EB" }}
-                        >
-                          Android
-                        </a>
-                      </div>
-                    </div>
-                  </details>
+                  <button
+                    type="button"
+                    onClick={handleCopyVlessLink}
+                    className="w-full flex items-center justify-center gap-2 font-bold touch-manipulation active:scale-[0.99] transition-all"
+                    style={{
+                      background: vpnLinkCopied ? "#16A34A" : "#2AABEE",
+                      color: "#FFFFFF",
+                      minHeight: "56px",
+                      borderRadius: "16px",
+                      fontSize: "16px",
+                    }}
+                  >
+                    {vpnLinkCopied ? (
+                      <><Check className="w-5 h-5" /> Скопировано — вставьте в Happ</>
+                    ) : (
+                      <><Copy className="w-5 h-5" /> Скопировать ссылку для Happ</>
+                    )}
+                  </button>
 
-                  {/* Альтернативы — ссылка и QR. Убрано с главного экрана чтобы не отвлекать */}
+                  <div className="p-3 font-mono text-[10px] break-all leading-relaxed max-h-28 overflow-y-auto" style={{ background: "#FFFFFF", borderRadius: "12px", border: "1px solid #E5E7EB", color: "#6B7280" }}>
+                    {vpn.vless_link}
+                  </div>
+
                   <details>
                     <summary
-                      className="flex items-center justify-between px-4 py-3 cursor-pointer list-none touch-manipulation"
-                      style={{ background: "#F7F8FA", borderRadius: "14px", color: "#111827" }}
+                      className="flex items-center justify-between px-4 py-3 cursor-pointer list-none touch-manipulation text-sm font-semibold"
+                      style={{ background: "#F7F8FA", borderRadius: "14px", color: "#6B7280" }}
                     >
-                      <span className="text-sm font-semibold">Другой VPN-клиент или QR-код</span>
-                      <span className="text-xs" style={{ color: "#2AABEE" }}>Открыть ↓</span>
+                      QR-код (другой телефон)
+                      <span className="text-xs font-normal" style={{ color: "#2AABEE" }}>↓</span>
                     </summary>
-                    <div className="mt-2 p-5 space-y-4" style={{ background: "#F7F8FA", borderRadius: "14px" }}>
-                      <div>
-                        <p className="text-xs font-semibold mb-2" style={{ color: "#111827" }}>Ссылка для импорта</p>
-                        <div className="p-3 font-mono text-[11px] break-all leading-relaxed mb-2" style={{ background: "#FFFFFF", borderRadius: "10px", color: "#6B7280" }}>
-                          {vpn.vless_link}
-                        </div>
-                        <button
-                          onClick={handleCopyVlessLink}
-                          className="w-full flex items-center justify-center gap-1.5 text-sm font-semibold touch-manipulation active:scale-95 transition-all"
-                          style={{
-                            background: vpnLinkCopied ? "#F0FDF4" : "#FFFFFF",
-                            color: vpnLinkCopied ? "#16A34A" : "#374151",
-                            height: "44px",
-                            borderRadius: "12px",
-                            border: "1px solid #E5E7EB",
-                          }}
-                        >
-                          {vpnLinkCopied ? <><Check className="w-4 h-4" />Скопировано</> : <><Copy className="w-4 h-4" />Скопировать ссылку</>}
-                        </button>
-                      </div>
-
-                      <div>
-                        <p className="text-xs font-semibold mb-2" style={{ color: "#111827" }}>QR-код для другого устройства</p>
-                        <div
-                          className="mx-auto flex items-center justify-center p-3"
-                          style={{ background: "#FFFFFF", borderRadius: "14px", maxWidth: "200px", boxShadow: "0 1px 6px rgba(0,0,0,0.05)" }}
-                        >
-                          {/* eslint-disable-next-line @next/next/no-img-element */}
-                          <img
-                            src={`https://api.qrserver.com/v1/create-qr-code/?size=180x180&data=${encodeURIComponent(vpn.vless_link)}`}
-                            alt="QR код VPN"
-                            width={180}
-                            height={180}
-                            style={{ display: "block", borderRadius: "8px" }}
-                          />
-                        </div>
+                    <div className="mt-2 flex flex-col items-center p-4" style={{ background: "#F7F8FA", borderRadius: "14px" }}>
+                      <p className="text-xs text-center mb-3" style={{ color: "#6B7280" }}>В Happ: «+» → «Сканировать QR»</p>
+                      <div className="p-3" style={{ background: "#FFFFFF", borderRadius: "14px", boxShadow: "0 1px 6px rgba(0,0,0,0.06)" }}>
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img
+                          src={`https://api.qrserver.com/v1/create-qr-code/?size=180x180&data=${encodeURIComponent(vpn.vless_link)}`}
+                          alt="QR код VPN"
+                          width={180}
+                          height={180}
+                          style={{ display: "block", borderRadius: "8px" }}
+                        />
                       </div>
                     </div>
                   </details>
 
-                  {/* Мелкая подсказка снизу */}
                   <p className="text-xs text-center px-2" style={{ color: "#9CA3AF" }}>
-                    Один конфиг работает на всех ваших устройствах. Без логов. Персональный сервер.
+                    Один конфиг на все ваши устройства. Персональный сервер, без логов трафика.
                   </p>
                 </>
               )}
