@@ -75,6 +75,34 @@ LAVA_CHECKOUT_FALLBACK_URL = (os.getenv("LAVA_CHECKOUT_FALLBACK_URL") or "").str
 
 ADMIN_API_KEY = (os.getenv("ADMIN_API_KEY") or "").strip()
 
+
+def _parse_telegram_id_csv(raw: str) -> set[int] | None:
+    """Comma-separated telegram ids; empty or invalid → no filter."""
+    s = (raw or "").strip()
+    if not s:
+        return None
+    out: set[int] = set()
+    for part in s.split(","):
+        p = part.strip()
+        if not p:
+            continue
+        try:
+            out.add(int(p))
+        except ValueError:
+            continue
+    return out if out else None
+
+
+# If set, admin analytics (stats, funnel, users-overview) only include these telegram_ids.
+ANALYTICS_PRODUCTION_TG_IDS: set[int] | None = _parse_telegram_id_csv(
+    os.getenv("ANALYTICS_PRODUCTION_TG_IDS", "")
+)
+
+
+def _analytics_scope() -> set[int] | None:
+    return ANALYTICS_PRODUCTION_TG_IDS
+
+
 PRODAMUS_SECRET_KEY = (os.getenv("PRODAMUS_SECRET_KEY") or "").strip()
 PRODAMUS_PAYMENT_URL = (os.getenv("PRODAMUS_PAYMENT_URL") or "https://admaster.payform.ru/").strip()
 # Второй поток оплаты (Prodamus / СБП). Пока выключен — не создаём чекаут; вебхук остаётся для уже начатых оплат.
@@ -2267,57 +2295,85 @@ class AdminStatsResponse(BaseModel):
     pending_payments: int
     revenue_estimate: int
     referrals: list[RefStat]
+    analytics_scoped: bool = False  # True when ANALYTICS_PRODUCTION_TG_IDS limits metrics
 
 
 @app.get("/admin/stats", response_model=AdminStatsResponse)
 def admin_stats(req: Request, db: Session = Depends(get_db)) -> AdminStatsResponse:
     _require_admin(req)
     now = utcnow()
+    scope = _analytics_scope()
+    scoped = scope is not None
 
-    total_users = db.execute(select(func.count()).select_from(User)).scalar() or 0
-    tg_users = db.execute(select(func.count()).select_from(User).where(User.telegram_id > 0)).scalar() or 0
-    marketing_opt_out_users = (
+    total_users = (
         db.execute(
-            select(func.count()).select_from(User).where(User.marketing_opt_out == True),  # noqa: E712
+            select(func.count()).select_from(User).where(User.telegram_id.in_(scope))
+            if scope
+            else select(func.count()).select_from(User)
         ).scalar()
         or 0
     )
+    tg_users = (
+        db.execute(
+            select(func.count())
+            .select_from(User)
+            .where(
+                and_(User.telegram_id > 0, User.telegram_id.in_(scope))
+                if scope
+                else User.telegram_id > 0
+            )
+        ).scalar()
+        or 0
+    )
+    mo_conds = [User.marketing_opt_out == True]  # noqa: E712
+    if scope is not None:
+        mo_conds.append(User.telegram_id.in_(scope))
+    marketing_opt_out_users = db.execute(select(func.count()).select_from(User).where(and_(*mo_conds))).scalar() or 0
+
+    def _sub_conds(*parts):
+        p = list(parts)
+        if scope:
+            p.insert(0, Subscription.telegram_id.in_(scope))
+        return and_(*p)
 
     active = db.execute(
         select(func.count()).select_from(Subscription).where(
-            Subscription.payment_status == "paid",
-            Subscription.expires_at.is_not(None),
-            Subscription.expires_at > now,
-            Subscription.access_suspended == False,  # noqa: E712
+            _sub_conds(
+                Subscription.payment_status == "paid",
+                Subscription.expires_at.is_not(None),
+                Subscription.expires_at > now,
+                Subscription.access_suspended == False,  # noqa: E712
+            )
         )
     ).scalar() or 0
 
     expired = db.execute(
         select(func.count()).select_from(Subscription).where(
-            Subscription.payment_status.in_(["paid", "expired"]),
-            Subscription.expires_at.is_not(None),
-            Subscription.expires_at <= now,
+            _sub_conds(
+                Subscription.payment_status.in_(["paid", "expired"]),
+                Subscription.expires_at.is_not(None),
+                Subscription.expires_at <= now,
+            )
         )
     ).scalar() or 0
 
     pending = db.execute(
         select(func.count()).select_from(Subscription).where(
-            Subscription.payment_status == "pending",
+            _sub_conds(Subscription.payment_status == "pending")
         )
     ).scalar() or 0
 
     total_paid = db.execute(
         select(func.count()).select_from(Subscription).where(
-            Subscription.payment_status.in_(["paid", "expired"]),
+            _sub_conds(Subscription.payment_status.in_(["paid", "expired"]))
         )
     ).scalar() or 0
 
-    ref_rows = db.execute(
-        select(User.ref_source, func.count().label("cnt"))
-        .where(User.ref_source.is_not(None))
-        .group_by(User.ref_source)
-        .order_by(func.count().desc())
-    ).all()
+    ref_q = select(User.ref_source, func.count().label("cnt")).where(User.ref_source.is_not(None))
+    if scope is not None:
+        ref_q = ref_q.where(User.telegram_id.in_(scope))
+    ref_q = ref_q.group_by(User.ref_source).order_by(func.count().desc())
+    ref_rows = db.execute(ref_q).all()
     referrals = [RefStat(source=r[0], count=r[1]) for r in ref_rows]
 
     return AdminStatsResponse(
@@ -2329,6 +2385,7 @@ def admin_stats(req: Request, db: Session = Depends(get_db)) -> AdminStatsRespon
         pending_payments=pending,
         revenue_estimate=total_paid * PAYMENT_AMOUNT_RUB,
         referrals=referrals,
+        analytics_scoped=scoped,
     )
 
 
@@ -2365,78 +2422,99 @@ class FunnelStatsResponse(BaseModel):
     nudge_converted: int        # users who got nudge_1 and later paid — shows nudge ROI
     opted_out: int
 
+    analytics_scoped: bool = False
+
 
 @app.get("/admin/funnel", response_model=FunnelStatsResponse)
 def admin_funnel(req: Request, db: Session = Depends(get_db)) -> FunnelStatsResponse:
     _require_admin(req)
     now = utcnow()
     week_ago = now - timedelta(days=7)
+    scope = _analytics_scope()
+    scoped = scope is not None
+    tg_user_cond = (
+        and_(User.telegram_id > 0, User.telegram_id.in_(scope)) if scope is not None else User.telegram_id > 0
+    )
+    sub_tg_cond = (
+        and_(Subscription.telegram_id > 0, Subscription.telegram_id.in_(scope))
+        if scope is not None
+        else Subscription.telegram_id > 0
+    )
 
     # ── TG users (unique real Telegram users, tg_id > 0) ──────────────────────
-    tg_users = db.execute(
-        select(func.count()).select_from(User).where(User.telegram_id > 0)
-    ).scalar() or 0
+    tg_users = db.execute(select(func.count()).select_from(User).where(tg_user_cond)).scalar() or 0
     tg_users_7d = db.execute(
-        select(func.count()).select_from(User).where(User.telegram_id > 0, User.created_at >= week_ago)
+        select(func.count()).select_from(User).where(tg_user_cond, User.created_at >= week_ago)
     ).scalar() or 0
 
     # Checkout = subscription row created; deduped by distinct telegram_id
     tg_checkout = db.execute(
-        select(func.count(Subscription.telegram_id.distinct())).select_from(Subscription).where(
-            Subscription.telegram_id > 0
-        )
+        select(func.count(Subscription.telegram_id.distinct()))
+        .select_from(Subscription)
+        .where(sub_tg_cond)
     ).scalar() or 0
     tg_checkout_7d = db.execute(
-        select(func.count(Subscription.telegram_id.distinct())).select_from(Subscription).where(
-            Subscription.telegram_id > 0, Subscription.created_at >= week_ago
-        )
+        select(func.count(Subscription.telegram_id.distinct()))
+        .select_from(Subscription)
+        .where(sub_tg_cond, Subscription.created_at >= week_ago)
     ).scalar() or 0
 
     # Payment link = lava_contract_id was assigned; deduped
     tg_payment_link = db.execute(
-        select(func.count(Subscription.telegram_id.distinct())).select_from(Subscription).where(
-            Subscription.telegram_id > 0, Subscription.lava_contract_id.is_not(None)
-        )
+        select(func.count(Subscription.telegram_id.distinct()))
+        .select_from(Subscription)
+        .where(sub_tg_cond, Subscription.lava_contract_id.is_not(None))
     ).scalar() or 0
 
     # Paid (ever) = paid or expired; deduped
     tg_paid = db.execute(
-        select(func.count(Subscription.telegram_id.distinct())).select_from(Subscription).where(
-            Subscription.telegram_id > 0, Subscription.payment_status.in_(["paid", "expired"])
-        )
+        select(func.count(Subscription.telegram_id.distinct()))
+        .select_from(Subscription)
+        .where(sub_tg_cond, Subscription.payment_status.in_(["paid", "expired"]))
     ).scalar() or 0
     tg_paid_7d = db.execute(
-        select(func.count(Subscription.telegram_id.distinct())).select_from(Subscription).where(
-            Subscription.telegram_id > 0,
+        select(func.count(Subscription.telegram_id.distinct()))
+        .select_from(Subscription)
+        .where(
+            sub_tg_cond,
             Subscription.payment_status.in_(["paid", "expired"]),
             Subscription.created_at >= week_ago,
         )
     ).scalar() or 0
 
     # Active now
+    active_now_conds = [
+        Subscription.payment_status == "paid",
+        Subscription.expires_at.is_not(None),
+        Subscription.expires_at > now,
+        Subscription.access_suspended == False,  # noqa: E712
+    ]
+    if scope is not None:
+        active_now_conds.insert(0, Subscription.telegram_id.in_(scope))
     active_now = db.execute(
-        select(func.count()).select_from(Subscription).where(
-            Subscription.payment_status == "paid",
-            Subscription.expires_at.is_not(None),
-            Subscription.expires_at > now,
-            Subscription.access_suspended == False,  # noqa: E712
-        )
+        select(func.count()).select_from(Subscription).where(and_(*active_now_conds))
     ).scalar() or 0
 
-    # ── Web users (telegram_id < 0) ──────────────────────────────────────────
-    web_users = db.execute(
-        select(func.count()).select_from(User).where(User.telegram_id < 0)
-    ).scalar() or 0
-    web_paid = db.execute(
-        select(func.count(Subscription.telegram_id.distinct())).select_from(Subscription).where(
-            Subscription.telegram_id < 0, Subscription.payment_status.in_(["paid", "expired"])
-        )
-    ).scalar() or 0
+    # ── Web users (telegram_id < 0) — скрыты при production-scope ─────────────
+    if scope is not None:
+        web_users = 0
+        web_paid = 0
+    else:
+        web_users = db.execute(
+            select(func.count()).select_from(User).where(User.telegram_id < 0)
+        ).scalar() or 0
+        web_paid = db.execute(
+            select(func.count(Subscription.telegram_id.distinct()))
+            .select_from(Subscription)
+            .where(
+                Subscription.telegram_id < 0, Subscription.payment_status.in_(["paid", "expired"])
+            )
+        ).scalar() or 0
 
     # ── Source conversion: users + paid per ref_source ───────────────────────
     source_user_rows = db.execute(
         select(User.ref_source, func.count().label("cnt"))
-        .where(User.telegram_id > 0)
+        .where(tg_user_cond)
         .group_by(User.ref_source)
         .order_by(func.count().desc())
     ).all()
@@ -2445,7 +2523,7 @@ def admin_funnel(req: Request, db: Session = Depends(get_db)) -> FunnelStatsResp
     source_paid_rows = db.execute(
         select(User.ref_source, func.count(User.telegram_id.distinct()).label("cnt"))
         .join(Subscription, Subscription.telegram_id == User.telegram_id)
-        .where(User.telegram_id > 0, Subscription.payment_status.in_(["paid", "expired"]))
+        .where(tg_user_cond, Subscription.payment_status.in_(["paid", "expired"]))
         .group_by(User.ref_source)
     ).all()
     paid_by_source: dict[str | None, int] = {r[0]: r[1] for r in source_paid_rows}
@@ -2456,14 +2534,19 @@ def admin_funnel(req: Request, db: Session = Depends(get_db)) -> FunnelStatsResp
     ]
 
     # ── Engagement ───────────────────────────────────────────────────────────
+    def _nu(*conds):
+        if scope is None:
+            return and_(*conds)
+        return and_(User.telegram_id.in_(scope), *conds)
+
     nudge_1_sent = db.execute(
-        select(func.count()).select_from(User).where(User.nudge_1_sent_at.is_not(None))
+        select(func.count()).select_from(User).where(_nu(User.nudge_1_sent_at.is_not(None)))
     ).scalar() or 0
     nudge_2_sent = db.execute(
-        select(func.count()).select_from(User).where(User.nudge_2_sent_at.is_not(None))
+        select(func.count()).select_from(User).where(_nu(User.nudge_2_sent_at.is_not(None)))
     ).scalar() or 0
     nudge_3_sent = db.execute(
-        select(func.count()).select_from(User).where(User.nudge_3_sent_at.is_not(None))
+        select(func.count()).select_from(User).where(_nu(User.nudge_3_sent_at.is_not(None)))
     ).scalar() or 0
 
     # Nudge converted: got nudge_1 + eventually paid
@@ -2471,13 +2554,15 @@ def admin_funnel(req: Request, db: Session = Depends(get_db)) -> FunnelStatsResp
         select(func.count(User.telegram_id.distinct()))
         .join(Subscription, Subscription.telegram_id == User.telegram_id)
         .where(
-            User.nudge_1_sent_at.is_not(None),
-            Subscription.payment_status.in_(["paid", "expired"]),
+            _nu(
+                User.nudge_1_sent_at.is_not(None),
+                Subscription.payment_status.in_(["paid", "expired"]),
+            )
         )
     ).scalar() or 0
 
     opted_out = db.execute(
-        select(func.count()).select_from(User).where(User.marketing_opt_out == True)  # noqa: E712
+        select(func.count()).select_from(User).where(_nu(User.marketing_opt_out == True))  # noqa: E712
     ).scalar() or 0
 
     return FunnelStatsResponse(
@@ -2497,6 +2582,7 @@ def admin_funnel(req: Request, db: Session = Depends(get_db)) -> FunnelStatsResp
         nudge_3_sent=nudge_3_sent,
         nudge_converted=nudge_converted,
         opted_out=opted_out,
+        analytics_scoped=scoped,
     )
 
 
@@ -2540,6 +2626,43 @@ def admin_cleanup_web_users(req: Request, db: Session = Depends(get_db)) -> Clea
         deleted_users=del_users.rowcount,
         deleted_pending_subscriptions=del_subs.rowcount,
         kept_paid_subscriptions=kept,
+    )
+
+
+class PurgeExceptRequest(BaseModel):
+    """Удалить из БД всех, кроме перечисленных telegram_id (users, subscriptions, vpn_peers, vpn_clients)."""
+
+    telegram_ids: list[int] = Field(..., min_length=1)
+    confirm: str = Field(..., min_length=1)
+
+
+class PurgeExceptResponse(BaseModel):
+    deleted_users: int
+    deleted_subscriptions: int
+    deleted_vpn_peers: int
+    deleted_vpn_clients: int
+
+
+@app.post("/admin/purge-except", response_model=PurgeExceptResponse)
+def admin_purge_except(body: PurgeExceptRequest, req: Request, db: Session = Depends(get_db)) -> PurgeExceptResponse:
+    """
+    Необратимо удаляет тестовые/лишние записи: остаются только указанные telegram_id.
+    Требует confirm == \"PURGE\".
+    """
+    _require_admin(req)
+    if body.confirm != "PURGE":
+        raise HTTPException(status_code=400, detail='Поле confirm должно быть строкой \"PURGE\"')
+    keep = set(body.telegram_ids)
+    ds = db.execute(delete(Subscription).where(Subscription.telegram_id.notin_(list(keep))))
+    dp = db.execute(delete(VpnPeer).where(VpnPeer.telegram_id.notin_(list(keep))))
+    dc = db.execute(delete(VpnClient).where(VpnClient.telegram_id.notin_(list(keep))))
+    du = db.execute(delete(User).where(User.telegram_id.notin_(list(keep))))
+    db.commit()
+    return PurgeExceptResponse(
+        deleted_subscriptions=int(ds.rowcount or 0),
+        deleted_vpn_peers=int(dp.rowcount or 0),
+        deleted_vpn_clients=int(dc.rowcount or 0),
+        deleted_users=int(du.rowcount or 0),
     )
 
 
@@ -2653,6 +2776,7 @@ class AdminUsersOverviewResponse(BaseModel):
     new_users_total: int
     subscribers_total: int
     users_table_total: int
+    analytics_scoped: bool = False
 
 
 @app.get("/admin/users-overview", response_model=AdminUsersOverviewResponse)
@@ -2662,31 +2786,37 @@ def admin_users_overview(
     limit: int = Query(5000, ge=1, le=20000),
 ) -> AdminUsersOverviewResponse:
     _require_admin(req)
+    scope = _analytics_scope()
+    scoped = scope is not None
 
-    users_table_total = db.execute(select(func.count()).select_from(User)).scalar() or 0
+    if scope is not None:
+        users_table_total = db.execute(
+            select(func.count()).select_from(User).where(User.telegram_id.in_(scope))
+        ).scalar() or 0
+    else:
+        users_table_total = db.execute(select(func.count()).select_from(User)).scalar() or 0
 
-    paid_telegram_ids = (
-        select(Subscription.telegram_id)
-        .where(Subscription.payment_status.in_(["paid", "expired"]))
-        .distinct()
+    paid_telegram_ids = select(Subscription.telegram_id).where(
+        Subscription.payment_status.in_(["paid", "expired"])
     )
+    if scope is not None:
+        paid_telegram_ids = paid_telegram_ids.where(Subscription.telegram_id.in_(scope))
+    paid_telegram_ids = paid_telegram_ids.distinct()
+
+    nu_conds = [User.telegram_id.notin_(paid_telegram_ids)]
+    if scope is not None:
+        nu_conds.append(User.telegram_id.in_(scope))
 
     new_users_list = (
         db.execute(
-            select(User)
-            .where(User.telegram_id.notin_(paid_telegram_ids))
-            .order_by(User.created_at.desc())
-            .limit(limit)
+            select(User).where(and_(*nu_conds)).order_by(User.created_at.desc()).limit(limit)
         )
         .scalars()
         .all()
     )
 
     new_users_total = (
-        db.execute(
-            select(func.count()).select_from(User).where(User.telegram_id.notin_(paid_telegram_ids))
-        ).scalar()
-        or 0
+        db.execute(select(func.count()).select_from(User).where(and_(*nu_conds))).scalar() or 0
     )
 
     paid_ids_subq = paid_telegram_ids.subquery()
@@ -2737,6 +2867,7 @@ def admin_users_overview(
         new_users_total=int(new_users_total),
         subscribers_total=int(subscribers_total),
         users_table_total=int(users_table_total),
+        analytics_scoped=scoped,
     )
 
 

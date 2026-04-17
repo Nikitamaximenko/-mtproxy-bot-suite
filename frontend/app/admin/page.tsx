@@ -16,6 +16,7 @@ type Stats = {
   pending_payments: number
   revenue_estimate: number
   referrals: RefStat[]
+  analytics_scoped?: boolean
 }
 
 type ProxyStatus = {
@@ -74,6 +75,7 @@ type UsersOverview = {
   new_users_total: number
   subscribers_total: number
   users_table_total: number
+  analytics_scoped?: boolean
 }
 
 type SourceStat = {
@@ -103,6 +105,7 @@ type FunnelStats = {
   nudge_3_sent: number
   nudge_converted: number
   opted_out: number
+  analytics_scoped?: boolean
 }
 
 function formatDate(iso: string | null) {
@@ -190,6 +193,11 @@ function GrantAccessButton({ busy, onGrant }: { busy: boolean; onGrant: () => vo
 
 const STORAGE_KEY = "frosty_admin_key"
 
+/** Реальные активные подписчики (prod): после purge в БД остаются только эти telegram_id. */
+const PRODUCTION_TELEGRAM_IDS = [
+  231115635, 1760841179, 1759725640, 195699085, 282345092,
+] as const
+
 export default function AdminPage() {
   const [key, setKey] = useState("")
   const [authed, setAuthed] = useState(false)
@@ -223,6 +231,13 @@ export default function AdminPage() {
   const [buttonUrl, setButtonUrl] = useState("")
   const [cleanupBusy, setCleanupBusy] = useState(false)
   const [cleanupResult, setCleanupResult] = useState<{ deleted_users: number; deleted_pending_subscriptions: number; kept_paid_subscriptions: number } | null>(null)
+  const [purgeBusy, setPurgeBusy] = useState(false)
+  const [purgeResult, setPurgeResult] = useState<{
+    deleted_users: number
+    deleted_subscriptions: number
+    deleted_vpn_peers: number
+    deleted_vpn_clients: number
+  } | null>(null)
   const ADMIN_TG_ID = 231115635
 
   const broadcastRecipientEstimate =
@@ -463,6 +478,57 @@ export default function AdminPage() {
     }
   }, [fetchAll, headers])
 
+  const purgeExceptProduction = useCallback(async () => {
+    const idsStr = PRODUCTION_TELEGRAM_IDS.join(", ")
+    const ok = window.confirm(
+      "УДАЛИТЬ из базы всех пользователей и подписки, КРОМЕ следующих telegram_id?\n\n" +
+        idsStr +
+        "\n\nБудут удалены строки в users, subscriptions, vpn_peers, vpn_clients. " +
+        "Операция необратима. Продолжить?"
+    )
+    if (!ok) return
+    const typed = window.prompt('Для подтверждения введите слово PURGE (заглавными):')
+    if (typed !== "PURGE") {
+      setError(typed === null ? "" : "Нужно ввести PURGE")
+      return
+    }
+    setPurgeBusy(true)
+    setPurgeResult(null)
+    setError("")
+    try {
+      const res = await fetch("/api/admin/purge-except", {
+        method: "POST",
+        headers: {
+          ...headers(),
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ telegram_ids: [...PRODUCTION_TELEGRAM_IDS], confirm: "PURGE" }),
+        cache: "no-store",
+      })
+      const data = (await res.json().catch(() => ({}))) as {
+        detail?: string
+        deleted_users?: number
+        deleted_subscriptions?: number
+        deleted_vpn_peers?: number
+        deleted_vpn_clients?: number
+      }
+      if (!res.ok) {
+        throw new Error(typeof data.detail === "string" ? data.detail : `Ошибка ${res.status}`)
+      }
+      setPurgeResult({
+        deleted_users: data.deleted_users ?? 0,
+        deleted_subscriptions: data.deleted_subscriptions ?? 0,
+        deleted_vpn_peers: data.deleted_vpn_peers ?? 0,
+        deleted_vpn_clients: data.deleted_vpn_clients ?? 0,
+      })
+      await fetchAll()
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Не удалось выполнить очистку")
+    } finally {
+      setPurgeBusy(false)
+    }
+  }, [fetchAll, headers])
+
   /** Один раз при монтировании: пробуем ключ из localStorage и не показываем форму входа до проверки */
   useEffect(() => {
     let cancelled = false
@@ -564,6 +630,10 @@ export default function AdminPage() {
 
   const newUsers = overview?.new_users ?? []
   const subscribers = overview?.subscribers ?? []
+  const analyticsScoped =
+    Boolean(stats?.analytics_scoped) ||
+    Boolean(funnel?.analytics_scoped) ||
+    Boolean(overview?.analytics_scoped)
 
   return (
     <div className="min-h-screen bg-gray-950 text-white">
@@ -602,6 +672,13 @@ export default function AdminPage() {
           </button>
         </div>
       </header>
+
+      {analyticsScoped ? (
+        <div className="border-b border-amber-800/60 bg-amber-950/40 px-6 py-2 text-center text-sm text-amber-100/95">
+          Метрики (статы, воронка, обзор) считаются только по{" "}
+          <code className="font-mono text-amber-50">ANALYTICS_PRODUCTION_TG_IDS</code> на сервере — не по всей базе.
+        </div>
+      ) : null}
 
       {error ? <p className="text-center text-red-400 text-sm py-2">{error}</p> : null}
 
@@ -820,10 +897,24 @@ export default function AdminPage() {
                   {cleanupBusy ? "Удаление…" : `Очистить ${funnel.web_users} веб-пользователей`}
                 </button>
               )}
+              <button
+                type="button"
+                onClick={() => void purgeExceptProduction()}
+                disabled={purgeBusy || cleanupBusy}
+                className="px-4 py-2 text-sm rounded-xl bg-red-950/80 border border-red-800 text-red-200 hover:bg-red-900/80 disabled:opacity-50 transition-colors"
+              >
+                {purgeBusy ? "Очистка БД…" : "Удалить всех, кроме 5 prod (users + подписки + VPN)"}
+              </button>
               {cleanupResult && (
                 <span className="text-xs text-gray-500">
                   Удалено: {cleanupResult.deleted_users} пользователей, {cleanupResult.deleted_pending_subscriptions} pending-подписок
                   {cleanupResult.kept_paid_subscriptions > 0 && ` · сохранено paid: ${cleanupResult.kept_paid_subscriptions}`}
+                </span>
+              )}
+              {purgeResult && (
+                <span className="text-xs text-gray-500">
+                  Purge: users {purgeResult.deleted_users}, подписок {purgeResult.deleted_subscriptions}, WG{" "}
+                  {purgeResult.deleted_vpn_peers}, VLESS {purgeResult.deleted_vpn_clients}
                 </span>
               )}
             </div>
