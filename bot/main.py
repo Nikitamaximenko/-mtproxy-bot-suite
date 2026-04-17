@@ -128,7 +128,7 @@ def main_menu_kb(tg_id: int) -> InlineKeyboardMarkup:
     ]
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="🧊 2 в 1 — Прокси + VPN", web_app=WebAppInfo(url=_miniapp_url(tg_id)))],
-        [InlineKeyboardButton(text="ℹ️ Как работает 2 в 1", callback_data="menu:help")],
+        [InlineKeyboardButton(text="ℹ️ Инструкция", callback_data="menu:help")],
         row3,
     ])
 
