@@ -111,6 +111,16 @@ def support_chat_kb() -> InlineKeyboardMarkup:
     )
 
 
+# Приглашение в режим поддержки: сначала объясняем, что писать нужно прямо в бот — затем следующие сообщения уходит ИИ.
+SUPPORT_CHAT_INVITE_HTML = (
+    "✨ <b>Поддержка</b>\n\n"
+    "Пишите <b>прямо в этот чат</b> — мы на связи и готовы помочь.\n\n"
+    "Отправьте <b>следующим сообщением</b> свой вопрос: оплата, настройка VPN (Happ), прокси для Telegram — дальше ответит помощник, "
+    "и вы сможете продолжить с ним обычный диалог.\n\n"
+    "<i>Закончить: кнопка ниже или /done</i>"
+)
+
+
 def format_dt(dt_str: str | None) -> str:
     if not dt_str:
         return "неизвестно"
@@ -546,13 +556,7 @@ async def main() -> None:
                 return
             await state.set_state(SupportStates.chatting)
             await query.answer()
-            await msg.answer(
-                "👋 <b>Чат с поддержкой</b>\n\n"
-                "Опишите проблему: оплата, VPN (Happ), прокси для Telegram.\n\n"
-                "<i>/done — выйти из чата</i>",
-                parse_mode="HTML",
-                reply_markup=support_chat_kb(),
-            )
+            await msg.answer(SUPPORT_CHAT_INVITE_HTML, parse_mode="HTML", reply_markup=support_chat_kb())
             return
 
         if action == "exit_support":
@@ -560,7 +564,7 @@ async def main() -> None:
             await query.answer("Чат закрыт")
             tg_id = query.from_user.id
             await msg.answer(
-                "Если снова понадобится помощь — кнопка «Поддержка» или /support.",
+                "Диалог закрыт. Поддержка снова — кнопка «Поддержка» или /support.",
                 reply_markup=main_menu_kb(tg_id),
             )
             return
@@ -576,20 +580,14 @@ async def main() -> None:
                 await message.answer("Поддержка через бота не настроена.")
             return
         await state.set_state(SupportStates.chatting)
-        await message.answer(
-            "👋 <b>Чат с поддержкой</b>\n\n"
-            "Опишите проблему: оплата, VPN (Happ), прокси для Telegram.\n\n"
-            "<i>/done — выйти из чата</i>",
-            parse_mode="HTML",
-            reply_markup=support_chat_kb(),
-        )
+        await message.answer(SUPPORT_CHAT_INVITE_HTML, parse_mode="HTML", reply_markup=support_chat_kb())
 
     @dp.message(Command("done"), StateFilter(SupportStates.chatting))
     async def _cmd_done(message: Message, state: FSMContext) -> None:
         await state.clear()
         tg_id = message.from_user.id if message.from_user else 0
         await message.answer(
-            "Чат закрыт. Снова: /support или кнопка «Поддержка».",
+            "Диалог закрыт. Снова нажмите «Поддержка» в меню или /support — снова напомним, что писать нужно в этот чат.",
             reply_markup=main_menu_kb(tg_id),
         )
 
@@ -614,7 +612,7 @@ async def main() -> None:
     @dp.message(StateFilter(SupportStates.chatting))
     async def _support_non_text(message: Message) -> None:
         await message.answer(
-            "Пока принимаем только текст. Опишите проблему сообщением.",
+            "Пока принимаем только текст — напишите вопрос прямо в этот чат сообщением.",
             reply_markup=support_chat_kb(),
         )
 
