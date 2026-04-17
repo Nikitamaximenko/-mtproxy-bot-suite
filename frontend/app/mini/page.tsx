@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { Manrope } from "next/font/google"
 import { Check, Copy, ExternalLink, RefreshCw, Shield, X } from "lucide-react"
-import { getTelegramUser, openTelegramLink } from "@/lib/telegram"
+import { getTelegramInitData, getTelegramUser, openTelegramLink } from "@/lib/telegram"
 
 const manrope = Manrope({ subsets: ["latin", "cyrillic"], weight: ["400", "500", "600", "700"] })
 
@@ -397,7 +397,25 @@ export default function MiniAppPage() {
     setVpnLoading(true)
     setVpnError(null)
     try {
-      const res = await fetch(`/api/vpn?tg_id=${tgId}`, { cache: "no-store" })
+      try {
+        window?.Telegram?.WebApp?.ready?.()
+      } catch {
+        /* ignore */
+      }
+      let initData = typeof window !== "undefined" ? getTelegramInitData() : ""
+      // Иногда initData появляется чуть позже первого тика после ready(); без этого POST уходит с пустой строкой.
+      if (!initData && typeof window !== "undefined" && (window as { Telegram?: { WebApp?: { version?: string } } })?.Telegram?.WebApp?.version) {
+        await new Promise<void>((resolve) => {
+          requestAnimationFrame(() => requestAnimationFrame(() => resolve()))
+        })
+        initData = getTelegramInitData()
+      }
+      const res = await fetch("/api/vpn", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        cache: "no-store",
+        body: JSON.stringify({ tg_id: tgId, init_data: initData }),
+      })
       const text = await res.text()
       let data: VpnData | null = null
       try {

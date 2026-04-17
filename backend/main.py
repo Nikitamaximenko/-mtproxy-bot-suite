@@ -13,7 +13,7 @@ import socket
 import time
 import urllib.error
 import urllib.request
-from urllib.parse import quote, urljoin
+from urllib.parse import parse_qsl, quote, urljoin
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
 from typing import Any, AsyncGenerator, Generator, Literal
@@ -2049,15 +2049,59 @@ def _has_valid_internal_token(req: Request) -> bool:
     return bool(got) and hmac.compare_digest(got, INTERNAL_API_TOKEN)
 
 
+def _verify_telegram_webapp_init_data(init_data_raw: str, expected_telegram_id: int) -> bool:
+    """Проверка подписи строки initData из Telegram Mini App (см. core.telegram.org
+    bots/webapps — validating data received via the Mini App). Позволяет отдавать
+    vless_link без X-Internal-Token, если Vercel не синхронизирован с Railway:
+    доверяем только Telegram, у которого есть секрет бота."""
+    if not BOT_TOKEN or not init_data_raw or not str(init_data_raw).strip():
+        return False
+    try:
+        data = dict(parse_qsl(str(init_data_raw).strip(), keep_blank_values=True))
+    except Exception:
+        return False
+    received_hash = data.pop("hash", None)
+    if not received_hash:
+        return False
+    check_parts = [f"{k}={data[k]}" for k in sorted(data.keys())]
+    data_check_string = "\n".join(check_parts)
+    secret_key = hmac.new(b"WebAppData", BOT_TOKEN.encode(), hashlib.sha256).digest()
+    calculated = hmac.new(secret_key, data_check_string.encode(), hashlib.sha256).hexdigest()
+    if not hmac.compare_digest(calculated, received_hash):
+        return False
+    auth_date = data.get("auth_date")
+    if auth_date is not None:
+        try:
+            if time.time() - int(auth_date) > 86400:
+                return False
+        except (ValueError, TypeError):
+            return False
+    user_raw = data.get("user")
+    if not user_raw:
+        return False
+    try:
+        user_obj = json.loads(user_raw)
+        uid = int(user_obj.get("id", 0))
+    except (json.JSONDecodeError, TypeError, ValueError):
+        return False
+    return uid == int(expected_telegram_id)
+
+
+def _vpn_config_caller_trusted(req: Request, telegram_id: int) -> bool:
+    if _has_valid_internal_token(req):
+        return True
+    init_hdr = (req.headers.get("X-Telegram-Init-Data") or "").strip()
+    if init_hdr and _verify_telegram_webapp_init_data(init_hdr, telegram_id):
+        return True
+    return False
+
+
 @app.get("/vpn/config/{telegram_id}", response_model=VpnConfigResponse)
 def vpn_config(telegram_id: int, req: Request, db: Session = Depends(get_db)) -> VpnConfigResponse:
-    # Согласовано с GET /subscription/{telegram_id}: при установленном INTERNAL_API_TOKEN
-    # бэкенд не отдаёт чувствительные данные без заголовка X-Internal-Token, но статус
-    # подписки отдаётся без 403. Раньше здесь всегда вызывали _require_internal_token —
-    # Vercel без того же токена получал 403, а экран подписки в Mini App оставался
-    # «активна» → пользователь видел красную ошибку «авторизация». Возвращаем 200 и
-    # reason=internal_token_required (без проверки подписки — не раскрываем факт наличия sub).
-    if INTERNAL_API_TOKEN and not _has_valid_internal_token(req):
+    # Доступ: X-Internal-Token (как у фронта с тем же секретом, что на бэкенде) ИЛИ
+    # X-Telegram-Init-Data с валидной подписью Telegram для этого telegram_id
+    # (Mini App внутри Telegram — не зависит от INTERNAL_API_TOKEN на Vercel).
+    if INTERNAL_API_TOKEN and not _vpn_config_caller_trusted(req, telegram_id):
         return VpnConfigResponse(available=False, reason="internal_token_required")
 
     if not _active_sub_for_vpn(telegram_id, db):

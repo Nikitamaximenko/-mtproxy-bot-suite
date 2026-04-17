@@ -11,6 +11,8 @@ declare global {
     Telegram?: {
       WebApp?: {
         version?: string
+        /** Подписанная строка query; нужна бэкенду для выдачи VPN без INTERNAL_API_TOKEN на Vercel */
+        initData?: string
         initDataUnsafe?: { user?: { id: number; username?: string } }
         ready?: () => void
         expand?: () => void
@@ -35,6 +37,14 @@ export function normalizePaymentUrl(url: string): string {
   } catch {
     return u
   }
+}
+
+/** Полная initData из WebApp (подпись Telegram). Пустая вне Telegram или до загрузки SDK. */
+export function getTelegramInitData(): string {
+  if (typeof window === "undefined") return ""
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const raw = (window as any)?.Telegram?.WebApp?.initData
+  return typeof raw === "string" ? raw : ""
 }
 
 export function getTelegramUser(): TelegramWebAppUser | null {
