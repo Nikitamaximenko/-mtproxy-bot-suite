@@ -24,13 +24,6 @@ type VpnData = {
   uuid: string | null
 }
 
-type FreeProxyData = {
-  server: string
-  port: number
-  secret: string
-  proxy_link: string
-}
-
 function FrostIcon({ className }: { className?: string }) {
   return (
     <svg viewBox="0 0 100 100" className={className} fill="none" xmlns="http://www.w3.org/2000/svg">
@@ -307,9 +300,6 @@ export default function MiniAppPage() {
   const [vpnLoading, setVpnLoading] = useState(false)
   const [vpnLinkCopied, setVpnLinkCopied] = useState(false)
 
-  // Free proxy (no subscription needed)
-  const [freeProxy, setFreeProxy] = useState<FreeProxyData | null>(null)
-  const [freeProxyCopied, setFreeProxyCopied] = useState(false)
 
   // VPN server ping
   const [vpnPing, setVpnPing] = useState<{ online: boolean; latency_ms: number | null } | null>(null)
@@ -406,21 +396,6 @@ export default function MiniAppPage() {
     navigator.clipboard.writeText(vpn.vless_link)
     setVpnLinkCopied(true)
     setTimeout(() => setVpnLinkCopied(false), 2000)
-  }
-
-  // Fetch free proxy on mount (shown in sell view)
-  useEffect(() => {
-    fetch("/api/proxy-free", { cache: "no-store" })
-      .then((r) => r.ok ? r.json() : null)
-      .then((d) => d && setFreeProxy(d as FreeProxyData))
-      .catch(() => {/* ignore */})
-  }, [])
-
-  const handleCopyFreeProxy = () => {
-    if (!freeProxy?.proxy_link) return
-    navigator.clipboard.writeText(freeProxy.proxy_link)
-    setFreeProxyCopied(true)
-    setTimeout(() => setFreeProxyCopied(false), 2000)
   }
 
   const isPaid = !!sub?.active

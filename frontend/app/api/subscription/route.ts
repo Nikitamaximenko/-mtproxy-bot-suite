@@ -20,7 +20,10 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: "Missing tg_id or email" }, { status: 400 })
   }
 
-  const res = await fetch(`${backendUrl}/subscription/${tgId}`, { cache: "no-store" })
+  const res = await fetch(`${backendUrl}/subscription/${tgId}`, {
+    cache: "no-store",
+    headers: { "X-Internal-Token": process.env.INTERNAL_API_TOKEN || "" },
+  })
   const text = await res.text().catch(() => "")
   if (!res.ok) {
     return NextResponse.json({ error: "Subscription lookup failed", details: text || undefined }, { status: 500 })

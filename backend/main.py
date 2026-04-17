@@ -110,6 +110,9 @@ XRAY_SHORT_ID = (os.getenv("XRAY_SHORT_ID") or "").strip()
 XRAY_SNI = (os.getenv("XRAY_SNI") or "www.microsoft.com").strip()
 XRAY_SERVER_IP = (os.getenv("XRAY_SERVER_IP") or "").strip()
 
+# Internal API token for frontend-to-backend calls (prevents direct public access)
+INTERNAL_API_TOKEN = (os.getenv("INTERNAL_API_TOKEN") or "").strip()
+
 
 def utcnow() -> datetime:
     return datetime.now(timezone.utc)
@@ -609,6 +612,10 @@ def activate_subscription(sub: Subscription) -> None:
     Активация после оплаты (или тестового гранта): 30 дней с момента вызова, статус paid, прокси включён.
     Для восстановления доступа по уже оплаченному окну без сдвига дат — см. admin_activate + access_suspended.
     """
+    # Idempotent: if already active and not expired, don't extend
+    if sub.payment_status == "paid" and sub.expires_at and sub.expires_at > utcnow():
+        logger.info("activate_subscription: already active, skipping tg_id=%s", sub.telegram_id)
+        return
     _apply_proxy_credentials(sub)
     sub.payment_status = "paid"
     sub.expires_at = utcnow() + timedelta(days=30)
@@ -662,7 +669,7 @@ def _sales_nudge_message(step: int, user: User) -> str:
     if step == 2:
         return (
             f"{g}, многие думают, что прокси — только для Telegram. "
-            "В <b>Frosty</b> ещё и WireGuard VPN для всего остального.\n\n"
+            "В <b>Frosty</b> ещё и VPN для Instagram, TikTok, YouTube — через приложение Happ.\n\n"
             "Один раз настроил — работают и Telegram, и Instagram, и всё что нужно.\n\n"
             f"<b>{price} ₽/мес</b> · 10 ₽/день · без ограничений по трафику.{ref_line}\n\n"
             "<i>Отписаться от напоминаний: /stop</i>"
@@ -764,26 +771,25 @@ def _notify_payment_success(tg_id: int, proxy_link: str) -> None:
     v = int(_t.time())
     miniapp_url = f"{FRONTEND_URL}/mini?tg_id={tg_id}&v={v}" if FRONTEND_URL else ""
     buttons: list[list[dict[str, Any]]] = [
-        [{"text": "🔌 Подключить прокси Telegram", "url": proxy_link}],
+        [{"text": "\U0001f50c Подключить прокси Telegram", "url": proxy_link}],
     ]
     if miniapp_url:
-        buttons.append([{"text": "🛡 Открыть личный кабинет (VPN)", "web_app": {"url": miniapp_url}}])
-    buttons.append([{"text": "📥 Скачать Happ для Android", "url": "https://play.google.com/store/apps/details?id=com.happ.vpn"}])
-    buttons.append([{"text": "📥 Скачать Happ для iOS", "url": "https://apps.apple.com/app/happ-proxy-utility/id6504287215"}])
+        buttons.append([{"text": "\U0001f6e1 Открыть личный кабинет (VPN)", "web_app": {"url": miniapp_url}}])
+    buttons.append([{"text": "\U0001f4e5 Скачать Happ для Android", "url": "https://play.google.com/store/apps/details?id=com.happ.vpn"}])
+    buttons.append([{"text": "\U0001f4e5 Скачать Happ для iOS", "url": "https://apps.apple.com/app/happ-proxy-utility/id6504287215"}])
     kb = {"inline_keyboard": buttons}
     _send_tg(tg_id, (
-        "🎉 <b>Подписка активирована!</b>\n\n"
+        "\U0001f389 <b>Подписка активирована!</b>\n\n"
         "Теперь у тебя есть:\n"
-        "📡 MTProxy — Telegram работает без ограничений\n"
-        "🛡 VPN — Instagram, TikTok, YouTube и всё остальное\n\n"
-        "<b>Ша�� 1 — Подключи прокси Telegram:</b>\n"
-        "Нажми кнопку «🔌 Подключить прокси» ниже\n\n"
-        "<b>Шаг 2 — Подключи VPN:</b>\n"
-        '1. Скачай <a href="https://play.google.com/store/apps/details?id=com.happ.vpn">Happ</a> (Android)'
-        ' ��ли <a href="https://apps.apple.com/app/happ-proxy-utility/id6504287215">Happ</a> (iOS)\n'
-        "2. Открой «Личный кабинет» → вкладка «🛡 VPN»\n"
-        "3. На��ми «Открыть в Happ» — подключение за 10 секунд\n\n"
-        "Если возникли вопросы — напиши в поддержку 👇"
+        "\U0001f4e1 MTProxy \u2014 Telegram работает без ограничений\n"
+        "\U0001f6e1 VPN \u2014 Instagram, TikTok, YouTube и всё остальное\n\n"
+        "<b>Шаг 1 \u2014 Подключи прокси Telegram:</b>\n"
+        "Нажми кнопку \u00abПодключить прокси\u00bb ниже\n\n"
+        "<b>Шаг 2 \u2014 Подключи VPN:</b>\n"
+        "1. Скачай Happ: Android или iOS (кнопки ниже)\n"
+        "2. Открой \u00abЛичный кабинет\u00bb -> вкладка \u00abVPN\u00bb\n"
+        "3. Нажми \u00abОткрыть в Happ\u00bb \u2014 подключение за 10 секунд\n\n"
+        "Если возникли вопросы \u2014 напиши в поддержку"
     ), kb)
 
 
@@ -801,25 +807,25 @@ def _notify_admin_payment(tg_id: int) -> None:
 def _notify_expiring(tg_id: int, expires_at: datetime) -> None:
     date_str = expires_at.strftime("%d.%m.%Y")
     buttons: list[list[dict[str, str]]] = [
-        [{"text": "💳 Продлить подписку", "callback_data": "menu:subscribe"}],
+        [{"text": "\U0001f4b3 \u041f\u0440\u043e\u0434\u043b\u0438\u0442\u044c \u043f\u043e\u0434\u043f\u0438\u0441\u043a\u0443", "callback_data": "menu:subscribe"}],
     ]
     _send_tg(tg_id, (
-        f"⏳ <b>Подписка заканчивается {date_str}</b>\n\n"
-        "После истечения:\n"
-        "• VPN перестанет работать\n"
-        "• ��рокси для Telegram отключится\n\n"
-        "Продлите чтобы всё продолжало работать 👇"
+        f"\u23f3 <b>\u041f\u043e\u0434\u043f\u0438\u0441\u043a\u0430 \u0437\u0430\u043a\u0430\u043d\u0447\u0438\u0432\u0430\u0435\u0442\u0441\u044f {date_str}</b>\n\n"
+        "\u041f\u043e\u0441\u043b\u0435 \u0438\u0441\u0442\u0435\u0447\u0435\u043d\u0438\u044f:\n"
+        "\u2022 VPN \u043f\u0435\u0440\u0435\u0441\u0442\u0430\u043d\u0435\u0442 \u0440\u0430\u0431\u043e\u0442\u0430\u0442\u044c\n"
+        "\u2022 \u041f\u0440\u043e\u043a\u0441\u0438 \u0434\u043b\u044f Telegram \u043e\u0442\u043a\u043b\u044e\u0447\u0438\u0442\u0441\u044f\n\n"
+        "\u041f\u0440\u043e\u0434\u043b\u0438\u0442\u0435 \u0447\u0442\u043e\u0431\u044b \u0432\u0441\u0451 \u043f\u0440\u043e\u0434\u043e\u043b\u0436\u0430\u043b\u043e \u0440\u0430\u0431\u043e\u0442\u0430\u0442\u044c \U0001f447"
     ), {"inline_keyboard": buttons})
 
 
 def _notify_expired(tg_id: int) -> None:
     buttons: list[list[dict[str, str]]] = [
-        [{"text": "💳 Оформить подписку", "callback_data": "menu:subscribe"}],
+        [{"text": "\U0001f4b3 \u041e\u0444\u043e\u0440\u043c\u0438\u0442\u044c \u043f\u043e\u0434\u043f\u0438\u0441\u043a\u0443", "callback_data": "menu:subscribe"}],
     ]
     _send_tg(tg_id, (
-        "❌ <b>Подписка истекла</b>\n\n"
-        "VPN и прокси больше не работают.\n\n"
-        "Оформите заново — подключение займёт 2 минуты."
+        "\u274c <b>\u041f\u043e\u0434\u043f\u0438\u0441\u043a\u0430 \u0438\u0441\u0442\u0435\u043a\u043b\u0430</b>\n\n"
+        "VPN \u0438 \u043f\u0440\u043e\u043a\u0441\u0438 \u0431\u043e\u043b\u044c\u0448\u0435 \u043d\u0435 \u0440\u0430\u0431\u043e\u0442\u0430\u044e\u0442.\n\n"
+        "\u041e\u0444\u043e\u0440\u043c\u0438\u0442\u0435 \u0437\u0430\u043d\u043e\u0432\u043e \u2014 \u043f\u043e\u0434\u043a\u043b\u044e\u0447\u0435\u043d\u0438\u0435 \u0437\u0430\u0439\u043c\u0451\u0442 2 \u043c\u0438\u043d\u0443\u0442\u044b."
     ), {"inline_keyboard": buttons})
 
 
@@ -1371,7 +1377,8 @@ class SubscriptionResponse(BaseModel):
 
 
 @app.get("/subscription/{telegram_id}", response_model=SubscriptionResponse)
-def get_subscription(telegram_id: int, db: Session = Depends(get_db)) -> SubscriptionResponse:
+def get_subscription(telegram_id: int, req: Request, db: Session = Depends(get_db)) -> SubscriptionResponse:
+    _require_internal_token(req)
     now = utcnow()
     sub = (
         db.execute(
@@ -1447,6 +1454,10 @@ def claim_web_subscription(
 
     if not sub:
         return ClaimWebSubscriptionResponse(ok=False, error="not_found")
+
+    # Reject expired subscriptions
+    if sub.expires_at and sub.expires_at < utcnow():
+        return ClaimWebSubscriptionResponse(ok=False, error="subscription_expired")
 
     proxy_link: str | None = None
     if sub.proxy_server and sub.proxy_port and sub.proxy_secret:
@@ -1942,8 +1953,18 @@ class VpnConfigResponse(BaseModel):
     uuid: str | None = None
 
 
+def _require_internal_token(req: Request) -> None:
+    """Verify X-Internal-Token header for frontend-to-backend calls."""
+    if not INTERNAL_API_TOKEN:
+        return  # not configured — allow (dev mode)
+    got = (req.headers.get("X-Internal-Token") or "").strip()
+    if not hmac.compare_digest(got, INTERNAL_API_TOKEN):
+        raise HTTPException(status_code=403, detail="Forbidden")
+
+
 @app.get("/vpn/config/{telegram_id}", response_model=VpnConfigResponse)
-def vpn_config(telegram_id: int, db: Session = Depends(get_db)) -> VpnConfigResponse:
+def vpn_config(telegram_id: int, req: Request, db: Session = Depends(get_db)) -> VpnConfigResponse:
+    _require_internal_token(req)
     if not _active_sub_for_vpn(telegram_id, db):
         # Return 200 with reason so frontend can differentiate without catching 403
         return VpnConfigResponse(available=False, reason="no_subscription")
@@ -1967,24 +1988,6 @@ class VpnOnlineResponse(BaseModel):
 def vpn_online(req: Request) -> VpnOnlineResponse:
     _require_admin(req)
     return VpnOnlineResponse(online=_xray_get_online_count())
-
-
-# ── Free proxy (no subscription required) ────────────────────────────────────
-
-class FreeProxyResponse(BaseModel):
-    server: str
-    port: int
-    secret: str
-    proxy_link: str
-
-
-@app.get("/proxy/free", response_model=FreeProxyResponse)
-def free_proxy() -> FreeProxyResponse:
-    server = MT_PROXY_SERVER or "176.123.161.97"
-    port = MT_PROXY_PORT if MT_PROXY_PORT else 443
-    secret = MT_PROXY_SECRET or "dd645eba01a59f188b5ba9db2564b44a00"
-    proxy_link = f"tg://proxy?server={server}&port={port}&secret={secret}"
-    return FreeProxyResponse(server=server, port=port, secret=secret, proxy_link=proxy_link)
 
 
 def _require_admin(req: Request) -> None:
