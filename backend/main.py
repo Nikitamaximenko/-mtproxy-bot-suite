@@ -36,6 +36,7 @@ from sqlalchemy import (
     func,
     select,
     text,
+    true as sa_true,
 )
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column, sessionmaker
@@ -227,6 +228,28 @@ class VpnClient(Base):
     traffic_used_bytes: Mapped[int] = mapped_column(BigInteger, default=0, nullable=False)
     last_sync_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
+
+
+class SupportAiMessage(Base):
+    """Лог диалогов с ИИ-ботом поддержки: 1 запись = 1 сообщение пользователя + ответ ассистента.
+
+    Используется для раздела «ИИ-поддержка» в админ-панели — посмотреть, что спрашивают
+    и что отвечает модель, плюс базовая статистика (объём, ошибки, уникальные пользователи).
+    """
+    __tablename__ = "support_ai_messages"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    telegram_id: Mapped[int] = mapped_column(BigInteger, index=True, nullable=False)
+    username: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    user_text: Mapped[str] = mapped_column(String(4096), nullable=False)
+    assistant_text: Mapped[str] = mapped_column(String(4096), nullable=False)
+    model: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    duration_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    ok: Mapped[bool] = mapped_column(Boolean, default=True, server_default=sa_true(), nullable=False)
+    error: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, index=True, nullable=False
+    )
 
 
 connect_args = {"check_same_thread": False} if DATABASE_URL.startswith("sqlite:") else {}
@@ -2652,6 +2675,42 @@ def internal_support_activate(
     return OkResponse(ok=True)
 
 
+class InternalSupportMessageBody(BaseModel):
+    """Лог одного раунда диалога с ИИ-поддержкой. Шлёт бот после отправки ответа."""
+
+    telegram_id: int = Field(..., description="Telegram id пользователя")
+    username: str | None = Field(None, max_length=64)
+    user_text: str = Field(..., min_length=1, max_length=4096)
+    assistant_text: str = Field(..., min_length=1, max_length=4096)
+    model: str | None = Field(None, max_length=128)
+    duration_ms: int | None = Field(None, ge=0)
+    ok: bool = True
+    error: str | None = Field(None, max_length=500)
+
+
+@app.post("/internal/support/message", response_model=OkResponse)
+def internal_support_message(
+    req: Request,
+    body: InternalSupportMessageBody,
+    db: Session = Depends(get_db),
+) -> OkResponse:
+    """Записывает в БД один раунд диалога с ИИ-поддержкой (для админ-панели)."""
+    _require_internal_token(req)
+    row = SupportAiMessage(
+        telegram_id=int(body.telegram_id),
+        username=(body.username or None),
+        user_text=body.user_text.strip()[:4096],
+        assistant_text=body.assistant_text.strip()[:4096],
+        model=(body.model or None),
+        duration_ms=body.duration_ms,
+        ok=bool(body.ok),
+        error=(body.error or None),
+    )
+    db.add(row)
+    db.commit()
+    return OkResponse(ok=True)
+
+
 class InternalDiagSubscriptionResponse(BaseModel):
     telegram_id: int
     user_exists: bool
@@ -3512,6 +3571,206 @@ def admin_vpn_client_deactivate(telegram_id: int, req: Request, db: Session = De
     _require_admin(req)
     deactivate_vpn_client(telegram_id, db)
     return OkResponse(ok=True)
+
+
+# ── ИИ-поддержка: просмотр логов и статистика в админ-панели ────────────────
+
+
+class SupportAiMessageItem(BaseModel):
+    id: int
+    telegram_id: int
+    username: str | None
+    user_text: str
+    assistant_text: str
+    model: str | None
+    duration_ms: int | None
+    ok: bool
+    error: str | None
+    created_at: datetime
+
+
+class SupportAiMessagesResponse(BaseModel):
+    messages: list[SupportAiMessageItem]
+    total: int
+
+
+class SupportAiDailyBucket(BaseModel):
+    day: str  # YYYY-MM-DD
+    count: int
+
+
+class SupportAiTopUser(BaseModel):
+    telegram_id: int
+    username: str | None
+    count: int
+
+
+class SupportAiStatsResponse(BaseModel):
+    total: int
+    last_24h: int
+    last_7d: int
+    unique_users_total: int
+    unique_users_7d: int
+    errors_total: int
+    avg_duration_ms: int | None
+    last_message_at: datetime | None
+    daily_7d: list[SupportAiDailyBucket]
+    top_users_7d: list[SupportAiTopUser]
+
+
+@app.get("/admin/support/messages", response_model=SupportAiMessagesResponse)
+def admin_support_messages(
+    req: Request,
+    db: Session = Depends(get_db),
+    limit: int = 100,
+    offset: int = 0,
+    tg_id: int | None = None,
+    only_errors: bool = False,
+) -> SupportAiMessagesResponse:
+    _require_admin(req)
+    limit = max(1, min(int(limit or 100), 500))
+    offset = max(0, int(offset or 0))
+
+    total_q = select(func.count(SupportAiMessage.id))
+    list_q = select(SupportAiMessage)
+    if tg_id is not None:
+        total_q = total_q.where(SupportAiMessage.telegram_id == int(tg_id))
+        list_q = list_q.where(SupportAiMessage.telegram_id == int(tg_id))
+    if only_errors:
+        total_q = total_q.where(SupportAiMessage.ok.is_(False))
+        list_q = list_q.where(SupportAiMessage.ok.is_(False))
+
+    total = int(db.execute(total_q).scalar() or 0)
+    rows = (
+        db.execute(
+            list_q.order_by(SupportAiMessage.created_at.desc()).offset(offset).limit(limit)
+        )
+        .scalars()
+        .all()
+    )
+    items = [
+        SupportAiMessageItem(
+            id=r.id,
+            telegram_id=r.telegram_id,
+            username=r.username,
+            user_text=r.user_text,
+            assistant_text=r.assistant_text,
+            model=r.model,
+            duration_ms=r.duration_ms,
+            ok=bool(r.ok),
+            error=r.error,
+            created_at=r.created_at,
+        )
+        for r in rows
+    ]
+    return SupportAiMessagesResponse(messages=items, total=total)
+
+
+@app.get("/admin/support/stats", response_model=SupportAiStatsResponse)
+def admin_support_stats(req: Request, db: Session = Depends(get_db)) -> SupportAiStatsResponse:
+    _require_admin(req)
+    now = utcnow()
+    day = timedelta(days=1)
+    since_24h = now - day
+    since_7d = now - timedelta(days=7)
+
+    total = int(
+        db.execute(select(func.count(SupportAiMessage.id))).scalar() or 0
+    )
+    last_24h = int(
+        db.execute(
+            select(func.count(SupportAiMessage.id)).where(
+                SupportAiMessage.created_at >= since_24h
+            )
+        ).scalar()
+        or 0
+    )
+    last_7d = int(
+        db.execute(
+            select(func.count(SupportAiMessage.id)).where(
+                SupportAiMessage.created_at >= since_7d
+            )
+        ).scalar()
+        or 0
+    )
+    unique_users_total = int(
+        db.execute(select(func.count(func.distinct(SupportAiMessage.telegram_id)))).scalar()
+        or 0
+    )
+    unique_users_7d = int(
+        db.execute(
+            select(func.count(func.distinct(SupportAiMessage.telegram_id))).where(
+                SupportAiMessage.created_at >= since_7d
+            )
+        ).scalar()
+        or 0
+    )
+    errors_total = int(
+        db.execute(
+            select(func.count(SupportAiMessage.id)).where(SupportAiMessage.ok.is_(False))
+        ).scalar()
+        or 0
+    )
+    avg_ms_raw = db.execute(
+        select(func.avg(SupportAiMessage.duration_ms)).where(
+            SupportAiMessage.duration_ms.is_not(None)
+        )
+    ).scalar()
+    avg_duration_ms = int(avg_ms_raw) if avg_ms_raw is not None else None
+
+    last_at = db.execute(select(func.max(SupportAiMessage.created_at))).scalar()
+
+    # Daily buckets for last 7 days (инициализируем нулями, чтобы в графике не было пропусков).
+    buckets: dict[str, int] = {}
+    for i in range(7):
+        d = (now - timedelta(days=6 - i)).date().isoformat()
+        buckets[d] = 0
+    recent_rows = (
+        db.execute(
+            select(SupportAiMessage.created_at).where(
+                SupportAiMessage.created_at >= now - timedelta(days=7)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    for ts in recent_rows:
+        if ts is None:
+            continue
+        key = ts.date().isoformat()
+        if key in buckets:
+            buckets[key] += 1
+    daily = [SupportAiDailyBucket(day=d, count=c) for d, c in buckets.items()]
+
+    # Top users last 7d.
+    top_rows = db.execute(
+        select(
+            SupportAiMessage.telegram_id,
+            func.count(SupportAiMessage.id).label("cnt"),
+            func.max(SupportAiMessage.username).label("username"),
+        )
+        .where(SupportAiMessage.created_at >= since_7d)
+        .group_by(SupportAiMessage.telegram_id)
+        .order_by(func.count(SupportAiMessage.id).desc())
+        .limit(10)
+    ).all()
+    top_users = [
+        SupportAiTopUser(telegram_id=int(r[0]), username=r[2], count=int(r[1]))
+        for r in top_rows
+    ]
+
+    return SupportAiStatsResponse(
+        total=total,
+        last_24h=last_24h,
+        last_7d=last_7d,
+        unique_users_total=unique_users_total,
+        unique_users_7d=unique_users_7d,
+        errors_total=errors_total,
+        avg_duration_ms=avg_duration_ms,
+        last_message_at=last_at,
+        daily_7d=daily,
+        top_users_7d=top_users,
+    )
 
 
 @app.post("/vpn/sync-traffic", response_model=OkResponse)

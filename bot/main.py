@@ -4,6 +4,7 @@ import asyncio
 import html
 import logging
 import os
+import time
 from datetime import datetime, timezone
 from typing import Any
 from uuid import UUID
@@ -770,23 +771,46 @@ async def main() -> None:
                 await message.bot.send_chat_action(message.chat.id, "typing")
             except Exception:
                 pass
-            from support_ai import run_support_reply
+            from support_ai import SUPPORT_AI_MODEL, run_support_reply
 
             data = await state.get_data()
             history_raw = data.get("support_history") or []
             history: list[dict[str, Any]] = history_raw if isinstance(history_raw, list) else []
+            started_at = time.monotonic()
+            reply_ok = True
+            reply_err: str | None = None
             try:
                 reply, new_history = await run_support_reply(session, tg_id, t, history)
-            except Exception:
+            except Exception as exc:
                 _log.exception("support_ai.run_support_reply failed tg_id=%s", tg_id)
-                await message.answer(
-                    "Помощник временно недоступен. Попробуйте ещё раз через минуту.",
-                    reply_markup=support_chat_kb(),
+                reply = "Помощник временно недоступен. Попробуйте ещё раз через минуту."
+                new_history = history
+                reply_ok = False
+                reply_err = str(exc)[:500]
+                await message.answer(reply, reply_markup=support_chat_kb())
+            else:
+                await message.answer(reply, reply_markup=support_chat_kb())
+            finally:
+                duration_ms = int((time.monotonic() - started_at) * 1000)
+                await state.update_data(support_history=new_history)
+                _log.info("support_ai: reply sent tg_id=%s len=%s ms=%s ok=%s", tg_id, len(reply), duration_ms, reply_ok)
+                uname = message.from_user.username if message.from_user else None
+                asyncio.create_task(
+                    backend_post(
+                        session,
+                        "/internal/support/message",
+                        {
+                            "telegram_id": int(tg_id),
+                            "username": uname,
+                            "user_text": t[:4096],
+                            "assistant_text": reply[:4096],
+                            "model": SUPPORT_AI_MODEL,
+                            "duration_ms": duration_ms,
+                            "ok": reply_ok,
+                            "error": reply_err,
+                        },
+                    )
                 )
-                return
-            await state.update_data(support_history=new_history)
-            _log.info("support_ai: reply sent tg_id=%s len=%s", tg_id, len(reply))
-            await message.answer(reply, reply_markup=support_chat_kb())
             return
 
         await message.answer(

@@ -122,6 +122,44 @@ type SourceStat = {
   paid: number
 }
 
+type SupportAiMessage = {
+  id: number
+  telegram_id: number
+  username: string | null
+  user_text: string
+  assistant_text: string
+  model: string | null
+  duration_ms: number | null
+  ok: boolean
+  error: string | null
+  created_at: string
+}
+
+type SupportAiMessagesData = {
+  messages: SupportAiMessage[]
+  total: number
+}
+
+type SupportAiDailyBucket = { day: string; count: number }
+type SupportAiTopUser = {
+  telegram_id: number
+  username: string | null
+  count: number
+}
+
+type SupportAiStats = {
+  total: number
+  last_24h: number
+  last_7d: number
+  unique_users_total: number
+  unique_users_7d: number
+  errors_total: number
+  avg_duration_ms: number | null
+  last_message_at: string | null
+  daily_7d: SupportAiDailyBucket[]
+  top_users_7d: SupportAiTopUser[]
+}
+
 type FunnelStats = {
   // TG funnel (unique users, tg_id > 0)
   tg_users: number
@@ -299,6 +337,11 @@ export default function AdminPage() {
   const [purgeBusy, setPurgeBusy] = useState(false)
   const [selfTestBusy, setSelfTestBusy] = useState(false)
   const [selfTestResult, setSelfTestResult] = useState<SelfTestResponse | null>(null)
+  const [supportStats, setSupportStats] = useState<SupportAiStats | null>(null)
+  const [supportMessages, setSupportMessages] = useState<SupportAiMessagesData | null>(null)
+  const [supportOnlyErrors, setSupportOnlyErrors] = useState(false)
+  const [supportTgFilter, setSupportTgFilter] = useState("")
+  const [supportExpandedId, setSupportExpandedId] = useState<number | null>(null)
   const [purgeResult, setPurgeResult] = useState<{
     deleted_users: number
     deleted_subscriptions: number
@@ -344,13 +387,15 @@ export default function AdminPage() {
       setLoading(true)
       setError("")
       try {
-        const [sRes, pRes, ovRes, fRes, vRes, vcRes] = await Promise.all([
+        const [sRes, pRes, ovRes, fRes, vRes, vcRes, ssRes, smRes] = await Promise.all([
           fetch("/api/admin/stats", { headers: headers(activeKey), cache: "no-store" }),
           fetch("/api/admin/proxy-status", { headers: headers(activeKey), cache: "no-store" }),
           fetch("/api/admin/users-overview", { headers: headers(activeKey), cache: "no-store" }),
           fetch("/api/admin/funnel", { headers: headers(activeKey), cache: "no-store" }),
           fetch("/api/admin/vpn-online", { headers: headers(activeKey), cache: "no-store" }),
           fetch("/api/admin/vpn-clients", { headers: headers(activeKey), cache: "no-store" }),
+          fetch("/api/admin/support/stats", { headers: headers(activeKey), cache: "no-store" }),
+          fetch("/api/admin/support/messages?limit=100", { headers: headers(activeKey), cache: "no-store" }),
         ])
 
         if (sRes.status === 403 || ovRes.status === 403) {
@@ -366,13 +411,15 @@ export default function AdminPage() {
           return
         }
 
-        const [sData, pData, ovData, fData, vData, vcData] = await Promise.all([
+        const [sData, pData, ovData, fData, vData, vcData, ssData, smData] = await Promise.all([
           sRes.json(),
           pRes.json(),
           ovRes.json(),
           fRes.ok ? fRes.json() : Promise.resolve(null),
           vRes.ok ? vRes.json() : Promise.resolve(null),
           vcRes.ok ? vcRes.json() : Promise.resolve(null),
+          ssRes.ok ? ssRes.json() : Promise.resolve(null),
+          smRes.ok ? smRes.json() : Promise.resolve(null),
         ])
         const rawStats = sData as Stats & { marketing_opt_out_users?: number }
         setStats({
@@ -385,6 +432,8 @@ export default function AdminPage() {
         setOverview(ovData as UsersOverview)
         const funnelNorm = safeFunnel(fData)
         setFunnel(funnelNorm)
+        setSupportStats(ssData as SupportAiStats | null)
+        setSupportMessages(smData as SupportAiMessagesData | null)
         setAuthed(true)
         persistKey(activeKey)
       } catch (e) {
@@ -602,6 +651,30 @@ export default function AdminPage() {
     }
   }, [fetchAll, headers])
 
+  const fetchSupportMessages = useCallback(
+    async (opts?: { tgId?: string; onlyErrors?: boolean }) => {
+      const q = new URLSearchParams({ limit: "100" })
+      const tgRaw = (opts?.tgId ?? supportTgFilter).trim()
+      if (tgRaw) {
+        const asNum = Number(tgRaw)
+        if (Number.isFinite(asNum) && asNum > 0) q.set("tg_id", String(asNum))
+      }
+      if (opts?.onlyErrors ?? supportOnlyErrors) q.set("only_errors", "true")
+      try {
+        const res = await fetch(`/api/admin/support/messages?${q.toString()}`, {
+          headers: headers(),
+          cache: "no-store",
+        })
+        if (!res.ok) return
+        const data = (await res.json()) as SupportAiMessagesData
+        setSupportMessages(data)
+      } catch {
+        /* ignore */
+      }
+    },
+    [headers, supportOnlyErrors, supportTgFilter],
+  )
+
   const runSelfTest = useCallback(async () => {
     setSelfTestBusy(true)
     setSelfTestResult(null)
@@ -682,6 +755,8 @@ export default function AdminPage() {
     setProxy(null)
     setVpnOnline(null)
     setVpnClients(null)
+    setSupportStats(null)
+    setSupportMessages(null)
     setKey("")
     setError("")
   }
@@ -1631,6 +1706,242 @@ export default function AdminPage() {
             </div>
           </section>
         )}
+
+        <section>
+          <h2 className="text-lg font-semibold mb-1 text-gray-300">ИИ-поддержка</h2>
+          <p className="text-xs text-gray-500 mb-4">
+            Диалоги пользователей с ИИ-ботом поддержки (OpenRouter). Записываются автоматически после
+            каждого ответа — видно вопрос, ответ, модель, длительность и ошибки.
+          </p>
+
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-4">
+            {[
+              {
+                label: "Сообщений всего",
+                value: supportStats?.total ?? "—",
+                sub: supportStats?.last_message_at
+                  ? `последнее ${formatDate(supportStats.last_message_at)}`
+                  : "нет сообщений",
+                color: "text-blue-400",
+              },
+              {
+                label: "За 24 часа",
+                value: supportStats?.last_24h ?? "—",
+                sub: supportStats ? `за 7д: ${supportStats.last_7d}` : undefined,
+                color: "text-emerald-400",
+              },
+              {
+                label: "Уникальных 7д",
+                value: supportStats?.unique_users_7d ?? "—",
+                sub: supportStats ? `всего: ${supportStats.unique_users_total}` : undefined,
+                color: "text-purple-400",
+              },
+              {
+                label: "Ошибок",
+                value: supportStats?.errors_total ?? "—",
+                sub:
+                  supportStats?.avg_duration_ms != null
+                    ? `avg ${(supportStats.avg_duration_ms / 1000).toFixed(1)} s`
+                    : "avg —",
+                color:
+                  supportStats && supportStats.errors_total > 0
+                    ? "text-red-400"
+                    : "text-gray-400",
+              },
+            ].map((c) => (
+              <div
+                key={c.label}
+                className="bg-gray-900 border border-gray-800 rounded-2xl p-4"
+              >
+                <div className="text-xs text-gray-500 mb-1">{c.label}</div>
+                <div className={`text-2xl font-bold ${c.color}`}>{c.value}</div>
+                {c.sub && <div className="text-xs text-gray-500 mt-1">{c.sub}</div>}
+              </div>
+            ))}
+          </div>
+
+          {supportStats && supportStats.daily_7d.length > 0 && (
+            <div className="bg-gray-900 border border-gray-800 rounded-2xl p-4 mb-4">
+              <div className="text-xs text-gray-500 mb-3 font-medium">Сообщений по дням (7д)</div>
+              {(() => {
+                const maxVal = Math.max(1, ...supportStats.daily_7d.map((d) => d.count))
+                return (
+                  <div className="flex items-end gap-2 h-28">
+                    {supportStats.daily_7d.map((b) => {
+                      const h = Math.round((b.count / maxVal) * 100)
+                      const short = b.day.slice(5)
+                      return (
+                        <div
+                          key={b.day}
+                          className="flex-1 flex flex-col items-center justify-end gap-1"
+                          title={`${b.day}: ${b.count}`}
+                        >
+                          <div className="text-xs text-gray-400 font-mono">{b.count}</div>
+                          <div
+                            className="w-full bg-blue-600/80 rounded-t"
+                            style={{ height: `${Math.max(4, h)}%` }}
+                          />
+                          <div className="text-[10px] text-gray-500 font-mono">{short}</div>
+                        </div>
+                      )
+                    })}
+                  </div>
+                )
+              })()}
+            </div>
+          )}
+
+          {supportStats && supportStats.top_users_7d.length > 0 && (
+            <div className="bg-gray-900 border border-gray-800 rounded-2xl p-4 mb-4">
+              <div className="text-xs text-gray-500 mb-3 font-medium">Топ пользователей (7д)</div>
+              <div className="flex flex-wrap gap-2">
+                {supportStats.top_users_7d.map((u) => (
+                  <button
+                    key={u.telegram_id}
+                    type="button"
+                    onClick={() => {
+                      const tgStr = String(u.telegram_id)
+                      setSupportTgFilter(tgStr)
+                      void fetchSupportMessages({ tgId: tgStr })
+                    }}
+                    className="px-3 py-1.5 text-xs font-mono bg-gray-800 hover:bg-gray-700 rounded-lg border border-gray-700 transition-colors"
+                    title="Фильтровать список по этому пользователю"
+                  >
+                    {u.username ? `@${u.username}` : u.telegram_id}
+                    <span className="ml-2 text-blue-400">{u.count}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
+          <div className="flex flex-wrap items-center gap-2 mb-3">
+            <input
+              type="text"
+              inputMode="numeric"
+              value={supportTgFilter}
+              onChange={(e) => setSupportTgFilter(e.target.value.replace(/[^\d]/g, ""))}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") void fetchSupportMessages()
+              }}
+              placeholder="Фильтр по Telegram ID…"
+              className="px-3 py-2 text-sm bg-gray-900 border border-gray-700 rounded-lg text-white placeholder:text-gray-500 outline-none focus:border-blue-500 w-56"
+            />
+            <button
+              type="button"
+              onClick={() => void fetchSupportMessages()}
+              className="px-3 py-2 text-sm bg-gray-800 rounded-lg hover:bg-gray-700 transition-colors"
+            >
+              Применить
+            </button>
+            {supportTgFilter && (
+              <button
+                type="button"
+                onClick={() => {
+                  setSupportTgFilter("")
+                  void fetchSupportMessages({ tgId: "" })
+                }}
+                className="px-3 py-2 text-sm bg-gray-800 rounded-lg hover:bg-gray-700 transition-colors"
+              >
+                Сбросить
+              </button>
+            )}
+            <label className="flex items-center gap-2 text-sm text-gray-300 select-none ml-auto">
+              <input
+                type="checkbox"
+                checked={supportOnlyErrors}
+                onChange={(e) => {
+                  setSupportOnlyErrors(e.target.checked)
+                  void fetchSupportMessages({ onlyErrors: e.target.checked })
+                }}
+                className="w-4 h-4"
+              />
+              Только ошибки
+            </label>
+          </div>
+
+          <div className="bg-gray-900 border border-gray-800 rounded-2xl overflow-hidden">
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b border-gray-800 text-gray-400 text-left">
+                    <th className="px-4 py-3 font-medium">Когда</th>
+                    <th className="px-4 py-3 font-medium">Пользователь</th>
+                    <th className="px-4 py-3 font-medium">Вопрос</th>
+                    <th className="px-4 py-3 font-medium">Ответ</th>
+                    <th className="px-4 py-3 font-medium text-right">Метрики</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {(supportMessages?.messages ?? []).map((m) => {
+                    const expanded = supportExpandedId === m.id
+                    const shrink = (s: string, n: number) =>
+                      !expanded && s.length > n ? `${s.slice(0, n)}…` : s
+                    return (
+                      <tr
+                        key={m.id}
+                        className={`border-b border-gray-800/50 align-top transition-colors ${
+                          expanded ? "bg-gray-800/30" : "hover:bg-gray-800/20"
+                        } ${!m.ok ? "bg-red-950/10" : ""}`}
+                        onClick={() =>
+                          setSupportExpandedId(expanded ? null : m.id)
+                        }
+                      >
+                        <td className="px-4 py-3 text-gray-400 text-xs whitespace-nowrap">
+                          {formatDate(m.created_at)}
+                        </td>
+                        <td className="px-4 py-3 whitespace-nowrap">
+                          <div className="font-mono text-xs">{m.telegram_id}</div>
+                          {m.username && (
+                            <div className="text-xs text-gray-500">@{m.username}</div>
+                          )}
+                        </td>
+                        <td className="px-4 py-3 text-gray-200 whitespace-pre-wrap max-w-md">
+                          {shrink(m.user_text, 220)}
+                        </td>
+                        <td className="px-4 py-3 text-gray-300 whitespace-pre-wrap max-w-md">
+                          {shrink(m.assistant_text, 220)}
+                          {!m.ok && m.error && (
+                            <div className="mt-1 text-xs text-red-400 font-mono">
+                              {m.error}
+                            </div>
+                          )}
+                        </td>
+                        <td className="px-4 py-3 text-xs text-gray-500 text-right whitespace-nowrap">
+                          {m.duration_ms != null && (
+                            <div className="font-mono">{m.duration_ms} ms</div>
+                          )}
+                          {m.model && (
+                            <div className="font-mono text-gray-600 truncate max-w-[160px]">
+                              {m.model}
+                            </div>
+                          )}
+                          {!m.ok && (
+                            <span className="inline-block mt-1 px-2 py-0.5 rounded-full text-[10px] font-medium bg-red-100 text-red-800">
+                              ошибка
+                            </span>
+                          )}
+                        </td>
+                      </tr>
+                    )
+                  })}
+                  {(!supportMessages || supportMessages.messages.length === 0) && (
+                    <tr>
+                      <td colSpan={5} className="px-4 py-8 text-center text-gray-500">
+                        Сообщений пока нет
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+            {supportMessages && supportMessages.total > supportMessages.messages.length && (
+              <div className="px-4 py-2 text-xs text-gray-500 border-t border-gray-800">
+                Показаны последние {supportMessages.messages.length} из {supportMessages.total}.
+              </div>
+            )}
+          </div>
+        </section>
 
         {stats?.referrals && stats.referrals.length > 0 && (
           <section>
