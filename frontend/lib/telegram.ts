@@ -3,6 +3,25 @@ export type TelegramWebAppUser = {
   username?: string
 }
 
+/* Минимальный глобальный тип Telegram WebApp SDK. Подгружается через
+ * <Script src="https://telegram.org/js/telegram-web-app.js"> в layout.tsx.
+ * Объявляем только те поля, которые реально используем. */
+declare global {
+  interface Window {
+    Telegram?: {
+      WebApp?: {
+        version?: string
+        initDataUnsafe?: { user?: { id: number; username?: string } }
+        ready?: () => void
+        expand?: () => void
+        close?: () => void
+        openLink?: (url: string, options?: { try_instant_view?: boolean }) => void
+        openTelegramLink?: (url: string) => void
+      }
+    }
+  }
+}
+
 /** Lava может вернуть относительный paymentUrl — иначе в WebApp откроется Vercel и даст 404. */
 export function normalizePaymentUrl(url: string): string {
   const u = url.trim()

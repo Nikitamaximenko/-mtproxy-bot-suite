@@ -320,6 +320,16 @@ export default function MiniAppPage() {
   }, [])
 
   useEffect(() => {
+    // Сигналим Telegram'у, что WebApp готов — он скрывает splash и красит
+    // header под Mini App. Без ready() у пользователя ещё 300-800ms висит
+    // серый экран, пока Telegram сам не решит что всё ок.
+    try {
+      window?.Telegram?.WebApp?.ready?.()
+      window?.Telegram?.WebApp?.expand?.()
+    } catch {
+      /* ignore: SDK может ещё не подгрузиться — это не фатально */
+    }
+
     const params = new URLSearchParams(window.location.search)
     const hasTgIdInUrl = params.has("tg_id")
     const hasTgWebApp = !!(window?.Telegram?.WebApp?.version)
@@ -485,18 +495,27 @@ export default function MiniAppPage() {
     setJustPaid(true)
   }, [])
 
-  /* ── No tg_id (браузер без WebApp) ── */
-  if (isWeb === false && !tgId) {
-    return <TgIdFallbackScreen onContinue={setTgId} />
-  }
+  /* ── Loader на самом первом рендере ──
+     Без этого guard'а было так: при первом рендере isWeb === null, tgId === null,
+     sub === null, loading === true → JSX ниже рендерил продажный экран, хотя мы
+     на самом деле ещё не успели понять, Telegram это юзер или браузер. Пользователи
+     с активной подпиской ловили «мигание» продажного экрана, а при медленной сети
+     видели его дольше и думали что мини-апп «их не узнал».
 
-  /* ── Loading ── */
-  if (isWeb === false && loading) {
+     Теперь показываем лоадер, пока:
+       — isWeb ещё не определён (useEffect не отработал), ИЛИ
+       — мы в Telegram-контексте (isWeb === false) и подписка ещё не загружена. */
+  if (isWeb === null || (isWeb === false && loading && sub === null)) {
     return (
       <div className={`${manrope.className} min-h-screen flex items-center justify-center`} style={{ background: "#FFFFFF" }}>
         <FrostIcon className="w-10 h-10 animate-float" style={{ color: "#2AABEE" } as React.CSSProperties} />
       </div>
     )
+  }
+
+  /* ── Браузер без tg_id (не из Telegram) — запрашиваем ID ── */
+  if (isWeb === false && !tgId) {
+    return <TgIdFallbackScreen onContinue={setTgId} />
   }
 
   /* ── Payment modal overlay ── */

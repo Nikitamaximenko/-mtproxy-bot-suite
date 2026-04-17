@@ -1,5 +1,6 @@
 import type { Metadata, Viewport } from 'next'
 import { Inter } from 'next/font/google'
+import Script from 'next/script'
 import { Analytics } from '@vercel/analytics/next'
 import { BackendKeepAlive } from '@/components/BackendKeepAlive'
 import './globals.css'
@@ -64,6 +65,20 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="ru">
+      <head>
+        {/*
+          Telegram WebApp SDK — обязан быть подключён на странице, которая
+          открывается внутри Telegram WebView, иначе window.Telegram.WebApp
+          остаётся undefined: initDataUnsafe.user.id не читается, ready()
+          не вызывается, openTelegramLink выбрасывает пользователя из WebView.
+          Страница /mini без этого скрипта не умеет определять tg_id из
+          Telegram-контекста и вынуждена опираться только на ?tg_id= в URL.
+        */}
+        <Script
+          src="https://telegram.org/js/telegram-web-app.js"
+          strategy="beforeInteractive"
+        />
+      </head>
       <body className="font-sans antialiased">
         <BackendKeepAlive />
         {children}
