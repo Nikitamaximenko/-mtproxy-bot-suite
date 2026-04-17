@@ -17,6 +17,10 @@ node_modules/
 .env
 .env.local
 .env.*.local
+.env.audit
+
+# Cursor / local audit NDJSON (не коммитить)
+.cursor/debug-*.log
 
 # OS
 .DS_Store
