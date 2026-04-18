@@ -83,8 +83,8 @@ function isCustomAppDeepLink(url: string): boolean {
 
 /**
  * Пересобирает MTProxy-ссылки из параметров: так гарантируется кодирование и полный query.
- * `WebApp.openTelegramLink("https://t.me/proxy?…")` в Telegram Desktop часто открывает
- * профиль юзера @proxy, игнорируя query — поэтому для MTProxy этот API не используем.
+ * Для открытия внутри Telegram без выхода в Safari/Chrome нельзя использовать WebApp.openLink —
+ * на macOS он уводит в системный браузер.
  */
 function buildMtProxyLinksFromQueryString(qs: string): { tgLink: string; tmeLink: string; telegramMeLink: string } | null {
   const raw = qs.trim()
@@ -193,19 +193,18 @@ export function openTelegramLink(url: string): boolean {
     } catch {
       /* ignore */
     }
-    // Не используем openTelegramLink для t.me/proxy — в Desktop открывается профиль @proxy.
-    // openLink: сначала https (по доке только http(s)); tg:// — последним в цикле.
-    if (typeof wa?.openLink === "function") {
-      for (const u of [tmeLink, telegramMeLink, tgLink]) {
+    // Только внутри Telegram: openTelegramLink + навигация WebView на tg://.
+    // WebApp.openLink(https://…) на macOS открывает Safari/Chrome — не используем для MTProxy.
+    if (typeof wa?.openTelegramLink === "function") {
+      for (const u of [tmeLink, telegramMeLink]) {
         try {
-          wa.openLink(u, { try_instant_view: false })
+          wa.openTelegramLink(u)
           return true
         } catch {
           /* next */
         }
       }
     }
-    openViaAnchorClick(tgLink)
     try {
       window.location.assign(tgLink)
       return true
@@ -218,19 +217,8 @@ export function openTelegramLink(url: string): boolean {
     } catch {
       /* ignore */
     }
-    try {
-      window.location.assign(tmeLink)
-      return true
-    } catch {
-      /* ignore */
-    }
-    try {
-      window.location.href = tmeLink
-      return true
-    } catch {
-      /* ignore */
-    }
-    return false
+    openViaAnchorClick(tgLink)
+    return true
   }
 
   if (resolved.startsWith("tg://")) {
