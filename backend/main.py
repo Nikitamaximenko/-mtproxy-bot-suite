@@ -1516,8 +1516,12 @@ def _prodamus_payment_is_success(payload: dict[str, Any]) -> bool:
 
 
 @app.post("/webhooks/prodamus")
+@app.post("/webhook/prodamus")
 async def prodamus_webhook(req: Request, db: Session = Depends(get_db)) -> PlainTextResponse:
-    """Ответ с телом success и кодом 200 — ожидание Prodamus (см. официальный приём вебхука)."""
+    """Ответ с телом success и кодом 200 — ожидание Prodamus (см. официальный приём вебхука).
+
+    Дублируем путь /webhook/prodamus (без s): так часто прописывают в кабинете Prodamus.
+    """
     if not PRODAMUS_SECRET_KEY:
         logger.warning("PRODAMUS_SECRET_KEY not set — rejecting webhook")
         raise HTTPException(status_code=401, detail="Webhook authentication not configured")
