@@ -82,48 +82,6 @@ function isCustomAppDeepLink(url: string): boolean {
 }
 
 /**
- * Пересобирает MTProxy-ссылки из параметров: так гарантируется кодирование и полный query.
- * Для открытия внутри Telegram без выхода в Safari/Chrome нельзя использовать WebApp.openLink —
- * на macOS он уводит в системный браузер.
- */
-function buildMtProxyLinksFromQueryString(qs: string): { tgLink: string; tmeLink: string; telegramMeLink: string } | null {
-  const raw = qs.trim()
-  if (!raw) return null
-  const search = raw.startsWith("?") ? raw : `?${raw}`
-  let params: URLSearchParams
-  try {
-    params = new URLSearchParams(search.slice(1))
-  } catch {
-    return null
-  }
-  const server = params.get("server")?.trim()
-  const port = params.get("port")?.trim()
-  const secret = params.get("secret")?.trim()
-  if (!server || !port || !secret) return null
-
-  const encoded = new URLSearchParams({ server, port, secret })
-  const q = encoded.toString()
-  return {
-    tgLink: `tg://proxy?${q}`,
-    tmeLink: `https://t.me/proxy?${q}`,
-    telegramMeLink: `https://telegram.me/proxy?${q}`,
-  }
-}
-
-/** Синтетический клик по ссылке (иногда срабатывает там, где location.assign на tg:// молчит). */
-function openViaAnchorClick(href: string): void {
-  if (typeof document === "undefined") return
-  const a = document.createElement("a")
-  a.href = href
-  a.target = "_self"
-  a.rel = "noreferrer noopener"
-  a.style.display = "none"
-  document.body.appendChild(a)
-  a.click()
-  document.body.removeChild(a)
-}
-
-/**
  * Платёжные ссылки (Lava / Prodamus) мы открываем НЕ через WebApp.openLink,
  * потому что в новых клиентах Telegram (iOS/Android/Desktop) он уводит юзера
  * в системный Safari/Chrome — мини-аппа «выплёвывает» оплату наружу.
@@ -183,41 +141,18 @@ export function openTelegramLink(url: string): boolean {
   const proxyTelegramMe = resolved.match(/^https?:\/\/telegram\.me\/proxy(\?.*)?$/i)
   if (proxyTg || proxyTme || proxyTelegramMe) {
     const qs = (proxyTg?.[1] ?? proxyTme?.[1] ?? proxyTelegramMe?.[1] ?? "").trim()
-    const built = buildMtProxyLinksFromQueryString(qs)
-    if (!built) {
+    const tgUrl = proxyTg
+      ? resolved.trim()
+      : `tg://proxy${qs.startsWith("?") ? qs : qs ? `?${qs}` : ""}`
+    if (!/[?&]server=/.test(tgUrl) || !/[?&]port=/.test(tgUrl) || !/[?&]secret=/.test(tgUrl)) {
       return false
     }
-    const { tgLink, tmeLink, telegramMeLink } = built
     try {
       wa?.ready?.()
     } catch {
       /* ignore */
     }
-    // Только внутри Telegram: openTelegramLink + навигация WebView на tg://.
-    // WebApp.openLink(https://…) на macOS открывает Safari/Chrome — не используем для MTProxy.
-    if (typeof wa?.openTelegramLink === "function") {
-      for (const u of [tmeLink, telegramMeLink]) {
-        try {
-          wa.openTelegramLink(u)
-          return true
-        } catch {
-          /* next */
-        }
-      }
-    }
-    try {
-      window.location.assign(tgLink)
-      return true
-    } catch {
-      /* ignore */
-    }
-    try {
-      window.location.href = tgLink
-      return true
-    } catch {
-      /* ignore */
-    }
-    openViaAnchorClick(tgLink)
+    window.location.href = tgUrl
     return true
   }
 
