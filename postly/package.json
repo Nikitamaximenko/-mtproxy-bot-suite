@@ -9,6 +9,7 @@
     "start": "next start",
     "lint": "next lint",
     "db:generate": "dotenv -e .env.local -- prisma generate",
+    "db:migrate": "dotenv -e .env.local -- prisma migrate deploy",
     "db:push": "dotenv -e .env.local -- prisma db push",
     "db:push:force": "dotenv -e .env.local -- prisma db push --accept-data-loss",
     "smoke:postmypost": "dotenv -e .env.local -- tsx scripts/smoke-postmypost.ts"
