@@ -678,18 +678,36 @@ def _apply_proxy_credentials(sub: Subscription) -> None:
     sub.proxy_secret = MT_PROXY_SECRET
 
 
-def activate_subscription(sub: Subscription) -> None:
+def activate_subscription(sub: Subscription, *, recurring: bool = False) -> None:
     """
-    Активация после оплаты (или тестового гранта): 30 дней с момента вызова, статус paid, прокси включён.
-    Для восстановления доступа по уже оплаченному окну без сдвига дат — см. admin_activate + access_suspended.
+    Активация после оплаты (или тестового гранта): 30 дней, статус paid, прокси включён.
+    recurring=True — продление Lava (subscription.recurring.payment.success): +30 дней от конца текущего
+    оплаченного окна, если оно ещё в будущем, иначе от now (идемпотентный skip не применяется).
+    Для восстановления доступа без сдвига дат — см. admin_activate + access_suspended.
     """
-    # Idempotent: if already active and not expired, don't extend
-    if sub.payment_status == "paid" and sub.expires_at and sub.expires_at > utcnow():
+    now = utcnow()
+    if recurring:
+        base = now
+        if sub.expires_at and sub.expires_at > base:
+            base = sub.expires_at
+        _apply_proxy_credentials(sub)
+        sub.payment_status = "paid"
+        sub.expires_at = base + timedelta(days=30)
+        sub.access_suspended = False
+        logger.info(
+            "activate_subscription: recurring extend tg_id=%s new_expires=%s",
+            sub.telegram_id,
+            sub.expires_at,
+        )
+        return
+
+    # Первый платёж: идемпотентность — не перезатирать активный период повторным payment.success
+    if sub.payment_status == "paid" and sub.expires_at and sub.expires_at > now:
         logger.info("activate_subscription: already active, skipping tg_id=%s", sub.telegram_id)
         return
     _apply_proxy_credentials(sub)
     sub.payment_status = "paid"
-    sub.expires_at = utcnow() + timedelta(days=30)
+    sub.expires_at = now + timedelta(days=30)
     sub.access_suspended = False
 
 
@@ -1071,14 +1089,20 @@ async def lava_webhook(req: Request, db: Session = Depends(get_db)) -> OkRespons
         logger.warning("No subscription found for contractId=%s (event=%s)", lookup_id, event_type)
         return OkResponse(ok=True)
 
+    is_recurring = event_type == "subscription.recurring.payment.success"
     try:
-        activate_subscription(sub)
+        activate_subscription(sub, recurring=is_recurring)
     except RuntimeError as e:
         logger.error("activate_subscription failed for contractId=%s: %s", lookup_id, e)
         raise HTTPException(status_code=503, detail=str(e))
 
     db.commit()
-    logger.info("Subscription activated for tg_id=%s contract=%s", sub.telegram_id, contract_id)
+    logger.info(
+        "Subscription activated for tg_id=%s contract=%s recurring=%s",
+        sub.telegram_id,
+        contract_id,
+        is_recurring,
+    )
 
     _provision_vpn_after_payment(int(sub.telegram_id), db)
 
