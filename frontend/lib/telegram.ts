@@ -172,7 +172,29 @@ export function openTelegramLink(url: string): boolean {
     } catch {
       /* ignore */
     }
-    // Только tg:// — не вызываем openTelegramLink(https://t.me/proxy), это даёт @proxy в Desktop.
+    // В WebView Telegram часто блокирует window.location на tg:// — кнопка «молчит».
+    // Официальный способ: WebApp.openTelegramLink (поддерживает tg://).
+    if (typeof wa?.openTelegramLink === "function") {
+      try {
+        wa.openTelegramLink(mtProxy)
+        return true
+      } catch {
+        /* fall through */
+      }
+    }
+    // Фолбэк: синтетический клик по ссылке (иногда проходит там, где assign/href режутся).
+    try {
+      const a = document.createElement("a")
+      a.href = mtProxy
+      a.setAttribute("rel", "noreferrer")
+      a.style.display = "none"
+      document.body.appendChild(a)
+      a.click()
+      a.remove()
+      return true
+    } catch {
+      /* fall through */
+    }
     try {
       if (window.parent && window.parent !== window) {
         window.parent.location.href = mtProxy
@@ -181,7 +203,15 @@ export function openTelegramLink(url: string): boolean {
     } catch {
       /* cross-origin / запрет — ниже */
     }
-    window.location.href = mtProxy
+    try {
+      window.location.assign(mtProxy)
+    } catch {
+      try {
+        window.location.href = mtProxy
+      } catch {
+        return false
+      }
+    }
     return true
   }
 
