@@ -200,6 +200,8 @@ class Subscription(Base):
 
     notified_expiring: Mapped[bool] = mapped_column(Boolean, default=False, server_default=sa_false(), nullable=False)
     notified_expired: Mapped[bool] = mapped_column(Boolean, default=False, server_default=sa_false(), nullable=False)
+    # Один раз уведомить о неудачном автопродлении Lava (вебхук может дублироваться).
+    renewal_failed_notified: Mapped[bool] = mapped_column(Boolean, default=False, server_default=sa_false(), nullable=False)
     # Ручное отключение в админке: не меняет оплаченный период (expires_at), только снимает доступ к прокси.
     access_suspended: Mapped[bool] = mapped_column(Boolean, default=False, server_default=sa_false(), nullable=False)
 
@@ -289,6 +291,17 @@ def _migrate() -> None:
                     )
                 else:
                     conn.execute(text("ALTER TABLE subscriptions ADD COLUMN access_suspended BOOLEAN NOT NULL DEFAULT 0"))
+            if "renewal_failed_notified" not in existing:
+                if engine.dialect.name == "postgresql":
+                    conn.execute(
+                        text(
+                            "ALTER TABLE subscriptions ADD COLUMN renewal_failed_notified BOOLEAN NOT NULL DEFAULT FALSE"
+                        )
+                    )
+                else:
+                    conn.execute(
+                        text("ALTER TABLE subscriptions ADD COLUMN renewal_failed_notified BOOLEAN NOT NULL DEFAULT 0")
+                    )
     if "users" in tables:
         existing = {c["name"] for c in inspector.get_columns("users")}
         with engine.begin() as conn:
@@ -694,6 +707,7 @@ def activate_subscription(sub: Subscription, *, recurring: bool = False) -> None
         sub.payment_status = "paid"
         sub.expires_at = base + timedelta(days=30)
         sub.access_suspended = False
+        sub.renewal_failed_notified = False
         logger.info(
             "activate_subscription: recurring extend tg_id=%s new_expires=%s",
             sub.telegram_id,
@@ -709,6 +723,7 @@ def activate_subscription(sub: Subscription, *, recurring: bool = False) -> None
     sub.payment_status = "paid"
     sub.expires_at = now + timedelta(days=30)
     sub.access_suspended = False
+    sub.renewal_failed_notified = False
 
 
 def _miniapp_public_url(tg_id: int) -> str:
@@ -957,6 +972,25 @@ def _notify_expired(tg_id: int) -> None:
     ), {"inline_keyboard": buttons})
 
 
+def _notify_recurring_payment_failed(tg_id: int, expires_at: datetime) -> None:
+    """Lava: автосписание за продление не прошло; период ещё действует до expires_at."""
+    date_str = expires_at.strftime("%d.%m.%Y")
+    buttons: list[list[dict[str, str]]] = [
+        [{"text": "\U0001f4b3 \u041e\u043f\u043b\u0430\u0442\u0438\u0442\u044c \u043f\u0440\u043e\u0434\u043b\u0435\u043d\u0438\u0435", "callback_data": "menu:subscribe"}],
+    ]
+    _send_tg(
+        tg_id,
+        (
+            "\u26a0\ufe0f <b>\u041d\u0435 \u0443\u0434\u0430\u043b\u043e\u0441\u044c \u0441\u043f\u0438\u0441\u0430\u0442\u044c \u043e\u043f\u043b\u0430\u0442\u0443 \u0437\u0430 \u043f\u0440\u043e\u0434\u043b\u0435\u043d\u0438\u0435</b>\n\n"
+            f"\u0414\u043e\u0441\u0442\u0443\u043f \u043e\u0441\u0442\u0430\u0451\u0442\u0441\u044f \u0434\u043e <b>{date_str}</b> "
+            "(\u0443\u0436\u0435 \u043e\u043f\u043b\u0430\u0447\u0435\u043d\u043d\u044b\u0439 \u043f\u0435\u0440\u0438\u043e\u0434).\n\n"
+            "\u041e\u0444\u043e\u0440\u043c\u0438\u0442\u0435 \u043e\u043f\u043b\u0430\u0442\u0443 \u0437\u0430\u0440\u0430\u043d\u0435\u0435, \u0447\u0442\u043e\u0431\u044b \u043d\u0435 \u043f\u043e\u0442\u0435\u0440\u044f\u0442\u044c VPN \u0438 MTProxy "
+            "\u043f\u043e\u0441\u043b\u0435 \u044d\u0442\u043e\u0439 \u0434\u0430\u0442\u044b."
+        ),
+        {"inline_keyboard": buttons},
+    )
+
+
 def _process_expiration_notifications() -> None:
     db = SessionLocal()
     try:
@@ -991,15 +1025,46 @@ def _process_expiration_notifications() -> None:
             logger.info("Sending expired notification to tg_id=%s", sub.telegram_id)
             _notify_expired(sub.telegram_id)
             sub.notified_expired = True
+            sub.payment_status = "expired"
+            sub.renewal_failed_notified = False
+            sub.proxy_server = None
+            sub.proxy_port = None
+            sub.proxy_secret = None
             # Deactivate VPN client when subscription expires
             try:
                 _deactivate_vpn_client_no_commit(int(sub.telegram_id), db)
             except Exception:
                 logger.exception("Failed to deactivate VPN for expired tg_id=%s", sub.telegram_id)
 
+        # Раньше при истечении не выставляли payment_status=expired — починить БД без повторной рассылки.
+        stale_paid = db.execute(
+            select(Subscription).where(
+                Subscription.payment_status == "paid",
+                Subscription.expires_at.is_not(None),
+                Subscription.expires_at <= now,
+                Subscription.notified_expired == True,  # noqa: E712
+            )
+        ).scalars().all()
+        for sub in stale_paid:
+            logger.info("Backfill expired status for tg_id=%s (was paid after notify)", sub.telegram_id)
+            sub.payment_status = "expired"
+            sub.renewal_failed_notified = False
+            sub.proxy_server = None
+            sub.proxy_port = None
+            sub.proxy_secret = None
+            try:
+                _deactivate_vpn_client_no_commit(int(sub.telegram_id), db)
+            except Exception:
+                logger.exception("Backfill: deactivate VPN failed tg_id=%s", sub.telegram_id)
+
         db.commit()
-        if expiring or expired:
-            logger.info("Expiration check: %d expiring, %d expired notifications sent", len(expiring), len(expired))
+        if expiring or expired or stale_paid:
+            logger.info(
+                "Expiration check: %d expiring, %d expired notified, %d stale paid backfilled",
+                len(expiring),
+                len(expired),
+                len(stale_paid),
+            )
     except Exception:
         db.rollback()
         raise
@@ -1074,6 +1139,47 @@ async def lava_webhook(req: Request, db: Session = Depends(get_db)) -> OkRespons
         str(payload.get("parentContractId") or product.get("parentContractId") or buyer.get("parentContractId") or "").strip()
     )
     logger.info("Webhook eventType=%s contractId=%s parentContractId=%s", event_type, contract_id or None, parent_contract_id or None)
+
+    # Неуспешное автопродление: не отзываем доступ досрочно (период предоплачен), но логируем и уведомляем.
+    _lava_recurring_fail = {
+        "subscription.recurring.payment.failed",
+        "subscription.recurring.payment.failure",
+    }
+    if event_type in _lava_recurring_fail:
+        lookup_fail = parent_contract_id or contract_id
+        if not lookup_fail:
+            return OkResponse(ok=True)
+        sub_fail = db.execute(
+            select(Subscription).where(Subscription.lava_contract_id == lookup_fail)
+        ).scalar_one_or_none()
+        if sub_fail is None:
+            logger.warning("Lava recurring fail: no subscription for contractId=%s", lookup_fail)
+            return OkResponse(ok=True)
+        now_f = utcnow()
+        if (
+            sub_fail.payment_status == "paid"
+            and sub_fail.expires_at
+            and sub_fail.expires_at > now_f
+            and not sub_fail.renewal_failed_notified
+        ):
+            _notify_recurring_payment_failed(int(sub_fail.telegram_id), sub_fail.expires_at)  # type: ignore[arg-type]
+            sub_fail.renewal_failed_notified = True
+            db.commit()
+            logger.info(
+                "Lava recurring payment failed: notified tg_id=%s contract=%s expires=%s",
+                sub_fail.telegram_id,
+                lookup_fail,
+                sub_fail.expires_at,
+            )
+        else:
+            logger.info(
+                "Lava recurring payment failed: skip notify tg_id=%s status=%s expires=%s already_notified=%s",
+                sub_fail.telegram_id,
+                sub_fail.payment_status,
+                sub_fail.expires_at,
+                sub_fail.renewal_failed_notified,
+            )
+        return OkResponse(ok=True)
 
     if event_type not in {"payment.success", "subscription.recurring.payment.success"}:
         return OkResponse(ok=True)
@@ -1555,6 +1661,9 @@ def check_token(token: UUID, db: Session = Depends(get_db)) -> CheckTokenRespons
     sub = db.execute(select(Subscription).where(Subscription.payment_token == str(token))).scalar_one_or_none()
     if sub is None or sub.payment_status != "paid":
         return CheckTokenResponse(found=False)
+    now = utcnow()
+    if sub.expires_at is None or sub.expires_at <= now:
+        return CheckTokenResponse(found=False)
 
     proxy_link: str | None = None
     if sub.proxy_server and sub.proxy_port and sub.proxy_secret:
@@ -1591,7 +1700,7 @@ def claim_web_subscription(
         return ClaimWebSubscriptionResponse(ok=False, error="not_found")
 
     # Reject expired subscriptions
-    if sub.expires_at and sub.expires_at < utcnow():
+    if sub.expires_at is None or sub.expires_at <= utcnow():
         return ClaimWebSubscriptionResponse(ok=False, error="subscription_expired")
 
     proxy_link: str | None = None
@@ -2844,6 +2953,7 @@ def internal_diag_subscription(
             "created_at": s.created_at.isoformat() if s.created_at else None,
             "expires_at": s.expires_at.isoformat() if s.expires_at else None,
             "access_suspended": bool(s.access_suspended),
+            "renewal_failed_notified": bool(s.renewal_failed_notified),
             "has_proxy_server": bool(s.proxy_server),
             "has_proxy_port": bool(s.proxy_port),
             "has_proxy_secret": bool(s.proxy_secret),
