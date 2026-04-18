@@ -84,8 +84,8 @@
 }
 
 @theme inline {
-  --font-sans: var(--font-manrope), 'Manrope', 'Inter', system-ui, sans-serif;
-  --font-display: var(--font-fraunces), 'Fraunces', 'Cormorant Garamond', Georgia, serif;
+  --font-sans: var(--font-onest), 'Onest', system-ui, sans-serif;
+  --font-display: var(--font-unbounded), 'Unbounded', system-ui, sans-serif;
   --font-mono: ui-monospace, 'Geist Mono', SFMono-Regular, monospace;
 
   --color-background: var(--background);
@@ -157,9 +157,9 @@
   h3,
   h4 {
     font-family: var(--font-display);
-    font-weight: 500;
-    letter-spacing: -0.015em;
-    line-height: 1.12;
+    font-weight: 600;
+    letter-spacing: -0.03em;
+    line-height: 1.08;
     color: var(--plum-deep);
   }
 
@@ -293,8 +293,9 @@
 
 .fr-serif {
   font-family: var(--font-display);
-  font-weight: 400;
-  font-style: italic;
+  font-weight: 500;
+  font-style: normal;
+  letter-spacing: -0.025em;
 }
 
 .fr-divider {

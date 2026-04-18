@@ -1,10 +1,7 @@
 "use client"
 
 import { useCallback, useEffect, useRef, useState } from "react"
-import { Manrope } from "next/font/google"
 import { Check, MessageCircle, Shield, Zap } from "lucide-react"
-
-const manrope = Manrope({ subsets: ["latin", "cyrillic"], weight: ["400", "500", "600", "700", "800"] })
 
 const TELEGRAM_BOT = "https://t.me/frostytg_bot?start=site"
 const PRICE_RUB = 299
@@ -109,7 +106,7 @@ function PaymentCard({ ping }: { ping: VpnPing | null }) {
         </span>
       </div>
       <div className="flex items-baseline gap-1 mb-1">
-        <span className="font-extrabold" style={{ fontSize: 36, color: "#111827", letterSpacing: "-0.02em" }}>
+        <span className="font-display font-extrabold" style={{ fontSize: 36, color: "#111827", letterSpacing: "-0.03em" }}>
           {PRICE_RUB} ₽
         </span>
         <span className="text-sm" style={{ color: "#6B7280" }}>
@@ -375,7 +372,7 @@ export function Landing() {
   }, [])
 
   return (
-    <div className={`${manrope.className}`} style={{ background: "#FFFFFF", color: "#111827" }}>
+    <div className="font-sans antialiased" style={{ background: "#FFFFFF", color: "#111827" }}>
       <nav className="sticky top-0 z-40" style={{ background: "rgba(255,255,255,0.85)", backdropFilter: "saturate(180%) blur(12px)", borderBottom: "1px solid #F3F4F6" }}>
         <div className="max-w-6xl mx-auto px-5 py-3 flex items-center justify-between">
           <div className="flex items-center gap-2">
@@ -418,8 +415,8 @@ export function Landing() {
               2 в 1 — Прокси + VPN
             </span>
             <h1
-              className="font-extrabold leading-[1.05] mb-5"
-              style={{ fontSize: "clamp(34px, 6vw, 56px)", letterSpacing: "-0.02em" }}
+              className="font-display font-extrabold leading-[1.05] mb-5"
+              style={{ fontSize: "clamp(34px, 6vw, 56px)", letterSpacing: "-0.03em" }}
             >
               Telegram работает сразу.
               <br />
@@ -506,8 +503,8 @@ export function Landing() {
       <section className="px-5 py-12" style={{ background: "#F7F8FA" }}>
         <div className="max-w-6xl mx-auto">
           <h2
-            className="font-extrabold mb-3"
-            style={{ fontSize: "clamp(26px, 3.5vw, 36px)", letterSpacing: "-0.02em" }}
+            className="font-display font-extrabold mb-3"
+            style={{ fontSize: "clamp(26px, 3.5vw, 36px)", letterSpacing: "-0.03em" }}
           >
             Устал жонглировать тремя VPN?
           </h2>
@@ -570,8 +567,8 @@ export function Landing() {
       <section className="px-5 py-14">
         <div className="max-w-6xl mx-auto">
           <h2
-            className="font-extrabold mb-2"
-            style={{ fontSize: "clamp(26px, 3.5vw, 36px)", letterSpacing: "-0.02em" }}
+            className="font-display font-extrabold mb-2"
+            style={{ fontSize: "clamp(26px, 3.5vw, 36px)", letterSpacing: "-0.03em" }}
           >
             Как это работает
           </h2>
@@ -654,8 +651,8 @@ export function Landing() {
       <section className="px-5 py-14" style={{ background: "#F7F8FA" }}>
         <div className="max-w-6xl mx-auto">
           <h2
-            className="font-extrabold mb-6"
-            style={{ fontSize: "clamp(24px, 3vw, 32px)", letterSpacing: "-0.02em" }}
+            className="font-display font-extrabold mb-6"
+            style={{ fontSize: "clamp(24px, 3vw, 32px)", letterSpacing: "-0.03em" }}
           >
             Почему Frosty, а не «бесплатный VPN из магазина»
           </h2>
@@ -715,8 +712,8 @@ export function Landing() {
       <section id="faq" className="px-5 py-14">
         <div className="max-w-3xl mx-auto">
           <h2
-            className="font-extrabold mb-6"
-            style={{ fontSize: "clamp(26px, 3.5vw, 36px)", letterSpacing: "-0.02em" }}
+            className="font-display font-extrabold mb-6"
+            style={{ fontSize: "clamp(26px, 3.5vw, 36px)", letterSpacing: "-0.03em" }}
           >
             Частые вопросы
           </h2>
@@ -753,8 +750,8 @@ export function Landing() {
       <section className="px-5 py-14" style={{ background: "#0F172A" }}>
         <div className="max-w-3xl mx-auto text-center">
           <h2
-            className="font-extrabold mb-3"
-            style={{ color: "#FFFFFF", fontSize: "clamp(26px, 3.5vw, 36px)", letterSpacing: "-0.02em" }}
+            className="font-display font-extrabold mb-3"
+            style={{ color: "#FFFFFF", fontSize: "clamp(26px, 3.5vw, 36px)", letterSpacing: "-0.03em" }}
           >
             Пока вы читаете — Telegram уже мог бы работать.
           </h2>

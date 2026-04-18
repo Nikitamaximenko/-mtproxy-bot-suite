@@ -1,8 +1,5 @@
 "use client"
 import { useEffect, useRef, useState } from "react"
-import { Manrope } from "next/font/google"
-
-const manrope = Manrope({ subsets: ["latin", "cyrillic"], weight: ["400", "500", "600", "700"] })
 
 type Phase =
   | "polling"      // автоматический поллинг после редиректа с Lava
@@ -134,7 +131,7 @@ export default function SuccessPage() {
 
   return (
     <div
-      className={manrope.className}
+      className="font-sans antialiased"
       style={{ minHeight: "100vh", background: "#FFFFFF", display: "flex", alignItems: "center", justifyContent: "center", padding: "24px" }}
     >
       <div style={{ maxWidth: "400px", width: "100%", textAlign: "center" }}>

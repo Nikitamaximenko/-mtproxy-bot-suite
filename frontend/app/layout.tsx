@@ -1,23 +1,22 @@
 import type { Metadata, Viewport } from 'next'
-import { Manrope, Fraunces } from 'next/font/google'
+import { Onest, Unbounded } from 'next/font/google'
 import Script from 'next/script'
 import { Analytics } from '@vercel/analytics/next'
 import { BackendKeepAlive } from '@/components/BackendKeepAlive'
 import { SITE_URL } from '@/lib/site'
 import './globals.css'
 
-const manrope = Manrope({
+const onest = Onest({
   subsets: ['latin', 'cyrillic'],
   weight: ['400', '500', '600', '700', '800'],
-  variable: '--font-manrope',
+  variable: '--font-onest',
   display: 'swap',
 })
 
-const fraunces = Fraunces({
+const unbounded = Unbounded({
   subsets: ['latin', 'cyrillic'],
-  weight: ['400', '500', '600'],
-  style: ['normal', 'italic'],
-  variable: '--font-fraunces',
+  weight: ['500', '600', '700', '800'],
+  variable: '--font-unbounded',
   display: 'swap',
 })
 
@@ -87,7 +86,7 @@ export default function RootLayout({
   children: React.ReactNode
 }>) {
   return (
-    <html lang="ru" className={`${manrope.variable} ${fraunces.variable}`}>
+    <html lang="ru" className={`${onest.variable} ${unbounded.variable}`}>
       <head>
         {/*
           Telegram WebApp SDK — обязан быть подключён на странице, которая

@@ -1,11 +1,8 @@
 "use client"
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
-import { Manrope } from "next/font/google"
 import { Check, Copy, ExternalLink, RefreshCw, Shield, X } from "lucide-react"
 import { getTelegramInitData, getTelegramInitDataAsync, getTelegramUser, openPaymentLink, openTelegramLink } from "@/lib/telegram"
-
-const manrope = Manrope({ subsets: ["latin", "cyrillic"], weight: ["400", "500", "600", "700"] })
 
 type SubscriptionData = {
   active: boolean
@@ -86,7 +83,7 @@ function TgIdFallbackScreen({ onContinue }: { onContinue: (id: number) => void }
   }
 
   return (
-    <div className={`${manrope.className} min-h-screen flex items-center justify-center px-4 py-10`} style={{ background: "#FFFFFF" }}>
+    <div className="font-sans antialiased min-h-screen flex items-center justify-center px-4 py-10" style={{ background: "#FFFFFF" }}>
       <div className="w-full max-w-sm space-y-6 text-center">
         <FrostIcon className="w-14 h-14 mx-auto" style={{ color: "#2AABEE" } as React.CSSProperties} />
         <div>
@@ -194,7 +191,7 @@ function PaymentModal({
   }, [checkPayment])
 
   return (
-    <div className={`${manrope.className} fixed inset-0 z-50 flex flex-col`} style={{ background: "#FFFFFF" }}>
+    <div className="font-sans antialiased fixed inset-0 z-50 flex flex-col" style={{ background: "#FFFFFF" }}>
       <div className="flex items-center justify-between px-4 py-3" style={{ borderBottom: "1px solid #F3F4F6" }}>
         <div className="flex items-center gap-2">
           <FrostIcon className="w-5 h-5" style={{ color: "#2AABEE" } as React.CSSProperties} />
@@ -613,7 +610,7 @@ export default function MiniAppPage() {
        — мы в Telegram-контексте (isWeb === false) и подписка ещё не загружена. */
   if (isWeb === null || (isWeb === false && loading && sub === null)) {
     return (
-      <div className={`${manrope.className} min-h-screen flex items-center justify-center`} style={{ background: "#FFFFFF" }}>
+      <div className={"font-sans antialiased min-h-screen flex items-center justify-center"} style={{ background: "#FFFFFF" }}>
         <FrostIcon className="w-10 h-10 animate-float" style={{ color: "#2AABEE" } as React.CSSProperties} />
       </div>
     )
@@ -625,7 +622,7 @@ export default function MiniAppPage() {
   if (isWeb === true) {
     if (typeof window !== "undefined") window.location.replace("/")
     return (
-      <div className={`${manrope.className} min-h-screen flex items-center justify-center`} style={{ background: "#FFFFFF" }}>
+      <div className={"font-sans antialiased min-h-screen flex items-center justify-center"} style={{ background: "#FFFFFF" }}>
         <FrostIcon className="w-10 h-10 animate-float" style={{ color: "#2AABEE" } as React.CSSProperties} />
       </div>
     )
@@ -651,7 +648,7 @@ export default function MiniAppPage() {
   /* ── Active subscription ── */
   if (isPaid) {
     return (
-      <div className={`${manrope.className} min-h-screen px-4 py-6`} style={{ background: "#FFFFFF" }}>
+      <div className={"font-sans antialiased min-h-screen px-4 py-6"} style={{ background: "#FFFFFF" }}>
         <div className="max-w-sm mx-auto">
 
           {/* Logo */}
@@ -1034,7 +1031,7 @@ export default function MiniAppPage() {
   return (
     <>
       {paymentModal}
-      <div className={`${manrope.className} min-h-screen px-4 py-6`} style={{ background: "#FFFFFF" }}>
+      <div className={"font-sans antialiased min-h-screen px-4 py-6"} style={{ background: "#FFFFFF" }}>
         <div className="max-w-sm mx-auto">
 
           {/* 1. Logo */}
