@@ -152,12 +152,10 @@ export function openTelegramLink(url: string): boolean {
   resolved = resolved.replace(/^tg:\/\/proxy\/+(?=\?)/i, "tg://proxy")
   resolved = resolved.replace(/^https?:\/\/t\.me\/proxy\/+(?=\?)/i, "https://t.me/proxy")
 
-  // MTProxy deep-link. В Mini App WebView схема tg:// не доходит до Telegram:
-  // WebApp.openLink принимает только http(s), openTelegramLink — только https://t.me/,
-  // а window.location.assign("tg://…") в iframe Telegram обычно блокируется.
-  // Официальный формат с параметрами — https://t.me/proxy?server=…&port=…&secret=… —
-  // Telegram распознаёт именно как MTProxy и открывает нативный диалог (без параметров
-  // это чат @proxy, поэтому query-строку сохраняем как есть).
+  // MTProxy: нужен именно tg://proxy?server=&port=&secret= — так открывается диалог прокси.
+  // Сначала пробуем tg:// (как в ссылке с бэкенда); https://t.me/proxy?… без параметров
+  // ведёт в чат @proxy, а с параметрами в части клиентов тоже уводит не туда — поэтому
+  // https оставляем только фолбэком, если навигация по tg:// не сработала.
   const proxyTg = resolved.match(/^tg:\/\/proxy(\?.*)?$/i)
   const proxyTme = resolved.match(/^https?:\/\/t\.me\/proxy(\?.*)?$/i)
   if (proxyTg || proxyTme) {
@@ -166,8 +164,21 @@ export function openTelegramLink(url: string): boolean {
       return false
     }
     const tmeLink = `https://t.me/proxy${qs || ""}`
+    const tgLink = /^tg:\/\//i.test(resolved.trim()) ? resolved.trim() : `tg://proxy${qs || ""}`
     try {
       wa?.ready?.()
+    } catch {
+      /* ignore */
+    }
+    try {
+      window.location.assign(tgLink)
+      return true
+    } catch {
+      /* ignore */
+    }
+    try {
+      window.location.href = tgLink
+      return true
     } catch {
       /* ignore */
     }
