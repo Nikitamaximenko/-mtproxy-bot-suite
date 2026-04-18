@@ -152,10 +152,10 @@ export function openTelegramLink(url: string): boolean {
   resolved = resolved.replace(/^tg:\/\/proxy\/+(?=\?)/i, "tg://proxy")
   resolved = resolved.replace(/^https?:\/\/t\.me\/proxy\/+(?=\?)/i, "https://t.me/proxy")
 
-  // MTProxy: нужен именно tg://proxy?server=&port=&secret= — так открывается диалог прокси.
-  // Сначала пробуем tg:// (как в ссылке с бэкенда); https://t.me/proxy?… без параметров
-  // ведёт в чат @proxy, а с параметрами в части клиентов тоже уводит не туда — поэтому
-  // https оставляем только фолбэком, если навигация по tg:// не сработала.
+  // MTProxy: с полным query и https://t.me/proxy?server=… Telegram открывает диалог прокси.
+  // Без query — чат @proxy (блокируем выше). В Mini App WebView window.location на tg://
+  // часто молча не срабатывает (и не кидает ошибку) — поэтому сначала WebApp API, потом
+  // https://, и только в конце tg:// как запасной вариант.
   const proxyTg = resolved.match(/^tg:\/\/proxy(\?.*)?$/i)
   const proxyTme = resolved.match(/^https?:\/\/t\.me\/proxy(\?.*)?$/i)
   if (proxyTg || proxyTme) {
@@ -167,18 +167,6 @@ export function openTelegramLink(url: string): boolean {
     const tgLink = /^tg:\/\//i.test(resolved.trim()) ? resolved.trim() : `tg://proxy${qs || ""}`
     try {
       wa?.ready?.()
-    } catch {
-      /* ignore */
-    }
-    try {
-      window.location.assign(tgLink)
-      return true
-    } catch {
-      /* ignore */
-    }
-    try {
-      window.location.href = tgLink
-      return true
     } catch {
       /* ignore */
     }
@@ -206,6 +194,18 @@ export function openTelegramLink(url: string): boolean {
     }
     try {
       window.location.href = tmeLink
+      return true
+    } catch {
+      /* ignore */
+    }
+    try {
+      window.location.assign(tgLink)
+      return true
+    } catch {
+      /* ignore */
+    }
+    try {
+      window.location.href = tgLink
       return true
     } catch {
       /* ignore */
