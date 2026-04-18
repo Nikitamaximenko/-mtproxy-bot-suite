@@ -81,21 +81,46 @@ function isCustomAppDeepLink(url: string): boolean {
   return /^(happ|vless|vmess|trojan|ss|socks|hy2):\/\//i.test(url.trim())
 }
 
-/** Без server/port/secret ссылка https://t.me/proxy открывает чат @proxy, а не диалог MTProxy. */
-function mtProxyQueryHasCredentials(qs: string): boolean {
+/**
+ * Пересобирает MTProxy-ссылки из параметров: так гарантируется кодирование и полный query.
+ * `WebApp.openTelegramLink("https://t.me/proxy?…")` в Telegram Desktop часто открывает
+ * профиль юзера @proxy, игнорируя query — поэтому для MTProxy этот API не используем.
+ */
+function buildMtProxyLinksFromQueryString(qs: string): { tgLink: string; tmeLink: string; telegramMeLink: string } | null {
   const raw = qs.trim()
-  if (!raw) return false
+  if (!raw) return null
   const search = raw.startsWith("?") ? raw : `?${raw}`
   let params: URLSearchParams
   try {
     params = new URLSearchParams(search.slice(1))
   } catch {
-    return false
+    return null
   }
   const server = params.get("server")?.trim()
   const port = params.get("port")?.trim()
   const secret = params.get("secret")?.trim()
-  return Boolean(server && port && secret)
+  if (!server || !port || !secret) return null
+
+  const encoded = new URLSearchParams({ server, port, secret })
+  const q = encoded.toString()
+  return {
+    tgLink: `tg://proxy?${q}`,
+    tmeLink: `https://t.me/proxy?${q}`,
+    telegramMeLink: `https://telegram.me/proxy?${q}`,
+  }
+}
+
+/** Синтетический клик по ссылке (иногда срабатывает там, где location.assign на tg:// молчит). */
+function openViaAnchorClick(href: string): void {
+  if (typeof document === "undefined") return
+  const a = document.createElement("a")
+  a.href = href
+  a.target = "_self"
+  a.rel = "noreferrer noopener"
+  a.style.display = "none"
+  document.body.appendChild(a)
+  a.click()
+  document.body.removeChild(a)
 }
 
 /**
@@ -151,40 +176,47 @@ export function openTelegramLink(url: string): boolean {
   // Слэш перед «?» ломал regexp (tg://proxy/?server=…) и уводил в общий tg:// → t.me хак.
   resolved = resolved.replace(/^tg:\/\/proxy\/+(?=\?)/i, "tg://proxy")
   resolved = resolved.replace(/^https?:\/\/t\.me\/proxy\/+(?=\?)/i, "https://t.me/proxy")
+  resolved = resolved.replace(/^https?:\/\/telegram\.me\/proxy\/+(?=\?)/i, "https://telegram.me/proxy")
 
-  // MTProxy: с полным query и https://t.me/proxy?server=… Telegram открывает диалог прокси.
-  // Без query — чат @proxy (блокируем выше). В Mini App WebView window.location на tg://
-  // часто молча не срабатывает (и не кидает ошибку) — поэтому сначала WebApp API, потом
-  // https://, и только в конце tg:// как запасной вариант.
   const proxyTg = resolved.match(/^tg:\/\/proxy(\?.*)?$/i)
   const proxyTme = resolved.match(/^https?:\/\/t\.me\/proxy(\?.*)?$/i)
-  if (proxyTg || proxyTme) {
-    const qs = (proxyTg?.[1] ?? proxyTme?.[1] ?? "").trim()
-    if (!mtProxyQueryHasCredentials(qs)) {
+  const proxyTelegramMe = resolved.match(/^https?:\/\/telegram\.me\/proxy(\?.*)?$/i)
+  if (proxyTg || proxyTme || proxyTelegramMe) {
+    const qs = (proxyTg?.[1] ?? proxyTme?.[1] ?? proxyTelegramMe?.[1] ?? "").trim()
+    const built = buildMtProxyLinksFromQueryString(qs)
+    if (!built) {
       return false
     }
-    const tmeLink = `https://t.me/proxy${qs || ""}`
-    const tgLink = /^tg:\/\//i.test(resolved.trim()) ? resolved.trim() : `tg://proxy${qs || ""}`
+    const { tgLink, tmeLink, telegramMeLink } = built
     try {
       wa?.ready?.()
     } catch {
       /* ignore */
     }
-    if (typeof wa?.openTelegramLink === "function") {
-      try {
-        wa.openTelegramLink(tmeLink)
-        return true
-      } catch {
-        /* fall through */
+    // Не используем openTelegramLink для t.me/proxy — в Desktop открывается профиль @proxy.
+    // openLink: сначала https (по доке только http(s)); tg:// — последним в цикле.
+    if (typeof wa?.openLink === "function") {
+      for (const u of [tmeLink, telegramMeLink, tgLink]) {
+        try {
+          wa.openLink(u, { try_instant_view: false })
+          return true
+        } catch {
+          /* next */
+        }
       }
     }
-    if (typeof wa?.openLink === "function") {
-      try {
-        wa.openLink(tmeLink, { try_instant_view: false })
-        return true
-      } catch {
-        /* fall through */
-      }
+    openViaAnchorClick(tgLink)
+    try {
+      window.location.assign(tgLink)
+      return true
+    } catch {
+      /* ignore */
+    }
+    try {
+      window.location.href = tgLink
+      return true
+    } catch {
+      /* ignore */
     }
     try {
       window.location.assign(tmeLink)
@@ -194,18 +226,6 @@ export function openTelegramLink(url: string): boolean {
     }
     try {
       window.location.href = tmeLink
-      return true
-    } catch {
-      /* ignore */
-    }
-    try {
-      window.location.assign(tgLink)
-      return true
-    } catch {
-      /* ignore */
-    }
-    try {
-      window.location.href = tgLink
       return true
     } catch {
       /* ignore */
