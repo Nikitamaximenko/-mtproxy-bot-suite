@@ -2,25 +2,23 @@
 
 import Link from "next/link"
 import { usePathname } from "next/navigation"
-import { 
-  LayoutDashboard, 
-  Server, 
-  Users, 
-  Settings, 
+import {
+  LayoutDashboard,
+  Server,
+  Users,
   BarChart3,
   Snowflake,
   LogOut,
   Menu,
-  X
+  X,
 } from "lucide-react"
 import { useState } from "react"
 
 const navItems = [
-  { href: "/admin", label: "Дашборд", icon: LayoutDashboard },
+  { href: "/admin", label: "Дашборд (API)", icon: LayoutDashboard },
   { href: "/admin/analytics", label: "Аналитика", icon: BarChart3 },
   { href: "/admin/servers", label: "Серверы", icon: Server },
   { href: "/admin/users", label: "Пользователи", icon: Users },
-  { href: "/admin/settings", label: "Настройки", icon: Settings },
 ]
 
 export function AdminSidebar() {

@@ -1,5 +1,6 @@
 "use client"
 
+import Link from "next/link"
 import { useCallback, useEffect, useRef, useState } from "react"
 
 type RefStat = {
@@ -818,39 +819,75 @@ export default function AdminPage() {
 
   return (
     <div className="min-h-screen bg-gray-950 text-white">
-      <header className="border-b border-gray-800 px-6 py-4 flex items-center justify-between flex-wrap gap-3">
-        <h1 className="text-xl font-bold">Frosty Admin</h1>
-        <div className="flex items-center gap-2 flex-wrap">
-          <button
-            type="button"
-            onClick={() => void fetchAll()}
-            disabled={loading || activatingAdmin || pendingTgId !== null || broadcastBusy}
-            className="px-4 py-2 text-sm bg-gray-800 rounded-lg hover:bg-gray-700 transition-colors disabled:opacity-50"
+      <header className="border-b border-gray-800 px-6 py-4">
+        <div className="flex flex-col gap-3">
+          <div className="flex items-center justify-between flex-wrap gap-3">
+            <h1 className="text-xl font-bold">Frosty Admin</h1>
+            <div className="flex items-center gap-2 flex-wrap">
+              <button
+                type="button"
+                onClick={() => void fetchAll()}
+                disabled={loading || activatingAdmin || pendingTgId !== null || broadcastBusy}
+                className="px-4 py-2 text-sm bg-gray-800 rounded-lg hover:bg-gray-700 transition-colors disabled:opacity-50"
+              >
+                {loading ? "⟳" : "Обновить"}
+              </button>
+              <button
+                type="button"
+                onClick={async () => {
+                  setActivatingAdmin(true)
+                  try {
+                    await setUserSubscription(ADMIN_TG_ID, true)
+                  } finally {
+                    setActivatingAdmin(false)
+                  }
+                }}
+                disabled={loading || activatingAdmin || pendingTgId !== null || broadcastBusy}
+                className="px-4 py-2 text-sm bg-blue-700 rounded-lg hover:bg-blue-600 transition-colors disabled:opacity-50"
+              >
+                {activatingAdmin ? "Активация…" : "Вернуть подписку админа"}
+              </button>
+              <button
+                type="button"
+                onClick={handleLogout}
+                className="px-4 py-2 text-sm bg-red-900/60 border border-red-800 rounded-lg hover:bg-red-900 transition-colors"
+              >
+                Выйти
+              </button>
+            </div>
+          </div>
+          <nav
+            className="flex flex-wrap items-center gap-x-4 gap-y-2 border-t border-gray-800 pt-3 text-sm"
+            aria-label="Дополнительные экраны админки"
           >
-            {loading ? "⟳" : "Обновить"}
-          </button>
-          <button
-            type="button"
-            onClick={async () => {
-              setActivatingAdmin(true)
-              try {
-                await setUserSubscription(ADMIN_TG_ID, true)
-              } finally {
-                setActivatingAdmin(false)
-              }
-            }}
-            disabled={loading || activatingAdmin || pendingTgId !== null || broadcastBusy}
-            className="px-4 py-2 text-sm bg-blue-700 rounded-lg hover:bg-blue-600 transition-colors disabled:opacity-50"
-          >
-            {activatingAdmin ? "Активация…" : "Вернуть подписку админа"}
-          </button>
-          <button
-            type="button"
-            onClick={handleLogout}
-            className="px-4 py-2 text-sm bg-red-900/60 border border-red-800 rounded-lg hover:bg-red-900 transition-colors"
-          >
-            Выйти
-          </button>
+            <span className="text-gray-500">
+              Экраны из merge (витрина UI, отдельно от данных ниже):
+            </span>
+            <Link
+              href="/admin/analytics"
+              className="text-sky-400 hover:text-sky-300 underline-offset-2 hover:underline"
+            >
+              Аналитика
+            </Link>
+            <span className="text-gray-600">·</span>
+            <Link
+              href="/admin/servers"
+              className="text-sky-400 hover:text-sky-300 underline-offset-2 hover:underline"
+            >
+              Серверы
+            </Link>
+            <span className="text-gray-600">·</span>
+            <Link
+              href="/admin/users"
+              className="text-sky-400 hover:text-sky-300 underline-offset-2 hover:underline"
+            >
+              Пользователи
+            </Link>
+            <span className="text-gray-600">·</span>
+            <Link href="/admin" className="text-gray-400 hover:text-gray-300">
+              Этот дашборд (данные API)
+            </Link>
+          </nav>
         </div>
       </header>
 
