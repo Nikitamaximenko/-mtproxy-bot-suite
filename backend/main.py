@@ -2353,6 +2353,54 @@ def admin_check_expirations(req: Request) -> OkResponse:
     return OkResponse(ok=True)
 
 
+class AdminNotifyUserRequest(BaseModel):
+    """Точечное сообщение одному пользователю (напоминание об оплате и т.п.)."""
+
+    message: str = Field(..., min_length=1, max_length=4096)
+    pay_button: bool = Field(
+        default=True,
+        description="Добавить кнопку «Оплатить подписку» (WebApp мини-кабинет), если задан FRONTEND_URL",
+    )
+
+
+class AdminNotifyUserResponse(BaseModel):
+    ok: bool
+    delivered: bool
+    detail: str | None = None
+
+
+@app.post("/admin/notify-user/{telegram_id}", response_model=AdminNotifyUserResponse)
+def admin_notify_user(
+    telegram_id: int,
+    req: Request,
+    payload: AdminNotifyUserRequest,
+) -> AdminNotifyUserResponse:
+    """Отправить одному tg_id HTML-текст через Bot API (как при ручном снятии доступа — с кнопкой оплаты)."""
+    _require_admin(req)
+    if telegram_id <= 0:
+        raise HTTPException(status_code=400, detail="telegram_id must be positive")
+    if not BOT_TOKEN:
+        raise HTTPException(status_code=503, detail="BOT_TOKEN is not configured on backend")
+
+    keyboard: dict | None = None
+    if payload.pay_button and FRONTEND_URL:
+        v = int(time.time())
+        miniapp_url = f"{FRONTEND_URL}/mini?tg_id={int(telegram_id)}&v={v}"
+        keyboard = {
+            "inline_keyboard": [
+                [{"text": "\U0001f4b3 Оплатить подписку", "web_app": {"url": miniapp_url}}],
+            ]
+        }
+    delivered = _send_tg(int(telegram_id), payload.message.strip(), keyboard)
+    if not delivered:
+        return AdminNotifyUserResponse(
+            ok=False,
+            delivered=False,
+            detail="Telegram не принял сообщение (бот заблокирован, нет чата или сеть).",
+        )
+    return AdminNotifyUserResponse(ok=True, delivered=True, detail=None)
+
+
 class BroadcastRequest(BaseModel):
     message: str = Field(..., min_length=1, max_length=4096)
     # По умолчанию не трогаем тех, кто отписался от маркетинга (как nudge-рассылки).
