@@ -303,6 +303,7 @@ export default function MiniAppPage() {
   const [vpnLinkCopied, setVpnLinkCopied] = useState(false)
   const [vpnError, setVpnError] = useState<string | null>(null)
   const [proxyBusy, setProxyBusy] = useState(false)
+  const [proxyConnectError, setProxyConnectError] = useState<string | null>(null)
 
   // VPN server ping
   const [vpnPing, setVpnPing] = useState<{ online: boolean; latency_ms: number | null } | null>(null)
@@ -480,8 +481,13 @@ export default function MiniAppPage() {
   /** Одна кнопка: открыть tg://proxy или сначала запросить ссылку с подписью Telegram. */
   const handleConnectProxy = useCallback(async () => {
     if (!tgId) return
+    setProxyConnectError(null)
     if (proxyLink) {
-      openTelegramLink(proxyLink)
+      if (!openTelegramLink(proxyLink)) {
+        setProxyConnectError(
+          "Ссылка прокси неполная. Подождите минуту и нажмите снова или напишите в поддержку."
+        )
+      }
       return
     }
     setProxyBusy(true)
@@ -497,7 +503,11 @@ export default function MiniAppPage() {
       if (res.ok && data) {
         setSub(data)
         if (data.proxy_link) {
-          openTelegramLink(data.proxy_link)
+          if (!openTelegramLink(data.proxy_link)) {
+            setProxyConnectError(
+              "Ссылка прокси неполная. Подождите минуту и нажмите снова или напишите в поддержку."
+            )
+          }
         }
       }
     } finally {
@@ -736,6 +746,11 @@ export default function MiniAppPage() {
                   {proxyBusy ? <RefreshCw className="w-5 h-5 animate-spin" /> : null}
                   Подключить прокси
                 </button>
+                {proxyConnectError ? (
+                  <p className="text-xs mt-3 leading-relaxed" style={{ color: "rgba(255,255,255,0.95)" }}>
+                    {proxyConnectError}
+                  </p>
+                ) : null}
               </div>
 
               {proxyLink ? (
