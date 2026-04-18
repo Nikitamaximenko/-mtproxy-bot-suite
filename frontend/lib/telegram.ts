@@ -82,6 +82,35 @@ function isCustomAppDeepLink(url: string): boolean {
 }
 
 /**
+ * Собирает канонический `tg://proxy?server=…&port=…&secret=…` из любой строки API.
+ * Нельзя полагаться только на regexp: иначе не матчится `tg://proxy/?…`, лишний слэш и т.п.,
+ * код ниже делает `tg://` → `https://t.me/…`, а `openTelegramLink(https://t.me/proxy?…)`
+ * в Telegram Desktop открывает профиль @proxy вместо диалога MTProxy.
+ */
+function parseMtProxyTgLink(raw: string): string | null {
+  const s = raw.trim()
+  const q = s.indexOf("?")
+  if (q < 0) return null
+  let params: URLSearchParams
+  try {
+    params = new URLSearchParams(s.slice(q + 1))
+  } catch {
+    return null
+  }
+  const server = params.get("server")?.trim()
+  const port = params.get("port")?.trim()
+  const secret = params.get("secret")?.trim()
+  if (!server || !port || !secret) return null
+  const hostPart = s.slice(0, q).toLowerCase()
+  const isProxy =
+    /tg:\/\/proxy\/?$/i.test(hostPart) ||
+    /^https?:\/\/(t\.me|telegram\.me)\/proxy\/?$/i.test(hostPart)
+  if (!isProxy) return null
+  const out = new URLSearchParams({ server, port, secret })
+  return `tg://proxy?${out.toString()}`
+}
+
+/**
  * Платёжные ссылки (Lava / Prodamus) мы открываем НЕ через WebApp.openLink,
  * потому что в новых клиентах Telegram (iOS/Android/Desktop) он уводит юзера
  * в системный Safari/Chrome — мини-аппа «выплёвывает» оплату наружу.
@@ -131,32 +160,36 @@ export function openTelegramLink(url: string): boolean {
   const wa = (window as any)?.Telegram?.WebApp
 
   let resolved = normalizePaymentUrl(url)
-  // Слэш перед «?» ломал regexp (tg://proxy/?server=…) и уводил в общий tg:// → t.me хак.
+  // Слэш перед «?» — иначе не матчится tg://proxy/?server=…
   resolved = resolved.replace(/^tg:\/\/proxy\/+(?=\?)/i, "tg://proxy")
   resolved = resolved.replace(/^https?:\/\/t\.me\/proxy\/+(?=\?)/i, "https://t.me/proxy")
   resolved = resolved.replace(/^https?:\/\/telegram\.me\/proxy\/+(?=\?)/i, "https://telegram.me/proxy")
 
-  const proxyTg = resolved.match(/^tg:\/\/proxy(\?.*)?$/i)
-  const proxyTme = resolved.match(/^https?:\/\/t\.me\/proxy(\?.*)?$/i)
-  const proxyTelegramMe = resolved.match(/^https?:\/\/telegram\.me\/proxy(\?.*)?$/i)
-  if (proxyTg || proxyTme || proxyTelegramMe) {
-    const qs = (proxyTg?.[1] ?? proxyTme?.[1] ?? proxyTelegramMe?.[1] ?? "").trim()
-    const tgUrl = proxyTg
-      ? resolved.trim()
-      : `tg://proxy${qs.startsWith("?") ? qs : qs ? `?${qs}` : ""}`
-    if (!/[?&]server=/.test(tgUrl) || !/[?&]port=/.test(tgUrl) || !/[?&]secret=/.test(tgUrl)) {
-      return false
-    }
+  const mtProxy = parseMtProxyTgLink(resolved)
+  if (mtProxy) {
     try {
       wa?.ready?.()
     } catch {
       /* ignore */
     }
-    window.location.href = tgUrl
+    // Только tg:// — не вызываем openTelegramLink(https://t.me/proxy), это даёт @proxy в Desktop.
+    try {
+      if (window.parent && window.parent !== window) {
+        window.parent.location.href = mtProxy
+        return true
+      }
+    } catch {
+      /* cross-origin / запрет — ниже */
+    }
+    window.location.href = mtProxy
     return true
   }
 
   if (resolved.startsWith("tg://")) {
+    // tg://proxy… без успешного parseMtProxyTgLink — не превращать в https://t.me/proxy (это даёт @proxy).
+    if (/^tg:\/\/proxy(?:$|[/?#])/i.test(resolved.trim())) {
+      return false
+    }
     const stripped = resolved.slice("tg://".length)
     resolved = `https://t.me/${stripped}`
   }
