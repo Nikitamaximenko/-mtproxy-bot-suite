@@ -158,6 +158,14 @@ def utcnow() -> datetime:
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("mtproxy")
 
+# Числовой id подписки Prodamus (раздел рекуррент / клубы). В ссылке передаётся subscription вместо products.
+_prod_sub_id_raw = (os.getenv("PRODAMUS_SUBSCRIPTION_ID") or "").strip()
+try:
+    PRODAMUS_SUBSCRIPTION_ID = int(_prod_sub_id_raw) if _prod_sub_id_raw else None
+except ValueError:
+    logger.warning("PRODAMUS_SUBSCRIPTION_ID is not an integer: %s", _prod_sub_id_raw[:32])
+    PRODAMUS_SUBSCRIPTION_ID = None
+
 
 class Base(DeclarativeBase):
     pass
@@ -1440,12 +1448,63 @@ def _prodamus_order_refs(payload: dict[str, Any]) -> list[str]:
         val = str(payload.get(key) or "").strip()
         if val and val not in out:
             out.append(val)
+    extra = str(payload.get("customer_extra") or "").strip()
+    if extra:
+        for m in _UUID_TOKEN.findall(extra):
+            if m not in out:
+                out.append(m)
     for val in payload.values():
         if isinstance(val, str):
             for m in _UUID_TOKEN.findall(val):
                 if m not in out:
                     out.append(m)
     return out
+
+
+def _prodamus_subscription_autopayment(payload: dict[str, Any]) -> bool:
+    """Автосписание по подписке: subscription.autopayment == 1 (см. документацию Prodamus)."""
+    sub = payload.get("subscription")
+    if isinstance(sub, dict):
+        return str(sub.get("autopayment") or "").strip() == "1"
+    if str(payload.get("subscription[autopayment]") or "").strip() == "1":
+        return True
+    return False
+
+
+def _find_subscription_for_prodamus(db: Session, payload: dict[str, Any]) -> Subscription | None:
+    """Сопоставление вебхука с подпиской: order_id / customer_extra (UUID) / email пользователя.
+
+    При автосписании order_id часто внутренний номер Prodamus, а наш UUID остаётся в customer_extra.
+    """
+    for ref in _prodamus_order_refs(payload):
+        sub = db.execute(select(Subscription).where(Subscription.payment_token == ref)).scalar_one_or_none()
+        if sub is not None:
+            return sub
+    email = str(payload.get("customer_email") or "").strip().lower()
+    if email:
+        user = (
+            db.execute(
+                select(User)
+                .where(User.email.isnot(None), func.lower(User.email) == email)
+                .limit(1)
+            )
+            .scalars()
+            .first()
+        )
+        if user is not None:
+            sub = (
+                db.execute(
+                    select(Subscription)
+                    .where(Subscription.telegram_id == user.telegram_id)
+                    .order_by(Subscription.created_at.desc())
+                    .limit(1)
+                )
+                .scalars()
+                .first()
+            )
+            if sub is not None:
+                return sub
+    return None
 
 
 def _prodamus_payment_is_success(payload: dict[str, Any]) -> bool:
@@ -1485,34 +1544,42 @@ async def prodamus_webhook(req: Request, db: Session = Depends(get_db)) -> Plain
         raise HTTPException(status_code=401, detail="Unauthorized")
 
     order_candidates = _prodamus_order_refs(payload_data)
-    logger.info("Prodamus webhook pay_ok=%s order_candidates=%s", _prodamus_payment_is_success(payload_data), order_candidates)
+    is_autopay = _prodamus_subscription_autopayment(payload_data)
+    logger.info(
+        "Prodamus webhook pay_ok=%s autopayment=%s order_candidates=%s",
+        _prodamus_payment_is_success(payload_data),
+        is_autopay,
+        order_candidates,
+    )
 
     if not _prodamus_payment_is_success(payload_data):
         return PlainTextResponse("success", status_code=200)
 
-    sub: Subscription | None = None
-    for ref in order_candidates:
-        sub = db.execute(select(Subscription).where(Subscription.payment_token == ref)).scalar_one_or_none()
-        if sub is not None:
-            break
+    sub = _find_subscription_for_prodamus(db, payload_data)
     if sub is None:
-        logger.warning("Prodamus: no subscription for tokens=%s", order_candidates)
+        logger.warning("Prodamus: no subscription row for refs=%s email=%s", order_candidates, payload_data.get("customer_email"))
         return PlainTextResponse("success", status_code=200)
 
     try:
-        activate_subscription(sub)
+        activate_subscription(sub, recurring=is_autopay)
     except RuntimeError as e:
         logger.error("Prodamus activate_subscription failed: %s", e)
         raise HTTPException(status_code=503, detail=str(e)) from e
 
     db.commit()
-    logger.info("Prodamus subscription activated tg_id=%s token=%s", sub.telegram_id, sub.payment_token)
+    logger.info(
+        "Prodamus subscription updated tg_id=%s token=%s recurring=%s",
+        sub.telegram_id,
+        sub.payment_token,
+        is_autopay,
+    )
 
     _provision_vpn_after_payment(int(sub.telegram_id), db)
 
-    proxy_link = f"tg://proxy?server={sub.proxy_server}&port={sub.proxy_port}&secret={sub.proxy_secret}"
-    _notify_payment_success(sub.telegram_id, proxy_link)
-    _notify_admin_payment(sub.telegram_id)
+    if not is_autopay:
+        proxy_link = f"tg://proxy?server={sub.proxy_server}&port={sub.proxy_port}&secret={sub.proxy_secret}"
+        _notify_payment_success(sub.telegram_id, proxy_link)
+        _notify_admin_payment(sub.telegram_id)
 
     return PlainTextResponse("success", status_code=200)
 
@@ -1612,7 +1679,7 @@ def checkout_create_prodamus(payload: ProdamusCheckoutRequest, db: Session = Dep
     else:
         if username and existing_user.username != username:
             existing_user.username = username
-        if customer_email and not existing_user.email:
+        if customer_email:
             existing_user.email = customer_email
 
     token = uuid4()
@@ -1643,16 +1710,22 @@ def checkout_create_prodamus(payload: ProdamusCheckoutRequest, db: Session = Dep
 
     from urllib.parse import urlencode as _urlencode
 
-    # Base params shared between both URL variants
+    if PRODAMUS_SUBSCRIPTION_ID is None:
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                "PRODAMUS_SUBSCRIPTION_ID is not configured: create a recurring subscription product in "
+                "Prodamus and set its numeric id in the environment (see payform autopayments docs)."
+            ),
+        )
+
+    # Рекуррент: параметр subscription вместо products (требование Prodamus).
+    # customer_extra — наш payment_token UUID: при автосписании order_id часто внутренний, а UUID приходит здесь.
+    # Подпись: те же шаги, что у поддержки — stringify по дереву, sort_keys, json, экранирование /, HMAC-SHA256.
     base_params: dict = {
         "order_id": str(token),
-        "products": [
-            {
-                "name": "Frosty MTProxy",
-                "price": "299",
-                "quantity": "1",
-            }
-        ],
+        "subscription": PRODAMUS_SUBSCRIPTION_ID,
+        "customer_extra": str(token),
         "callbackType": "json",
         "urlSuccess": (
             f"{FRONTEND_URL}/success?token={token}"
@@ -1675,7 +1748,8 @@ def checkout_create_prodamus(payload: ProdamusCheckoutRequest, db: Session = Dep
     if PRODAMUS_SECRET_KEY:
         link_params["signature"] = _prodamus_sign(link_params, PRODAMUS_SECRET_KEY)
     link_query = _urlencode(_http_build_query(link_params))
-    link_api_url = f"https://admaster.payform.ru/?{link_query}"
+    payform_root = PRODAMUS_PAYMENT_URL.rstrip("/") + "/"
+    link_api_url = f"{payform_root}?{link_query}"
 
     payment_url: str | None = None
     try:
@@ -1697,7 +1771,7 @@ def checkout_create_prodamus(payload: ProdamusCheckoutRequest, db: Session = Dep
         if PRODAMUS_SECRET_KEY:
             direct_params["signature"] = _prodamus_sign(direct_params, PRODAMUS_SECRET_KEY)
         direct_query = _urlencode(_http_build_query(direct_params))
-        payment_url = f"https://admaster.payform.ru/?{direct_query}"
+        payment_url = f"{payform_root}?{direct_query}"
         logger.info("Prodamus using direct URL fallback tg_id=%s", tg_id)
 
     return ProdamusCheckoutResponse(payment_url=payment_url, payment_token=token)
