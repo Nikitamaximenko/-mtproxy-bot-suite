@@ -34,6 +34,7 @@ from sqlalchemy import (
     delete,
     false as sa_false,
     func,
+    or_,
     select,
     text,
     true as sa_true,
@@ -181,6 +182,11 @@ class User(Base):
 # FIX: "expired" added — it was missing from the original type
 PaymentStatus = Literal["pending", "paid", "expired"]
 
+# Почему снят доступ (для ежедневных напоминаний только renewal_failed).
+BLOCK_REASON_RENEWAL_FAILED = "renewal_failed"
+BLOCK_REASON_ADMIN = "admin"
+BLOCK_REASON_EXPIRED = "expired"
+
 
 class Subscription(Base):
     __tablename__ = "subscriptions"
@@ -204,6 +210,12 @@ class Subscription(Base):
     renewal_failed_notified: Mapped[bool] = mapped_column(Boolean, default=False, server_default=sa_false(), nullable=False)
     # Ручное отключение в админке: не меняет оплаченный период (expires_at), только снимает доступ к прокси.
     access_suspended: Mapped[bool] = mapped_column(Boolean, default=False, server_default=sa_false(), nullable=False)
+    # admin | renewal_failed | expired | NULL = не заблокирован по правилу
+    access_blocked_reason: Mapped[str | None] = mapped_column(String(32), nullable=True, default=None)
+    # Последнее напоминание об оплате при renewal_failed (не чаще 1 раза в календарный день UTC).
+    last_subscription_reminder_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True, default=None
+    )
 
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
 
@@ -301,6 +313,19 @@ def _migrate() -> None:
                 else:
                     conn.execute(
                         text("ALTER TABLE subscriptions ADD COLUMN renewal_failed_notified BOOLEAN NOT NULL DEFAULT 0")
+                    )
+            if "access_blocked_reason" not in existing:
+                conn.execute(text("ALTER TABLE subscriptions ADD COLUMN access_blocked_reason VARCHAR(32)"))
+            if "last_subscription_reminder_at" not in existing:
+                if engine.dialect.name == "postgresql":
+                    conn.execute(
+                        text(
+                            "ALTER TABLE subscriptions ADD COLUMN last_subscription_reminder_at TIMESTAMPTZ"
+                        )
+                    )
+                else:
+                    conn.execute(
+                        text("ALTER TABLE subscriptions ADD COLUMN last_subscription_reminder_at TIMESTAMP")
                     )
     if "users" in tables:
         existing = {c["name"] for c in inspector.get_columns("users")}
@@ -707,6 +732,8 @@ def activate_subscription(sub: Subscription, *, recurring: bool = False) -> None
         sub.payment_status = "paid"
         sub.expires_at = base + timedelta(days=30)
         sub.access_suspended = False
+        sub.access_blocked_reason = None
+        sub.last_subscription_reminder_at = None
         sub.renewal_failed_notified = False
         logger.info(
             "activate_subscription: recurring extend tg_id=%s new_expires=%s",
@@ -715,14 +742,22 @@ def activate_subscription(sub: Subscription, *, recurring: bool = False) -> None
         )
         return
 
-    # Первый платёж: идемпотентность — не перезатирать активный период повторным payment.success
-    if sub.payment_status == "paid" and sub.expires_at and sub.expires_at > now:
+    # Идемпотентность: пропуск только если доступ реально полный (не блокировка renewal/admin).
+    if (
+        sub.payment_status == "paid"
+        and sub.expires_at
+        and sub.expires_at > now
+        and not sub.access_suspended
+        and sub.access_blocked_reason is None
+    ):
         logger.info("activate_subscription: already active, skipping tg_id=%s", sub.telegram_id)
         return
     _apply_proxy_credentials(sub)
     sub.payment_status = "paid"
     sub.expires_at = now + timedelta(days=30)
     sub.access_suspended = False
+    sub.access_blocked_reason = None
+    sub.last_subscription_reminder_at = None
     sub.renewal_failed_notified = False
 
 
@@ -972,23 +1007,92 @@ def _notify_expired(tg_id: int) -> None:
     ), {"inline_keyboard": buttons})
 
 
-def _notify_recurring_payment_failed(tg_id: int, expires_at: datetime) -> None:
-    """Lava: автосписание за продление не прошло; период ещё действует до expires_at."""
-    date_str = expires_at.strftime("%d.%m.%Y")
-    buttons: list[list[dict[str, str]]] = [
-        [{"text": "\U0001f4b3 \u041e\u043f\u043b\u0430\u0442\u0438\u0442\u044c \u043f\u0440\u043e\u0434\u043b\u0435\u043d\u0438\u0435", "callback_data": "menu:subscribe"}],
-    ]
-    _send_tg(
-        tg_id,
-        (
-            "\u26a0\ufe0f <b>\u041d\u0435 \u0443\u0434\u0430\u043b\u043e\u0441\u044c \u0441\u043f\u0438\u0441\u0430\u0442\u044c \u043e\u043f\u043b\u0430\u0442\u0443 \u0437\u0430 \u043f\u0440\u043e\u0434\u043b\u0435\u043d\u0438\u0435</b>\n\n"
-            f"\u0414\u043e\u0441\u0442\u0443\u043f \u043e\u0441\u0442\u0430\u0451\u0442\u0441\u044f \u0434\u043e <b>{date_str}</b> "
-            "(\u0443\u0436\u0435 \u043e\u043f\u043b\u0430\u0447\u0435\u043d\u043d\u044b\u0439 \u043f\u0435\u0440\u0438\u043e\u0434).\n\n"
-            "\u041e\u0444\u043e\u0440\u043c\u0438\u0442\u0435 \u043e\u043f\u043b\u0430\u0442\u0443 \u0437\u0430\u0440\u0430\u043d\u0435\u0435, \u0447\u0442\u043e\u0431\u044b \u043d\u0435 \u043f\u043e\u0442\u0435\u0440\u044f\u0442\u044c VPN \u0438 MTProxy "
-            "\u043f\u043e\u0441\u043b\u0435 \u044d\u0442\u043e\u0439 \u0434\u0430\u0442\u044b."
-        ),
-        {"inline_keyboard": buttons},
+def _renewal_failed_notify_text(*, first: bool) -> str:
+    if first:
+        return (
+            "<b>Автопродление не прошло</b>\n\n"
+            "Доступ к VPN и MTProxy <b>отключён</b>: не удалось списать оплату "
+            "(недостаточно средств, карта просрочена или отклонена банком).\n\n"
+            "Обновите способ оплаты и возобновите подписку в приложении."
+        )
+    return (
+        "<b>Подписка всё ещё не оплачена</b>\n\n"
+        "Доступ к VPN и MTProxy остаётся заблокированным. "
+        "Оформите оплату в приложении, чтобы снова подключиться."
     )
+
+
+def _apply_renewal_payment_failure(db: Session, sub: Subscription) -> None:
+    """Lava: неуспешное автопродление — сразу снимаем доступ; первое событие шлёт жёсткое уведомление."""
+    tg_id = int(sub.telegram_id)
+    was_already = (
+        sub.access_blocked_reason == BLOCK_REASON_RENEWAL_FAILED and sub.access_suspended
+    )
+    now = utcnow()
+
+    sub.access_suspended = True
+    sub.access_blocked_reason = BLOCK_REASON_RENEWAL_FAILED
+    sub.proxy_server = None
+    sub.proxy_port = None
+    sub.proxy_secret = None
+    try:
+        _deactivate_vpn_client_no_commit(tg_id, db)
+    except Exception:
+        logger.exception("renewal payment failure: VPN deactivate failed tg_id=%s", tg_id)
+
+    if not was_already:
+        _notify_access_suspended(
+            tg_id, _renewal_failed_notify_text(first=True), pay_button=True
+        )
+        sub.last_subscription_reminder_at = now
+        sub.renewal_failed_notified = True
+        logger.info(
+            "Renewal payment failure: access blocked + notified tg_id=%s contract=%s",
+            tg_id,
+            sub.lava_contract_id,
+        )
+    else:
+        logger.info(
+            "Renewal payment failure: idempotent block tg_id=%s contract=%s",
+            tg_id,
+            sub.lava_contract_id,
+        )
+
+
+def _process_renewal_failure_daily_reminders() -> None:
+    """Раз в запуск цикла: напоминание об оплате для renewal_failed (не чаще 1 раза в сутки UTC)."""
+    db = SessionLocal()
+    try:
+        now = utcnow()
+        today = now.date()
+        rows = db.execute(
+            select(Subscription).where(
+                Subscription.payment_status == "paid",
+                Subscription.access_blocked_reason == BLOCK_REASON_RENEWAL_FAILED,
+                Subscription.access_suspended == True,  # noqa: E712
+            )
+        ).scalars().all()
+        n = 0
+        for sub in rows:
+            last = sub.last_subscription_reminder_at
+            if last is not None and last.date() >= today:
+                continue
+            _notify_access_suspended(
+                int(sub.telegram_id),
+                _renewal_failed_notify_text(first=False),
+                pay_button=True,
+            )
+            sub.last_subscription_reminder_at = now
+            sub.renewal_failed_notified = True
+            n += 1
+        if n:
+            logger.info("Renewal failure daily reminders sent: %d", n)
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()
 
 
 def _process_expiration_notifications() -> None:
@@ -1004,6 +1108,10 @@ def _process_expiration_notifications() -> None:
                 Subscription.expires_at <= three_days_ahead,
                 Subscription.expires_at > now,
                 Subscription.notified_expiring == False,  # noqa: E712
+                or_(
+                    Subscription.access_blocked_reason.is_(None),
+                    Subscription.access_blocked_reason != BLOCK_REASON_RENEWAL_FAILED,
+                ),
             )
         ).scalars().all()
 
@@ -1027,6 +1135,9 @@ def _process_expiration_notifications() -> None:
             sub.notified_expired = True
             sub.payment_status = "expired"
             sub.renewal_failed_notified = False
+            sub.access_suspended = True
+            sub.access_blocked_reason = BLOCK_REASON_EXPIRED
+            sub.last_subscription_reminder_at = None
             sub.proxy_server = None
             sub.proxy_port = None
             sub.proxy_secret = None
@@ -1049,6 +1160,9 @@ def _process_expiration_notifications() -> None:
             logger.info("Backfill expired status for tg_id=%s (was paid after notify)", sub.telegram_id)
             sub.payment_status = "expired"
             sub.renewal_failed_notified = False
+            sub.access_suspended = True
+            sub.access_blocked_reason = BLOCK_REASON_EXPIRED
+            sub.last_subscription_reminder_at = None
             sub.proxy_server = None
             sub.proxy_port = None
             sub.proxy_secret = None
@@ -1086,6 +1200,10 @@ async def _expiration_loop() -> None:
             await loop.run_in_executor(None, _process_expiration_notifications)
         except Exception:
             logger.exception("Expiration check failed")
+        try:
+            await loop.run_in_executor(None, _process_renewal_failure_daily_reminders)
+        except Exception:
+            logger.exception("Renewal failure reminders failed")
         try:
             await loop.run_in_executor(None, _process_sales_nudges)
         except Exception:
@@ -1140,7 +1258,7 @@ async def lava_webhook(req: Request, db: Session = Depends(get_db)) -> OkRespons
     )
     logger.info("Webhook eventType=%s contractId=%s parentContractId=%s", event_type, contract_id or None, parent_contract_id or None)
 
-    # Неуспешное автопродление: не отзываем доступ досрочно (период предоплачен), но логируем и уведомляем.
+    # Неуспешное автопродление — немедленно блокируем доступ; ежедневные напоминания в фоне.
     _lava_recurring_fail = {
         "subscription.recurring.payment.failed",
         "subscription.recurring.payment.failure",
@@ -1155,30 +1273,15 @@ async def lava_webhook(req: Request, db: Session = Depends(get_db)) -> OkRespons
         if sub_fail is None:
             logger.warning("Lava recurring fail: no subscription for contractId=%s", lookup_fail)
             return OkResponse(ok=True)
-        now_f = utcnow()
-        if (
-            sub_fail.payment_status == "paid"
-            and sub_fail.expires_at
-            and sub_fail.expires_at > now_f
-            and not sub_fail.renewal_failed_notified
-        ):
-            _notify_recurring_payment_failed(int(sub_fail.telegram_id), sub_fail.expires_at)  # type: ignore[arg-type]
-            sub_fail.renewal_failed_notified = True
-            db.commit()
+        if sub_fail.payment_status != "paid":
             logger.info(
-                "Lava recurring payment failed: notified tg_id=%s contract=%s expires=%s",
-                sub_fail.telegram_id,
-                lookup_fail,
-                sub_fail.expires_at,
-            )
-        else:
-            logger.info(
-                "Lava recurring payment failed: skip notify tg_id=%s status=%s expires=%s already_notified=%s",
+                "Lava recurring payment failed: skip (not paid) tg_id=%s status=%s",
                 sub_fail.telegram_id,
                 sub_fail.payment_status,
-                sub_fail.expires_at,
-                sub_fail.renewal_failed_notified,
             )
+            return OkResponse(ok=True)
+        _apply_renewal_payment_failure(db, sub_fail)
+        db.commit()
         return OkResponse(ok=True)
 
     if event_type not in {"payment.success", "subscription.recurring.payment.success"}:
@@ -1638,7 +1741,7 @@ def get_subscription(telegram_id: int, req: Request, db: Session = Depends(get_d
     if not sub:
         return SubscriptionResponse(active=False, expires_at=None, proxy_link=None, suspended=False)
 
-    if sub.access_suspended:
+    if sub.access_suspended or sub.access_blocked_reason:
         return SubscriptionResponse(active=False, expires_at=sub.expires_at, proxy_link=None, suspended=True)
 
     if not (sub.proxy_server and sub.proxy_port and sub.proxy_secret):
@@ -1663,6 +1766,8 @@ def check_token(token: UUID, db: Session = Depends(get_db)) -> CheckTokenRespons
         return CheckTokenResponse(found=False)
     now = utcnow()
     if sub.expires_at is None or sub.expires_at <= now:
+        return CheckTokenResponse(found=False)
+    if sub.access_suspended or sub.access_blocked_reason:
         return CheckTokenResponse(found=False)
 
     proxy_link: str | None = None
@@ -1702,6 +1807,9 @@ def claim_web_subscription(
     # Reject expired subscriptions
     if sub.expires_at is None or sub.expires_at <= utcnow():
         return ClaimWebSubscriptionResponse(ok=False, error="subscription_expired")
+
+    if sub.access_suspended or sub.access_blocked_reason:
+        return ClaimWebSubscriptionResponse(ok=False, error="access_revoked")
 
     proxy_link: str | None = None
     if sub.proxy_server and sub.proxy_port and sub.proxy_secret:
@@ -1778,7 +1886,7 @@ def subscription_by_email(email: str, db: Session = Depends(get_db)):
     if not sub:
         return {"active": False}
 
-    if sub.access_suspended:
+    if sub.access_suspended or sub.access_blocked_reason:
         return {"active": False, "suspended": True, "expires_at": sub.expires_at}
 
     proxy_link: str | None = None
@@ -2138,6 +2246,7 @@ def _active_sub_for_vpn(telegram_id: int, db: Session) -> bool:
             Subscription.payment_status == "paid",
             Subscription.expires_at > now,
             Subscription.access_suspended == False,  # noqa: E712
+            Subscription.access_blocked_reason.is_(None),
         )
         .limit(1)
     )
@@ -2547,6 +2656,8 @@ def _admin_deactivate_user(telegram_id: int, db: Session) -> int:
     ).scalars().all()
     for sub in subs:
         sub.access_suspended = True
+        sub.access_blocked_reason = BLOCK_REASON_ADMIN
+        sub.last_subscription_reminder_at = None
         sub.proxy_server = None
         sub.proxy_port = None
         sub.proxy_secret = None
@@ -2607,6 +2718,7 @@ def admin_user_debug(telegram_id: int, req: Request, db: Session = Depends(get_d
                 "lava_contract_id": s.lava_contract_id,
                 "created_at": s.created_at.isoformat() if s.created_at else None,
                 "access_suspended": bool(s.access_suspended),
+                "access_blocked_reason": s.access_blocked_reason,
             }
             for s in subs
         ],
@@ -2655,6 +2767,9 @@ def _admin_activate_user(telegram_id: int, db: Session) -> None:
         except RuntimeError as e:
             raise HTTPException(status_code=503, detail=str(e))
         sub.access_suspended = False
+        sub.access_blocked_reason = None
+        sub.last_subscription_reminder_at = None
+        sub.renewal_failed_notified = False
         db.commit()
         logger.info("Admin restored access for paid tg_id=%s (expires_at unchanged)", telegram_id)
     else:
@@ -2697,6 +2812,7 @@ class SelfTestUserState(BaseModel):
     payment_status: str | None = None
     expires_at: datetime | None = None
     access_suspended: bool | None = None
+    access_blocked_reason: str | None = None
     has_proxy: bool | None = None
     # Реальное состояние VPN-клиента в 3X-UI (None = записи нет, True/False =
     # есть и активен/деактивирован). ЭТО главное поле — подписка в БД paid,
@@ -2750,6 +2866,7 @@ def _snapshot_latest_sub(telegram_id: int, db: Session) -> SelfTestUserState:
         payment_status=sub.payment_status,
         expires_at=sub.expires_at,
         access_suspended=bool(sub.access_suspended),
+        access_blocked_reason=sub.access_blocked_reason,
         has_proxy=bool(sub.proxy_server and sub.proxy_port and sub.proxy_secret),
         vpn_active=vpn_active,
     )
@@ -2801,6 +2918,7 @@ def admin_self_test_toggle(
                 sub_ok = (
                     after_deact.exists is True
                     and after_deact.access_suspended is True
+                    and after_deact.access_blocked_reason == BLOCK_REASON_ADMIN
                     and after_deact.has_proxy is False
                 )
                 vpn_ok = after_deact.vpn_active is not True  # None или False — оба ок
@@ -2819,6 +2937,7 @@ def admin_self_test_toggle(
                     after_act.exists is True
                     and after_act.payment_status == "paid"
                     and after_act.access_suspended is False
+                    and after_act.access_blocked_reason is None
                     and after_act.has_proxy is True
                     and after_act.expires_at is not None
                     and after_act.expires_at > now
@@ -3001,6 +3120,10 @@ def internal_diag_subscription(
             "created_at": s.created_at.isoformat() if s.created_at else None,
             "expires_at": s.expires_at.isoformat() if s.expires_at else None,
             "access_suspended": bool(s.access_suspended),
+            "access_blocked_reason": s.access_blocked_reason,
+            "last_subscription_reminder_at": (
+                s.last_subscription_reminder_at.isoformat() if s.last_subscription_reminder_at else None
+            ),
             "renewal_failed_notified": bool(s.renewal_failed_notified),
             "has_proxy_server": bool(s.proxy_server),
             "has_proxy_port": bool(s.proxy_port),
@@ -3011,7 +3134,7 @@ def internal_diag_subscription(
     would: dict
     if paid_active is None:
         would = {"active": False, "suspended": False, "proxy_link": None, "expires_at": None}
-    elif paid_active.access_suspended:
+    elif paid_active.access_suspended or paid_active.access_blocked_reason:
         would = {
             "active": False,
             "suspended": True,
@@ -3119,6 +3242,7 @@ def admin_stats(req: Request, db: Session = Depends(get_db)) -> AdminStatsRespon
         Subscription.expires_at.is_not(None),
         Subscription.expires_at > now,
         Subscription.access_suspended == False,  # noqa: E712
+        Subscription.access_blocked_reason.is_(None),
     )
     active_tg_sq = select(Subscription.telegram_id).where(active_conds).distinct()
 
@@ -3283,6 +3407,7 @@ def admin_funnel(req: Request, db: Session = Depends(get_db)) -> FunnelStatsResp
         Subscription.expires_at.is_not(None),
         Subscription.expires_at > now,
         Subscription.access_suspended == False,  # noqa: E712
+        Subscription.access_blocked_reason.is_(None),
     ]
     if scope is not None:
         active_now_conds.insert(1, Subscription.telegram_id.in_(scope))
@@ -3472,6 +3597,7 @@ class SubInfo(BaseModel):
     created_at: datetime
     has_proxy: bool
     access_suspended: bool = False
+    access_blocked_reason: str | None = None
     # Реальное состояние VPN-клиента в 3X-UI (VLESS Reality) — главный показатель
     # доступа. None = записи vpn_clients вообще нет (provisioning не сработал
     # или юзер ни разу не клеймил VPN); False = есть, но помечен inactive (толкали
@@ -3506,6 +3632,7 @@ def _sub_info(s: Subscription, username: str | None, vpn_map: dict[int, VpnClien
         created_at=s.created_at,
         has_proxy=bool(s.proxy_server and s.proxy_port and s.proxy_secret),
         access_suspended=bool(s.access_suspended),
+        access_blocked_reason=s.access_blocked_reason,
         vpn_active=bool(vc.active) if vc is not None else None,
         vpn_uuid=vc.uuid if vc is not None else None,
     )

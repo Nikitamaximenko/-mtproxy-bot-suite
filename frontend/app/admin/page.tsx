@@ -62,6 +62,7 @@ type SubInfo = {
   created_at: string
   has_proxy: boolean
   access_suspended?: boolean
+  access_blocked_reason?: string | null
   // Реальное состояние VPN в 3X-UI (главный показатель доступа). null = записи
   // vpn_clients ещё нет (провижининг не сработал), true/false = клиент есть
   // и активен/деактивирован.
@@ -211,9 +212,10 @@ function StatusBadge({ status }: { status: string }) {
   )
 }
 
-/** Доступ как в API: paid, срок в будущем, не снят доступ вручную (access_suspended). */
+/** Доступ как в API: paid, срок в будущем, без блокировки (suspend / причина блока). */
 function isSubAccessActive(s: SubInfo): boolean {
   if (s.access_suspended) return false
+  if (s.access_blocked_reason) return false
   if (s.payment_status !== "paid") return false
   if (!s.expires_at) return false
   return new Date(s.expires_at).getTime() > Date.now()
@@ -1584,6 +1586,14 @@ export default function AdminPage() {
                           </td>
                           <td className="px-4 py-3">
                             <StatusBadge status={s.payment_status} />
+                            {s.access_blocked_reason ? (
+                              <div
+                                className="text-[10px] text-orange-300 mt-1 font-mono leading-tight"
+                                title="Доступ заблокирован по правилу"
+                              >
+                                {s.access_blocked_reason}
+                              </div>
+                            ) : null}
                           </td>
                           <td className="px-4 py-3 text-gray-300">{formatDate(s.expires_at)}</td>
                           <td className="px-4 py-3 text-gray-400">{formatDate(s.created_at)}</td>
