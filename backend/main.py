@@ -166,6 +166,10 @@ except ValueError:
     logger.warning("PRODAMUS_SUBSCRIPTION_ID is not an integer: %s", _prod_sub_id_raw[:32])
     PRODAMUS_SUBSCRIPTION_ID = None
 
+# Код системы в параметре sys (согласование с Prodamus). Пустая строка в PRODAMUS_SYS — параметр не передаём.
+_prod_sys_env = os.getenv("PRODAMUS_SYS")
+PRODAMUS_SYS = "meetingai" if _prod_sys_env is None else _prod_sys_env.strip()
+
 
 class Base(DeclarativeBase):
     pass
@@ -1744,6 +1748,8 @@ def checkout_create_prodamus(payload: ProdamusCheckoutRequest, db: Session = Dep
         base_params["urlReturn"] = f"{FRONTEND_URL}/mini"
     if customer_email:
         base_params["customer_email"] = customer_email
+    if PRODAMUS_SYS:
+        base_params["sys"] = PRODAMUS_SYS
 
     # ── Step 1: get short link via server-side do=link call ──────────────────
     # do=link tells Prodamus to return a plain-text shortlink instead of rendering
