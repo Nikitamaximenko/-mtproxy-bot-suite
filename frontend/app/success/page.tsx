@@ -54,7 +54,7 @@ export default function SuccessPage() {
       : `email=${encodeURIComponent(email!)}`
 
     let attempts = 0
-    const MAX = 45 // ~2 мин — вебхук Prodamus иногда с задержкой
+    const MAX = 45 // ~2 мин — вебхук оплаты иногда с задержкой
 
     const check = async () => {
       attempts++

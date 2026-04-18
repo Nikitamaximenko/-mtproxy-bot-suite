@@ -111,7 +111,7 @@ function parseMtProxyTgLink(raw: string): string | null {
 }
 
 /**
- * Платёжные ссылки (Lava / Prodamus) мы открываем НЕ через WebApp.openLink,
+ * Платёжные ссылки (Lava) мы открываем НЕ через WebApp.openLink,
  * потому что в новых клиентах Telegram (iOS/Android/Desktop) он уводит юзера
  * в системный Safari/Chrome — мини-аппа «выплёвывает» оплату наружу.
  *

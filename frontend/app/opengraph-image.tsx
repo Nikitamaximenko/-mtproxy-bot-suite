@@ -81,7 +81,7 @@ export default function OGImage() {
             color: "#BFDBFE",
           }}
         >
-          <span>Карты · СБП · отмена в любой момент</span>
+          <span>Банковские карты · отмена в любой момент</span>
           <span style={{ color: "#FFFFFF", fontWeight: 700 }}>frostybot.ru</span>
         </div>
       </div>

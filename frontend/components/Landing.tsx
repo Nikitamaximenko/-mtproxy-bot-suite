@@ -41,7 +41,6 @@ function PaymentCard({ ping }: { ping: VpnPing | null }) {
   const [email, setEmail] = useState("")
   const [touched, setTouched] = useState(false)
   const [paying, setPaying] = useState(false)
-  const [method, setMethod] = useState<"sbp" | "card">("sbp")
   const [error, setError] = useState<string | null>(null)
   const [detail, setDetail] = useState<string | null>(null)
 
@@ -59,8 +58,7 @@ function PaymentCard({ ping }: { ping: VpnPing | null }) {
       } catch {
         /* ignore */
       }
-      const endpoint = method === "sbp" ? "/api/checkout-sbp" : "/api/checkout"
-      const res = await fetch(endpoint, {
+      const res = await fetch("/api/checkout", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -85,7 +83,7 @@ function PaymentCard({ ping }: { ping: VpnPing | null }) {
     } finally {
       setPaying(false)
     }
-  }, [email, valid, method])
+  }, [email, valid])
 
   return (
     <div
@@ -148,80 +146,6 @@ function PaymentCard({ ping }: { ping: VpnPing | null }) {
         </p>
       )}
 
-      <div className="mt-3 mb-1">
-        <span className="block text-xs font-medium mb-1.5" style={{ color: "#6B7280" }}>
-          Способ оплаты
-        </span>
-        <div className="grid grid-cols-2 gap-2">
-          <button
-            type="button"
-            onClick={() => setMethod("sbp")}
-            className="p-3 text-left transition-all active:scale-[0.98]"
-            style={{
-              background: method === "sbp" ? "#EFF6FF" : "#F7F8FA",
-              border: method === "sbp" ? "1.5px solid #2AABEE" : "1.5px solid transparent",
-              borderRadius: 14,
-            }}
-          >
-            <div className="flex items-center justify-between mb-1">
-              <span
-                className="text-xs font-bold"
-                style={{ color: method === "sbp" ? "#1D4ED8" : "#111827" }}
-              >
-                СБП / СберПей
-              </span>
-              <span
-                style={{
-                  width: 16,
-                  height: 16,
-                  borderRadius: "50%",
-                  border: method === "sbp" ? "5px solid #2AABEE" : "1.5px solid #D1D5DB",
-                  background: "#FFFFFF",
-                  boxSizing: "border-box",
-                  display: "inline-block",
-                }}
-              />
-            </div>
-            <p className="text-[11px] leading-snug" style={{ color: "#6B7280" }}>
-              QR или номер телефона · быстрее всего
-            </p>
-          </button>
-          <button
-            type="button"
-            onClick={() => setMethod("card")}
-            className="p-3 text-left transition-all active:scale-[0.98]"
-            style={{
-              background: method === "card" ? "#EFF6FF" : "#F7F8FA",
-              border: method === "card" ? "1.5px solid #2AABEE" : "1.5px solid transparent",
-              borderRadius: 14,
-            }}
-          >
-            <div className="flex items-center justify-between mb-1">
-              <span
-                className="text-xs font-bold"
-                style={{ color: method === "card" ? "#1D4ED8" : "#111827" }}
-              >
-                Банковская карта
-              </span>
-              <span
-                style={{
-                  width: 16,
-                  height: 16,
-                  borderRadius: "50%",
-                  border: method === "card" ? "5px solid #2AABEE" : "1.5px solid #D1D5DB",
-                  background: "#FFFFFF",
-                  boxSizing: "border-box",
-                  display: "inline-block",
-                }}
-              />
-            </div>
-            <p className="text-[11px] leading-snug" style={{ color: "#6B7280" }}>
-              Visa / Mastercard / МИР
-            </p>
-          </button>
-        </div>
-      </div>
-
       <button
         type="button"
         disabled={!valid || paying}
@@ -236,11 +160,7 @@ function PaymentCard({ ping }: { ping: VpnPing | null }) {
           marginTop: 12,
         }}
       >
-        {paying
-          ? "Готовим оплату…"
-          : method === "sbp"
-            ? `Оплатить ${PRICE_RUB} ₽ через СБП`
-            : `Оплатить ${PRICE_RUB} ₽ картой`}
+        {paying ? "Готовим оплату…" : `Оплатить ${PRICE_RUB} ₽`}
       </button>
 
       <div className="flex items-center justify-center gap-2 mt-3 text-[11px]" style={{ color: "#9CA3AF" }}>
@@ -248,7 +168,7 @@ function PaymentCard({ ping }: { ping: VpnPing | null }) {
           <path d="M12 2L4 6v6c0 5 3.5 9.5 8 10 4.5-.5 8-5 8-10V6l-8-4z" stroke="currentColor" strokeWidth="1.7" strokeLinejoin="round" />
           <path d="M9 12l2 2 4-4" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" />
         </svg>
-        Защищённая оплата · карта или СБП
+        Защищённая оплата · банковская карта
       </div>
 
       {error && (
@@ -581,7 +501,7 @@ export function Landing() {
               {
                 step: "1",
                 title: "Оплата 299 ₽",
-                text: "Карта или СБП. Письмо с доступом придёт на email, в Telegram — сразу появятся кнопки «Подключить прокси» и «VPN».",
+                text: "Оплата банковской картой. Письмо с доступом придёт на email, в Telegram — сразу появятся кнопки «Подключить прокси» и «VPN».",
               },
               {
                 step: "2",
@@ -729,11 +649,11 @@ export function Landing() {
             />
             <Faq
               q="Нужен ли Telegram, чтобы купить?"
-              a="Нет. Оплачиваете на сайте картой или по СБП, на email приходит чек и ссылка. Чтобы получить кнопки «Подключить прокси» и «VPN» — откройте нашего бота в Telegram из письма: подписка привяжется автоматически."
+              a="Нет. Оплачиваете на сайте банковской картой, на email приходит чек и ссылка. Чтобы получить кнопки «Подключить прокси» и «VPN» — откройте нашего бота в Telegram из письма: подписка привяжется автоматически."
             />
             <Faq
               q="Какие способы оплаты?"
-              a="Российские карты и СБП. Подписка — 299 ₽/мес, без скрытых комиссий, продление или отмена по вашему желанию."
+              a="Банковские карты (Visa / Mastercard / МИР). Подписка — 299 ₽/мес, без скрытых комиссий, продление или отмена по вашему желанию."
             />
             <Faq
               q="Вы пишете логи моего трафика?"

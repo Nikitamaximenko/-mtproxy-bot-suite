@@ -9,7 +9,6 @@ interface PaymentScreenProps {
 
 export function PaymentScreen({ onSuccess }: PaymentScreenProps) {
   const [email, setEmail] = useState("")
-  const [selectedMethod, setSelectedMethod] = useState<"card" | "sbp">("card")
   const [isProcessing, setIsProcessing] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -86,30 +85,6 @@ export function PaymentScreen({ onSuccess }: PaymentScreenProps) {
               onChange={(e) => setEmail(e.target.value)}
               className="w-full h-14 px-4 bg-[#F5F5F5] rounded-[14px] text-[#1A1A1A] placeholder:text-[#C7C7CC] focus:outline-none focus:ring-2 focus:ring-[#2AABEE]/20 transition-all"
             />
-          </div>
-
-          {/* Payment methods */}
-          <div className="mb-6">
-            <label className="text-sm text-[#8E8E93] mb-2 block">Способ оплаты</label>
-            <div className="grid grid-cols-2 gap-3">
-              {[
-                { id: "card" as const, label: "Карта" },
-                { id: "sbp" as const, label: "СБП" },
-              ].map((method) => (
-                <button
-                  key={method.id}
-                  onClick={() => setSelectedMethod(method.id)}
-                  className={cn(
-                    "h-14 rounded-[14px] border font-medium transition-all",
-                    selectedMethod === method.id
-                      ? "border-[#2AABEE] bg-[#2AABEE]/5 text-[#2AABEE]"
-                      : "border-[#E8E8E8] bg-white text-[#1A1A1A]"
-                  )}
-                >
-                  {method.label}
-                </button>
-              ))}
-            </div>
           </div>
 
           {error && (
