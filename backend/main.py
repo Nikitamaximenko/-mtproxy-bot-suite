@@ -20,7 +20,7 @@ from typing import Any, AsyncGenerator, Generator, Literal
 from uuid import UUID, uuid4
 
 from dotenv import load_dotenv
-from fastapi import Depends, FastAPI, HTTPException, Query, Request
+from fastapi import Body, Depends, FastAPI, HTTPException, Query, Request
 from fastapi.responses import PlainTextResponse
 from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import (
@@ -2352,6 +2352,27 @@ def admin_broadcast_status(req: Request) -> BroadcastStatusResponse:
     return BroadcastStatusResponse(**s)
 
 
+class AdminDeactivateRequest(BaseModel):
+    """Опционально: после приостановки доступа отправить пользователю сообщение в Telegram."""
+
+    message: str | None = None
+    pay_button: bool = True
+
+
+def _notify_access_suspended(tg_id: int, text: str, *, pay_button: bool) -> None:
+    """Личное уведомление: доступ остановлен; опционально кнопка мини-аппа для оплаты."""
+    keyboard: dict | None = None
+    if pay_button and FRONTEND_URL:
+        v = int(time.time())
+        miniapp_url = f"{FRONTEND_URL}/mini?tg_id={tg_id}&v={v}"
+        keyboard = {
+            "inline_keyboard": [
+                [{"text": "\U0001f4b3 Оплатить подписку", "web_app": {"url": miniapp_url}}],
+            ]
+        }
+    _send_tg(tg_id, text, keyboard)
+
+
 def _admin_deactivate_user(telegram_id: int, db: Session) -> int:
     """Главный тумблер «Выкл», инлайн-реализация. Используется и HTTP-эндпойнтом,
     и self-test'ом (чтобы тест проверял ровно ту же логику, что кликает админ).
@@ -2379,13 +2400,26 @@ def _admin_deactivate_user(telegram_id: int, db: Session) -> int:
 
 
 @app.post("/admin/deactivate/{telegram_id}", response_model=OkResponse)
-def admin_deactivate(telegram_id: int, req: Request, db: Session = Depends(get_db)) -> OkResponse:
+def admin_deactivate(
+    telegram_id: int,
+    req: Request,
+    db: Session = Depends(get_db),
+    payload: AdminDeactivateRequest = Body(default_factory=AdminDeactivateRequest),
+) -> OkResponse:
     _require_admin(req)
     n = _admin_deactivate_user(telegram_id, db)
     logger.info(
         "Admin suspended access for tg_id=%s (subscriptions=%d, vpn_client deactivated)",
         telegram_id, n,
     )
+    if payload.message and payload.message.strip():
+        sent = _notify_access_suspended(
+            telegram_id, payload.message.strip(), pay_button=payload.pay_button
+        )
+        logger.info(
+            "Admin deactivate notify tg_id=%s sent=%s pay_button=%s",
+            telegram_id, sent, payload.pay_button,
+        )
     return OkResponse(ok=True)
 
 
