@@ -29,7 +29,8 @@ export async function POST(req: Request) {
       create: { email, source: source ?? null },
       update: source !== undefined ? { source } : { email },
     })
-  } catch {
+  } catch (e) {
+    console.error("[waitlist] prisma error:", e)
     return NextResponse.json({ error: "Что-то пошло не так" }, { status: 500 })
   }
 
