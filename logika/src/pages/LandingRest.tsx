@@ -4,7 +4,6 @@ import {
   FaqSection,
   HowItWorksSection,
   LawsSection,
-  QuotesSection,
   ReviewsSection,
   StatsSection,
   TariffsSection,
@@ -27,8 +26,6 @@ export default function LandingRest() {
       <LawsSection />
 
       <HowItWorksSection />
-
-      <QuotesSection />
 
       <section id="tariffs">
         <TariffsSection />

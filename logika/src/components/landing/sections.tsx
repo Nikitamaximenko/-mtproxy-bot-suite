@@ -183,50 +183,6 @@ export function HowItWorksSection() {
   )
 }
 
-const quotes = [
-  { t: 'Мыслю, следовательно существую.', a: 'Декарт' },
-  { t: 'Человек — раб своих привычек, а не своего разума.', a: 'Аристотель' },
-  {
-    t: 'Нет ничего труднее, как отличить действительную ошибку от того, что таковою кажется.',
-    a: 'Декарт',
-  },
-  {
-    t: 'То, что мы называем интуицией, часто оказывается ленью ума.',
-    a: 'Современный парафраз',
-  },
-  {
-    t: 'Между стимулом и реакцией есть пространство. В этом пространстве — наша свобода.',
-    a: 'Виктор Франкл',
-  },
-  { t: 'Когда факты меняются, я меняю мнение. А вы?', a: 'Кейнс' },
-  { t: 'Истина — это то, что выдерживает проверку аргумента.', a: 'Парафраз' },
-]
-
-export function QuotesSection() {
-  return (
-    <section className="py-[120px] md:py-[200px]">
-      <div className="mx-auto max-w-[1280px] px-4 md:px-6">
-        <h2 className="text-dim font-mono text-[13px] uppercase tracking-[0.08em]">Цитаты</h2>
-        <div className="mt-10 flex gap-6 overflow-x-auto pb-4 md:gap-8">
-          {quotes.map((q) => (
-            <figure
-              key={q.t}
-              className="border-border bg-card min-w-[min(100%,380px)] flex-shrink-0 rounded-[12px] border p-8 md:min-w-[420px]"
-            >
-              <blockquote className="text-2xl font-medium leading-snug tracking-[-0.02em] md:text-[28px]">
-                {q.t}
-              </blockquote>
-              <figcaption className="text-dim mt-8 font-mono text-[13px] uppercase tracking-[0.08em]">
-                {q.a}
-              </figcaption>
-            </figure>
-          ))}
-        </div>
-      </div>
-    </section>
-  )
-}
-
 export function TariffsSection() {
   const [yearly, setYearly] = useState(false)
   const pro = yearly ? Math.round(790 * 12 * 0.7) : 790
