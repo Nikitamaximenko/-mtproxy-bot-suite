@@ -1,4 +1,4 @@
-"""Каскад: Haiku (роутер) → Sonnet (вопросы) → Opus (анализ + thinking + JSON) → Opus (self-critique)."""
+"""Каскад: Haiku (роутер) → Opus 4.7 (вопросы) → Opus (анализ + JSON) → Opus (self-critique). Модели — см. Settings."""
 
 from __future__ import annotations
 

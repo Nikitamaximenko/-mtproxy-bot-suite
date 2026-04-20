@@ -1,6 +1,6 @@
 # Logika API
 
-Бэкенд для приложения «Логика»: PostgreSQL, вход по SMS через [SMS Aero](https://smsaero.ru/integration/documentation/api/), отчёты и уточняющие вопросы через **Anthropic Claude** (по умолчанию `claude-opus-4-7`), выдача PDF (ReportLab).
+Бэкенд для приложения «Логика»: PostgreSQL, вход по SMS через [SMS Aero](https://smsaero.ru/integration/documentation/api/), уточняющие вопросы и отчёт через **Claude Opus 4.7** (настраивается через `ANTHROPIC_MODEL_*`), выдача PDF (ReportLab).
 
 ## Архитектура LLM (юнит-экономика)
 

@@ -28,7 +28,8 @@ class Settings(BaseSettings):
 
     # Каскад: переопредели под актуальные id в Anthropic Console
     anthropic_model_router: str = "claude-haiku-4-5-20251001"
-    anthropic_model_questions: str = "claude-sonnet-4-6"
+    # Уточняющие вопросы: по запросу — тот же Opus 4.7, что и отчёт (дороже Sonnet).
+    anthropic_model_questions: str = "claude-opus-4-7"
     anthropic_model_analysis: str = "claude-opus-4-7"
     anthropic_model_critique: str = "claude-opus-4-7"
     opus_effort: str = "high"  # low|medium|high|xhigh|max — усилие рассуждения (structured output)
