@@ -39,7 +39,7 @@ uvicorn app.main:app --reload --port 8000
 | Переменная | Описание |
 |------------|----------|
 | `JWT_SECRET` | Длинная случайная строка |
-| `CORS_ORIGINS` | URL фронта на Vercel и `http://localhost:5173` через запятую |
+| `CORS_ORIGINS` | Свой домен фронта и `http://localhost:5173` через запятую. Деплои на `*.vercel.app` допускаются автоматически (regex в `main.py`). |
 | `SMSAERO_EMAIL` | Логин кабинета SMS Aero |
 | `SMSAERO_API_KEY` | API-ключ |
 | `SMSAERO_SIGN` | Подпись отправителя из кабинета |

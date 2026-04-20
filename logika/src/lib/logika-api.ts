@@ -26,6 +26,19 @@ export function setToken(t: string | null) {
   }
 }
 
+function mapNetworkError(e: unknown): Error {
+  const msg = e instanceof Error ? e.message : String(e)
+  if (
+    e instanceof TypeError &&
+    (msg === 'Failed to fetch' || msg.toLowerCase().includes('network'))
+  ) {
+    return new Error(
+      'Нет ответа от API: проверьте адрес VITE_LOGIKA_API_URL на Vercel и что бэкенд запущен (CORS для этого домена).',
+    )
+  }
+  return e instanceof Error ? e : new Error(msg)
+}
+
 async function req<T>(
   path: string,
   init: RequestInit & { json?: unknown } = {},
@@ -42,7 +55,12 @@ async function req<T>(
     ;(headers as Record<string, string>)['Content-Type'] = 'application/json'
     body = JSON.stringify(init.json)
   }
-  const r = await fetch(`${base}${path}`, { ...init, headers, body })
+  let r: Response
+  try {
+    r = await fetch(`${base}${path}`, { ...init, headers, body })
+  } catch (e) {
+    throw mapNetworkError(e)
+  }
   if (!r.ok) {
     let msg = r.statusText
     try {
@@ -88,9 +106,14 @@ export async function replySession(sessionId: string, text: string) {
 export async function downloadPdf(sessionId: string) {
   const base = getApiBase()
   const token = getToken()
-  const r = await fetch(`${base}/v1/sessions/${sessionId}/pdf`, {
-    headers: { Authorization: `Bearer ${token}` },
-  })
+  let r: Response
+  try {
+    r = await fetch(`${base}/v1/sessions/${sessionId}/pdf`, {
+      headers: { Authorization: `Bearer ${token}` },
+    })
+  } catch (e) {
+    throw mapNetworkError(e)
+  }
   if (!r.ok) throw new Error('Не удалось скачать PDF')
   const blob = await r.blob()
   const url = URL.createObjectURL(blob)

@@ -24,6 +24,10 @@ from app.smsaero import send_otp_sms
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+# Браузер блокирует ответ без Access-Control-Allow-Origin → на фронте «Failed to fetch».
+# Явный список в CORS_ORIGINS обязателен для своего домена; превью/деплои Vercel покрываем regex.
+_VERCEL_PREVIEW_ORIGIN_RE = r"^https://[^\s/]+\.vercel\.app$"
+
 
 def get_settings_dep() -> Settings:
     return get_settings()
@@ -37,6 +41,7 @@ def create_app() -> FastAPI:
     app.add_middleware(
         CORSMiddleware,
         allow_origins=origins or ["http://localhost:5173"],
+        allow_origin_regex=_VERCEL_PREVIEW_ORIGIN_RE,
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
