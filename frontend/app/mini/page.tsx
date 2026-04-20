@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
 import { Check, Copy, ExternalLink, RefreshCw, Shield, X } from "lucide-react"
 import { getTelegramInitData, getTelegramInitDataAsync, getTelegramUser, openPaymentLink, openTelegramLink } from "@/lib/telegram"
 
@@ -272,8 +272,8 @@ function readStoredEmail(): string | null {
 
 /* ── Main Page ── */
 export default function MiniAppPage() {
-  const tgUser = useMemo(() => getTelegramUser(), [])
-  const [tgId, setTgId] = useState<number | null>(tgUser?.id ?? null)
+  /** Не использовать useMemo(getTelegramUser): SDK подставляет initDataUnsafe позже первого кадра. */
+  const [tgId, setTgId] = useState<number | null>(null)
   const [sub, setSub] = useState<SubscriptionData | null>(null)
   const [loading, setLoading] = useState(true)
 
@@ -318,6 +318,7 @@ export default function MiniAppPage() {
   }, [])
 
   useEffect(() => {
+    if (typeof window === "undefined") return
     // Сигналим Telegram'у, что WebApp готов — он скрывает splash и красит
     // header под Mini App. Без ready() у пользователя ещё 300-800ms висит
     // серый экран, пока Telegram сам не решит что всё ок.
@@ -339,19 +340,31 @@ export default function MiniAppPage() {
       !!(wa?.initData && wa.initData.length > 0) || !!wa?.initDataUnsafe?.user?.id
     const inTelegram = hasTgIdInUrl || hasRealTgWebApp
     setIsWeb(!inTelegram)
+
+    /**
+     * Канонический tg_id: сначала user.id из initDataUnsafe (появляется после ready / с задержкой),
+     * иначе ?tg_id= из ссылки кнопки, иначе sessionStorage fallback. Иначе refresh() успевает
+     * отработать с tgId=null и мини-апп навсегда остаётся на экране оплаты при живой подписке/триале.
+     */
+    const resolveTgId = () => {
+      const uid = getTelegramUser()?.id
+      const urlId = getTgIdFallbackFromUrl()
+      const stored = readStoredTgId()
+      const fallback = urlId ?? (stored != null && stored > 0 ? stored : null)
+      const resolved = uid != null && uid > 0 ? uid : fallback
+      if (resolved == null || !Number.isFinite(resolved) || resolved <= 0) return
+      setTgId((prev) => {
+        if (uid != null && uid > 0) return uid
+        return prev ?? resolved
+      })
+    }
+    resolveTgId()
+    const timers = [50, 200, 500, 1200].map((ms) => window.setTimeout(resolveTgId, ms))
+    return () => timers.forEach(clearTimeout)
   }, [])
 
   const isEmailValid = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())
   const showEmailError = emailTouched && email.length > 0 && !isEmailValid
-
-  useEffect(() => {
-    if (tgId) return
-    const urlId = getTgIdFallbackFromUrl()
-    if (urlId) { setTgId(urlId); return }
-    const stored = readStoredTgId()
-    if (stored) setTgId(stored)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
 
   const refresh = useCallback(async () => {
     // Case 1: Telegram user — POST + init_data, чтобы бэкенд отдал proxy_link без INTERNAL_API_TOKEN на Vercel
