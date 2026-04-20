@@ -705,9 +705,9 @@ function FlowPage() {
             key="chat"
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
-            className="mx-auto flex min-h-[calc(100dvh-72px)] max-w-[720px] flex-col px-4 py-8"
+            className="mx-auto flex h-[calc(100dvh-72px)] min-h-0 w-full max-w-[720px] flex-col px-4 pt-6 sm:pt-8"
           >
-            <div className="mb-4">
+            <div className="mb-4 shrink-0">
               <div className="text-dim flex items-center justify-between font-mono text-[13px] uppercase tracking-[0.08em]">
                 <span>
                   Уточнение{' '}
@@ -747,7 +747,7 @@ function FlowPage() {
                 />
               </div>
             </div>
-            <div className="flex-1 space-y-4 overflow-y-auto pb-28">
+            <div className="min-h-0 flex-1 space-y-4 overflow-y-auto overflow-x-hidden pb-2 [-webkit-overflow-scrolling:touch]">
               {apiMode ? (
                 apiThread.map((m, i) => (
                   <Bubble
@@ -771,15 +771,20 @@ function FlowPage() {
                 </>
               )}
             </div>
-            <div className="border-border bg-background/90 fixed bottom-0 left-0 right-0 border-t p-4 backdrop-blur-md">
+            {/* Без position:fixed — на iOS иначе «плывёт» каретка в input внутри слоёв с blur/transform */}
+            <div className="border-border bg-background max-md:bg-background shrink-0 border-t px-0 py-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] sm:bg-background/90 sm:px-0 sm:py-4 sm:backdrop-blur-md">
               {apiMode && apiThread.filter((m) => m.role === 'user').length === 5 && (
-                <p className="text-accent mx-auto mb-3 max-w-[720px] text-center text-sm leading-snug">
+                <p className="text-accent mb-3 px-1 text-center text-sm leading-snug">
                   Это последний ответ перед отчётом. После отправки начнётся сбор полного анализа (обычно 1–3
                   минуты).
                 </p>
               )}
-              <div className="mx-auto flex max-w-[720px] gap-3">
+              <div className="flex min-w-0 items-stretch gap-2 sm:gap-3">
                 <input
+                  type="text"
+                  enterKeyHint="send"
+                  autoComplete="off"
+                  autoCorrect="on"
                   value={draft}
                   onChange={(e) => setDraft(e.target.value)}
                   onKeyDown={(e) => {
@@ -790,13 +795,13 @@ function FlowPage() {
                   }}
                   placeholder="Ответ…"
                   disabled={busy}
-                  className="border-border bg-elevated focus:border-accent flex-1 rounded-[12px] border px-4 py-3 text-[15px] outline-none transition-colors duration-300 disabled:opacity-50"
+                  className="border-border bg-elevated focus:border-accent min-w-0 flex-1 rounded-[12px] border px-3 py-3 text-left text-base leading-normal text-foreground outline-none transition-colors [-webkit-tap-highlight-color:transparent] disabled:opacity-50 sm:px-4 sm:text-[15px]"
                 />
                 <button
                   type="button"
                   onClick={() => void submitAnswer()}
                   disabled={busy}
-                  className="ease-brand bg-accent text-background hover:bg-accent-hover rounded-[4px] px-4 py-3 font-medium transition-all duration-300 disabled:opacity-50"
+                  className="ease-brand bg-accent text-background hover:bg-accent-hover touch-manipulation shrink-0 rounded-[4px] px-3 py-3 text-sm font-medium transition-all duration-300 disabled:opacity-50 sm:px-4 sm:text-base"
                 >
                   Ответить
                 </button>
