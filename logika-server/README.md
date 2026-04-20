@@ -29,6 +29,8 @@ uvicorn app.main:app --reload --port 8000
 - `POST /v1/sessions/start` — заголовок `Authorization: Bearer …`, тело `{ "dilemma": "…" }`
 - `POST /v1/sessions/{id}/reply` — `{ "text": "…" }`
 - `GET /v1/sessions/{id}/pdf` — скачивание PDF
+- `GET /v1/me` — профиль (телефон, имя) по JWT
+- `GET /v1/cabinet` — история сессий и агрегированная статистика для личного кабинета
 
 ## Railway
 

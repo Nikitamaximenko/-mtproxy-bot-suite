@@ -2,8 +2,9 @@ from __future__ import annotations
 
 import logging
 import uuid
+from collections import defaultdict
 from datetime import datetime, timedelta, timezone
-from typing import Annotated
+from typing import Annotated, Any
 
 from fastapi import Depends, FastAPI, Header, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -224,6 +225,121 @@ def create_app() -> FastAPI:
         sess.updated_at = datetime.now(timezone.utc)
         db.commit()
         return {"done": True, "report": rep}
+
+    @app.get("/v1/me")
+    def get_me(user: LogikaUser = Depends(get_bearer_user)) -> dict[str, str | None]:
+        return {"phone_e164": user.phone_e164, "name": user.name}
+
+    @app.get("/v1/cabinet")
+    def get_cabinet(
+        db: Session = Depends(get_db),
+        user: LogikaUser = Depends(get_bearer_user),
+    ) -> dict[str, Any]:
+        """Список сессий пользователя + агрегаты для кабинета (графики, топ искажений)."""
+        rows = list(
+            db.execute(
+                select(LogikaChatSession)
+                .where(LogikaChatSession.user_id == user.id)
+                .order_by(LogikaChatSession.updated_at.desc())
+            )
+            .scalars()
+            .all()
+        )
+        sessions_out: list[dict[str, Any]] = []
+        for sess in rows:
+            verdict = None
+            if sess.report and isinstance(sess.report, dict):
+                verdict = sess.report.get("verdict_short")
+            sessions_out.append(
+                {
+                    "session_id": str(sess.id),
+                    "dilemma": sess.dilemma,
+                    "phase": sess.phase,
+                    "score": sess.score,
+                    "created_at": sess.created_at.isoformat() if sess.created_at else None,
+                    "updated_at": sess.updated_at.isoformat() if sess.updated_at else None,
+                    "verdict_short": verdict,
+                }
+            )
+
+        done = [s for s in rows if s.phase == "done" and s.score is not None]
+        month_scores: dict[str, list[int]] = defaultdict(list)
+        bias_counts: dict[str, int] = defaultdict(int)
+        for s in done:
+            if s.updated_at:
+                ym = s.updated_at.strftime("%Y-%m")
+                month_scores[ym].append(int(s.score or 0))
+            rep = s.report if isinstance(s.report, dict) else {}
+            for b in rep.get("biases") or []:
+                if isinstance(b, dict):
+                    nm = str(b.get("name") or "").strip()
+                    if nm:
+                        bias_counts[nm] += 1
+
+        _mr = (
+            "",
+            "Янв",
+            "Фев",
+            "Мар",
+            "Апр",
+            "Май",
+            "Июн",
+            "Июл",
+            "Авг",
+            "Сен",
+            "Окт",
+            "Ноя",
+            "Дек",
+        )
+
+        def _month_label(ym: str) -> str:
+            y, m = ym.split("-")
+            mi = int(m, 10)
+            return f"{_mr[mi]} {y[2:]}"
+
+        sorted_months = sorted(month_scores.keys(), reverse=True)[:8]
+        monthly: list[dict[str, Any]] = []
+        for ym in reversed(sorted_months):
+            vals = month_scores[ym]
+            monthly.append(
+                {
+                    "month": ym,
+                    "label": _month_label(ym),
+                    "avg_score": round(sum(vals) / len(vals)),
+                    "count": len(vals),
+                }
+            )
+
+        top_biases = sorted(bias_counts.items(), key=lambda x: -x[1])[:12]
+        best = max(done, key=lambda x: int(x.score or 0)) if done else None
+        worst = min(done, key=lambda x: int(x.score or 0)) if done else None
+
+        def _sess_card(s: LogikaChatSession | None) -> dict[str, Any] | None:
+            if s is None:
+                return None
+            v = None
+            if s.report and isinstance(s.report, dict):
+                v = s.report.get("verdict_short")
+            return {
+                "session_id": str(s.id),
+                "score": s.score,
+                "verdict_short": v,
+                "dilemma_short": (s.dilemma[:120] + "…") if len(s.dilemma) > 120 else s.dilemma,
+            }
+
+        return {
+            "sessions": sessions_out,
+            "stats": {
+                "monthly": monthly,
+                "biases": [{"name": n, "count": c} for n, c in top_biases],
+                "highlight_high": _sess_card(best),
+                "highlight_low": _sess_card(worst),
+                "totals": {
+                    "sessions": len(rows),
+                    "completed": len(done),
+                },
+            },
+        }
 
     @app.get("/v1/sessions/{session_id}/pdf")
     def get_pdf(

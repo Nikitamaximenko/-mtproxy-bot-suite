@@ -16,7 +16,10 @@ import { Logo } from '../components/Logo'
 import { HeroFork } from '../components/landing/HeroFork'
 import { useCountUp } from '../hooks/useCountUp'
 import {
+  type CabinetResponse,
   downloadPdf,
+  fetchCabinet,
+  fetchMe,
   hasApi,
   replySession,
   requestCode,
@@ -53,6 +56,24 @@ const analyzeLines = [
 
 const ease = [0.32, 0.72, 0, 1] as const
 
+function formatRuDate(iso: string | null) {
+  if (!iso) return '—'
+  try {
+    return new Intl.DateTimeFormat('ru-RU', {
+      day: 'numeric',
+      month: 'long',
+      year: 'numeric',
+    }).format(new Date(iso))
+  } catch {
+    return iso
+  }
+}
+
+function maskPhoneE164(p: string) {
+  if (p.length < 6) return p
+  return `${p.slice(0, 4)} ··· ${p.slice(-2)}`
+}
+
 function FlowPage() {
   const apiMode = hasApi()
   const [phase, setPhase] = useState<Phase>('phone')
@@ -64,6 +85,11 @@ function FlowPage() {
   const [analyzeLine, setAnalyzeLine] = useState(0)
   const [showPaywall, setShowPaywall] = useState(true)
   const [cabinetTab, setCabinetTab] = useState<'history' | 'stats' | 'settings'>('history')
+  const [historyFilter, setHistoryFilter] = useState<'all' | 'high' | 'low' | 'partial'>('all')
+  const [cabinetData, setCabinetData] = useState<CabinetResponse | null>(null)
+  const [cabinetLoading, setCabinetLoading] = useState(false)
+  const [cabinetErr, setCabinetErr] = useState<string | null>(null)
+  const [meProfile, setMeProfile] = useState<{ phone_e164: string; name: string | null } | null>(null)
   const [flowError, setFlowError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const [apiSessionId, setApiSessionId] = useState<string | null>(null)
@@ -88,24 +114,52 @@ function FlowPage() {
     }
   }, [phase, apiMode])
 
+  useEffect(() => {
+    if (phase !== 'cabinet' || !apiMode) return
+    let cancel = false
+    setCabinetLoading(true)
+    setCabinetErr(null)
+    void (async () => {
+      try {
+        const [cab, me] = await Promise.all([fetchCabinet(), fetchMe()])
+        if (!cancel) {
+          setCabinetData(cab)
+          setMeProfile(me)
+        }
+      } catch (e) {
+        if (!cancel) setCabinetErr(e instanceof Error ? e.message : 'Ошибка загрузки кабинета')
+      } finally {
+        if (!cancel) setCabinetLoading(false)
+      }
+    })()
+    return () => {
+      cancel = true
+    }
+  }, [phase, apiMode])
+
   const score = Number(apiReport?.overall_score ?? 42)
   const scoreView = useCountUp(score, phase === 'report')
 
-  const chartData = useMemo(
-    () => [
-      { m: 'Янв', s: 54 },
-      { m: 'Фев', s: 61 },
-      { m: 'Мар', s: 48 },
-      { m: 'Апр', s: 78 },
-    ],
-    [],
-  )
+  const chartData = useMemo(() => {
+    if (!cabinetData?.stats?.monthly?.length) return []
+    return cabinetData.stats.monthly.map((m) => ({ m: m.label, s: m.avg_score }))
+  }, [cabinetData])
 
-  const biasData = [
-    { name: 'Свежее', v: 12 },
-    { name: 'Подтверждение', v: 9 },
-    { name: 'Чёрно-белое', v: 7 },
-  ]
+  const biasData = useMemo(() => {
+    if (!cabinetData?.stats?.biases?.length) return []
+    return cabinetData.stats.biases.map((b) => ({ name: b.name, v: b.count }))
+  }, [cabinetData])
+
+  const filteredSessions = useMemo(() => {
+    const list = cabinetData?.sessions ?? []
+    return list.filter((s) => {
+      if (historyFilter === 'all') return true
+      if (s.phase !== 'done' || s.score == null) return false
+      if (historyFilter === 'high') return s.score >= 70
+      if (historyFilter === 'low') return s.score < 50
+      return s.score >= 50 && s.score < 70
+    })
+  }, [cabinetData, historyFilter])
 
   const submitAnswer = async () => {
     const t = draft.trim()
@@ -690,76 +744,150 @@ function FlowPage() {
               </div>
             </aside>
             <div className="flex-1 p-4 md:p-10">
+              {!apiMode && (
+                <p className="text-muted max-w-md text-sm">
+                  Кабинет с историей из API: задайте <span className="font-mono">VITE_LOGIKA_API_URL</span> при
+                  сборке фронта.
+                </p>
+              )}
+              {apiMode && cabinetErr && (
+                <p className="text-danger text-sm">{cabinetErr}</p>
+              )}
               {cabinetTab === 'history' && (
                 <div>
                   <h2 className="text-2xl font-medium">История</h2>
+                  {cabinetLoading && <p className="text-muted mt-4 text-sm">Загрузка…</p>}
                   <div className="mt-6 flex flex-wrap gap-2 font-mono text-[11px] uppercase tracking-[0.08em] text-muted">
-                    {['Все', 'Логичные', 'Нелогичные', 'Частично'].map((f) => (
+                    {(
+                      [
+                        ['all', 'Все'],
+                        ['high', 'Логичные'],
+                        ['low', 'Нелогичные'],
+                        ['partial', 'Частично'],
+                      ] as const
+                    ).map(([id, label]) => (
                       <button
-                        key={f}
+                        key={id}
                         type="button"
-                        className="border-border hover:border-border-hover rounded-[4px] border px-3 py-1 transition-colors"
+                        onClick={() => setHistoryFilter(id)}
+                        className={clsx(
+                          'rounded-[4px] border px-3 py-1 transition-colors',
+                          historyFilter === id
+                            ? 'border-accent text-foreground'
+                            : 'border-border hover:border-border-hover',
+                        )}
                       >
-                        {f}
+                        {label}
                       </button>
                     ))}
                   </div>
-                  <div className="border-border bg-card mt-8 rounded-[12px] border p-6">
-                    <p className="text-dim font-mono text-xs uppercase tracking-[0.08em]">12 апреля 2026</p>
-                    <p className="mt-2 text-lg">«Стоит ли менять работу на стартап?»</p>
-                    <p className="text-muted mt-2 text-sm">
-                      Overall Score: 78 из 100 · Логично
+                  {!cabinetLoading && filteredSessions.length === 0 && (
+                    <p className="text-muted mt-8 text-sm">
+                      Пока нет сессий по этому фильтру. Пройди анализ в потоке — записи появятся здесь.
                     </p>
-                    <div className="mt-6 flex gap-3">
-                      <button type="button" className="text-accent text-sm font-medium">
-                        Открыть
-                      </button>
-                      <a href="/pdf-preview.html" className="text-sm text-muted hover:text-foreground">
-                        PDF
-                      </a>
-                    </div>
+                  )}
+                  <div className="mt-8 space-y-4">
+                    {filteredSessions.map((s) => (
+                      <div key={s.session_id} className="border-border bg-card rounded-[12px] border p-6">
+                        <p className="text-dim font-mono text-xs uppercase tracking-[0.08em]">
+                          {formatRuDate(s.updated_at)}
+                        </p>
+                        <p className="mt-2 text-lg leading-snug">
+                          «{s.dilemma.length > 160 ? `${s.dilemma.slice(0, 160)}…` : s.dilemma}»
+                        </p>
+                        <p className="text-muted mt-2 text-sm">
+                          {s.phase === 'done' && s.score != null
+                            ? `Оценка: ${s.score} / 100${s.verdict_short ? ` · ${s.verdict_short}` : ''}`
+                            : s.phase === 'clarifying'
+                              ? 'Сессия не завершена'
+                              : '—'}
+                        </p>
+                        <div className="mt-6 flex flex-wrap gap-3">
+                          {s.phase === 'done' && (
+                            <button
+                              type="button"
+                              onClick={() => void downloadPdf(s.session_id)}
+                              className="text-accent text-sm font-medium"
+                            >
+                              Скачать PDF
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    ))}
                   </div>
                 </div>
               )}
               {cabinetTab === 'stats' && (
                 <div>
                   <h2 className="text-2xl font-medium">Статистика</h2>
+                  {cabinetData?.stats?.totals && (
+                    <p className="text-muted mt-2 text-sm">
+                      Всего сессий: {cabinetData.stats.totals.sessions}, завершённых анализов:{' '}
+                      {cabinetData.stats.totals.completed}
+                    </p>
+                  )}
+                  {cabinetLoading && <p className="text-muted mt-6 text-sm">Загрузка…</p>}
                   <div className="mt-8 h-64 w-full">
-                    <ResponsiveContainer width="100%" height="100%">
-                      <LineChart data={chartData}>
-                        <XAxis dataKey="m" stroke="#5a5a62" fontSize={11} />
-                        <YAxis stroke="#5a5a62" fontSize={11} domain={[0, 100]} />
-                        <Tooltip
-                          contentStyle={{ background: '#121214', border: '1px solid #222226' }}
-                        />
-                        <Line type="monotone" dataKey="s" stroke="#c4f542" strokeWidth={2} dot={false} />
-                      </LineChart>
-                    </ResponsiveContainer>
+                    {chartData.length > 0 ? (
+                      <ResponsiveContainer width="100%" height="100%">
+                        <LineChart data={chartData}>
+                          <XAxis dataKey="m" stroke="#5a5a62" fontSize={11} />
+                          <YAxis stroke="#5a5a62" fontSize={11} domain={[0, 100]} />
+                          <Tooltip
+                            contentStyle={{ background: '#121214', border: '1px solid #222226' }}
+                          />
+                          <Line type="monotone" dataKey="s" stroke="#c4f542" strokeWidth={2} dot />
+                        </LineChart>
+                      </ResponsiveContainer>
+                    ) : (
+                      !cabinetLoading && (
+                        <p className="text-muted flex h-full items-center justify-center text-sm">
+                          Нет данных по месяцам — заверши хотя бы один анализ.
+                        </p>
+                      )
+                    )}
                   </div>
                   <div className="mt-10 h-56 w-full">
-                    <ResponsiveContainer width="100%" height="100%">
-                      <BarChart data={biasData}>
-                        <XAxis dataKey="name" stroke="#5a5a62" fontSize={11} />
-                        <YAxis stroke="#5a5a62" fontSize={11} />
-                        <Tooltip
-                          contentStyle={{ background: '#121214', border: '1px solid #222226' }}
-                        />
-                        <Bar dataKey="v" fill="#c4f542" radius={[4, 4, 0, 0]} />
-                      </BarChart>
-                    </ResponsiveContainer>
+                    {biasData.length > 0 ? (
+                      <ResponsiveContainer width="100%" height="100%">
+                        <BarChart data={biasData}>
+                          <XAxis dataKey="name" stroke="#5a5a62" fontSize={10} interval={0} angle={-20} height={60} />
+                          <YAxis stroke="#5a5a62" fontSize={11} allowDecimals={false} />
+                          <Tooltip
+                            contentStyle={{ background: '#121214', border: '1px solid #222226' }}
+                          />
+                          <Bar dataKey="v" fill="#c4f542" radius={[4, 4, 0, 0]} />
+                        </BarChart>
+                      </ResponsiveContainer>
+                    ) : (
+                      !cabinetLoading && (
+                        <p className="text-muted flex h-full items-center justify-center text-sm">
+                          Искажения появятся после отчётов с заполненными biases.
+                        </p>
+                      )
+                    )}
                   </div>
                   <div className="mt-10 grid gap-4 md:grid-cols-2">
                     <div className="border-border bg-card rounded-[12px] border p-5">
                       <p className="text-dim font-mono text-xs uppercase tracking-[0.08em]">
-                        Самое логичное решение месяца
+                        Лучший результат (по оценке)
                       </p>
-                      <p className="mt-3 text-lg">Смена контракта после расчёта буфера</p>
+                      <p className="mt-3 text-lg">
+                        {cabinetData?.stats?.highlight_high
+                          ? `${cabinetData.stats.highlight_high.score ?? '—'} / 100 — ${cabinetData.stats.highlight_high.verdict_short ?? cabinetData.stats.highlight_high.dilemma_short}`
+                          : '—'}
+                      </p>
                     </div>
                     <div className="border-border bg-card rounded-[12px] border p-5">
                       <p className="text-dim font-mono text-xs uppercase tracking-[0.08em]">
-                        Самое нелогичное
+                        Ниже всего (по оценке)
                       </p>
-                      <p className="mt-3 text-lg">Импульсивный отказ без критериев</p>
+                      <p className="mt-3 text-lg">
+                        {cabinetData?.stats?.highlight_low
+                          ? `${cabinetData.stats.highlight_low.score ?? '—'} / 100 — ${cabinetData.stats.highlight_low.verdict_short ?? cabinetData.stats.highlight_low.dilemma_short}`
+                          : '—'}
+                      </p>
                     </div>
                   </div>
                 </div>
@@ -770,19 +898,21 @@ function FlowPage() {
                   <label className="mt-8 block text-sm text-muted">
                     Телефон
                     <input
-                      defaultValue="+7 ···"
-                      className="border-border bg-elevated mt-2 w-full rounded-[4px] border px-3 py-2 text-foreground"
+                      readOnly
+                      value={meProfile ? maskPhoneE164(meProfile.phone_e164) : '—'}
+                      className="border-border bg-elevated mt-2 w-full cursor-not-allowed rounded-[4px] border px-3 py-2 text-foreground"
                     />
                   </label>
                   <label className="mt-6 block text-sm text-muted">
                     Имя
                     <input
                       placeholder="Как к тебе обращаться"
+                      defaultValue={meProfile?.name ?? ''}
                       className="border-border bg-elevated mt-2 w-full rounded-[4px] border px-3 py-2 text-foreground"
                     />
                   </label>
                   <p className="text-dim mt-10 text-sm">
-                    Удаление аккаунта — без соплей, без возврата данных. Как ты и просил.
+                    Имя пока только локально в поле; сохранение на сервер — в следующих версиях.
                   </p>
                 </div>
               )}

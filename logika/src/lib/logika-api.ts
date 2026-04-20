@@ -103,6 +103,45 @@ export async function replySession(sessionId: string, text: string) {
   >(`/v1/sessions/${sessionId}/reply`, { method: 'POST', json: { text } })
 }
 
+export type CabinetSession = {
+  session_id: string
+  dilemma: string
+  phase: string
+  score: number | null
+  created_at: string | null
+  updated_at: string | null
+  verdict_short: string | null
+}
+
+export type CabinetResponse = {
+  sessions: CabinetSession[]
+  stats: {
+    monthly: { month: string; label: string; avg_score: number; count: number }[]
+    biases: { name: string; count: number }[]
+    highlight_high: {
+      session_id: string
+      score: number | null
+      verdict_short: string | null
+      dilemma_short: string
+    } | null
+    highlight_low: {
+      session_id: string
+      score: number | null
+      verdict_short: string | null
+      dilemma_short: string
+    } | null
+    totals: { sessions: number; completed: number }
+  }
+}
+
+export async function fetchCabinet(): Promise<CabinetResponse> {
+  return req<CabinetResponse>('/v1/cabinet')
+}
+
+export async function fetchMe(): Promise<{ phone_e164: string; name: string | null }> {
+  return req('/v1/me')
+}
+
 export async function downloadPdf(sessionId: string) {
   const base = getApiBase()
   const token = getToken()
