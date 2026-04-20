@@ -29,6 +29,23 @@ logger = logging.getLogger(__name__)
 _VERCEL_PREVIEW_ORIGIN_RE = r"^https://[^\s/]+\.vercel\.app$"
 
 
+class RequestCodeBody(BaseModel):
+    phone: str = Field(..., min_length=10)
+
+
+class VerifyBody(BaseModel):
+    phone: str
+    code: str = Field(..., min_length=4, max_length=8)
+
+
+class StartSessionBody(BaseModel):
+    dilemma: str = Field(..., min_length=8, max_length=8000)
+
+
+class ReplyBody(BaseModel):
+    text: str = Field(..., min_length=1, max_length=8000)
+
+
 def get_settings_dep() -> Settings:
     return get_settings()
 
@@ -56,21 +73,14 @@ def create_app() -> FastAPI:
     def health() -> dict[str, str]:
         return {"status": "ok"}
 
-    class RequestCodeBody(BaseModel):
-        phone: str = Field(..., min_length=10)
-
-    class VerifyBody(BaseModel):
-        phone: str
-        code: str = Field(..., min_length=4, max_length=8)
-
     @app.post("/v1/auth/request-code")
     async def request_code(
-        body: RequestCodeBody,
+        payload: RequestCodeBody,
         db: Session = Depends(get_db),
         settings: Settings = Depends(get_settings_dep),
     ) -> dict[str, bool]:
         try:
-            digits = normalize_ru_phone(body.phone)
+            digits = normalize_ru_phone(payload.phone)
         except ValueError as e:
             raise HTTPException(400, str(e)) from e
         phone_e164 = to_e164(digits)
@@ -89,16 +99,16 @@ def create_app() -> FastAPI:
 
     @app.post("/v1/auth/verify")
     def verify_code(
-        body: VerifyBody,
+        payload: VerifyBody,
         db: Session = Depends(get_db),
         settings: Settings = Depends(get_settings_dep),
     ) -> dict[str, str]:
         try:
-            digits = normalize_ru_phone(body.phone)
+            digits = normalize_ru_phone(payload.phone)
         except ValueError as e:
             raise HTTPException(400, str(e)) from e
         phone_e164 = to_e164(digits)
-        code = body.code.strip().replace(" ", "")
+        code = payload.code.strip().replace(" ", "")
         h = hash_otp(settings, digits, code)
         row = db.execute(
             select(LogikaOtpCode)
@@ -137,17 +147,14 @@ def create_app() -> FastAPI:
             raise HTTPException(401, "Пользователь не найден")
         return user
 
-    class StartSessionBody(BaseModel):
-        dilemma: str = Field(..., min_length=8, max_length=8000)
-
     @app.post("/v1/sessions/start")
     async def start_session(
-        body: StartSessionBody,
+        payload: StartSessionBody,
         db: Session = Depends(get_db),
         settings: Settings = Depends(get_settings_dep),
         user: LogikaUser = Depends(get_bearer_user),
     ) -> dict[str, str]:
-        sess = LogikaChatSession(user_id=user.id, dilemma=body.dilemma.strip(), messages=[], phase="clarifying")
+        sess = LogikaChatSession(user_id=user.id, dilemma=payload.dilemma.strip(), messages=[], phase="clarifying")
         db.add(sess)
         db.commit()
         db.refresh(sess)
@@ -162,13 +169,10 @@ def create_app() -> FastAPI:
         db.commit()
         return {"session_id": str(sess.id), "bot_message": q1}
 
-    class ReplyBody(BaseModel):
-        text: str = Field(..., min_length=1, max_length=8000)
-
     @app.post("/v1/sessions/{session_id}/reply")
     async def reply(
         session_id: uuid.UUID,
-        body: ReplyBody,
+        payload: ReplyBody,
         db: Session = Depends(get_db),
         settings: Settings = Depends(get_settings_dep),
         user: LogikaUser = Depends(get_bearer_user),
@@ -180,7 +184,7 @@ def create_app() -> FastAPI:
             raise HTTPException(400, "Сессия уже закрыта")
 
         msgs = list(sess.messages or [])
-        msgs.append({"role": "user", "content": body.text.strip()})
+        msgs.append({"role": "user", "content": payload.text.strip()})
         n_user = len([m for m in msgs if m["role"] == "user"])
 
         if n_user < settings.questions_count:
