@@ -1,0 +1,30 @@
+{
+  "name": "logika-telegram",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "description": "Telegram bot for Логика — decision analysis via four laws of logic",
+  "main": "dist/bot.js",
+  "scripts": {
+    "dev": "tsx watch src/bot.ts",
+    "build": "tsc -p tsconfig.json",
+    "start": "node dist/bot.js",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.36.0",
+    "@grammyjs/conversations": "^2.0.0",
+    "dotenv": "^16.4.5",
+    "grammy": "^1.30.0",
+    "pino": "^9.5.0",
+    "puppeteer": "^23.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^24.12.2",
+    "tsx": "^4.19.2",
+    "typescript": "~5.9.3"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

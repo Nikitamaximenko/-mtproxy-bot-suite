@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Логика — превью отчёта PDF</title>
+    <title>Логика — аналитический отчёт</title>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
@@ -11,240 +11,598 @@
       rel="stylesheet"
     />
     <style>
+      :root {
+        --bg: #0a0a0b;
+        --card: #121214;
+        --elevated: #1a1a1d;
+        --border: #222226;
+        --fg: #f5f5f7;
+        --muted: #9a9aa4;
+        --dim: #5a5a62;
+        --accent: #c4f542;
+        --accent-dim: rgba(196, 245, 66, 0.1);
+        --danger: #ff4d4d;
+        --warn: #ffb23d;
+      }
       @page {
         size: A4 portrait;
-        margin: 16mm;
+        margin: 0;
+        background: var(--bg);
       }
       * {
         box-sizing: border-box;
+        -webkit-print-color-adjust: exact;
+        print-color-adjust: exact;
       }
+      html,
       body {
         margin: 0;
-        background: #1a1a1d;
+        padding: 0;
+        background: var(--bg);
+        color: var(--fg);
         font-family: Inter, system-ui, sans-serif;
-        color: #1a1a1d;
+        font-size: 10pt;
+        line-height: 1.55;
+        -webkit-font-smoothing: antialiased;
       }
       .sheet {
         width: 210mm;
         min-height: 297mm;
-        margin: 0 auto 12mm;
-        padding: 18mm 16mm;
-        background: #faf7f0;
+        margin: 0 auto 8mm;
+        padding: 14mm;
+        background: var(--bg);
         page-break-after: always;
-        box-shadow: 0 8px 40px rgba(0, 0, 0, 0.25);
+        position: relative;
       }
       .sheet:last-child {
         page-break-after: auto;
+        margin-bottom: 0;
       }
-      .logo {
-        font-weight: 600;
-        letter-spacing: -0.03em;
-        font-size: 14px;
+      @media screen {
+        body {
+          padding: 24px 0;
+        }
+        .sheet {
+          box-shadow: 0 18px 64px rgba(0, 0, 0, 0.55), 0 0 0 1px rgba(255, 255, 255, 0.04);
+          border-radius: 2px;
+        }
       }
-      .logo span {
-        color: #c4f542;
-      }
-      .accent {
-        color: #6b7f2a;
-      }
-      .big-score {
-        font-size: 72px;
-        font-weight: 600;
-        letter-spacing: -0.04em;
-        line-height: 1;
-        margin: 24px 0 8px;
-        color: #ffb23d;
-      }
-      h1.cover-title {
-        font-size: 28px;
-        font-weight: 500;
-        letter-spacing: -0.02em;
-        margin: 48px 0 16px;
-        max-width: 36ch;
-      }
-      .meta {
+      /* --- reusable --- */
+      .mono {
         font-family: 'JetBrains Mono', monospace;
-        font-size: 11px;
         text-transform: uppercase;
         letter-spacing: 0.08em;
-        color: #6b6b72;
+        font-size: 8.5pt;
       }
-      h2 {
-        font-size: 18px;
-        font-weight: 600;
-        margin: 0 0 16px;
-        letter-spacing: -0.02em;
+      .dim { color: var(--dim); }
+      .muted { color: var(--muted); }
+      .accent { color: var(--accent); }
+      .warn { color: var(--warn); }
+      .danger { color: var(--danger); }
+      .card {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        padding: 12px 14px;
       }
-      p,
-      li {
+      .card-lg {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 14px;
+      }
+      .row {
+        display: flex;
+        gap: 10px;
+      }
+      .two {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 10px;
+      }
+      .three {
+        display: grid;
+        grid-template-columns: 1fr 1fr 1fr;
+        gap: 10px;
+      }
+      /* --- meta --- */
+      .meta-bar {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding-bottom: 10px;
+        border-bottom: 1px solid var(--border);
+        color: var(--dim);
+      }
+      .logo {
+        font-weight: 500;
+        letter-spacing: -0.03em;
+        font-size: 12pt;
+        color: var(--fg);
+      }
+      .logo span {
+        color: var(--accent);
+      }
+      /* --- hero --- */
+      .hero {
+        margin-top: 14px;
+        overflow: hidden;
+      }
+      .hero-top {
+        padding: 14px 16px;
+      }
+      .hero-question {
+        font-size: 16pt;
+        font-weight: 500;
+        letter-spacing: -0.01em;
+        line-height: 1.25;
+        margin-top: 6px;
+        color: var(--fg);
+      }
+      .hero-grid {
+        display: grid;
+        grid-template-columns: 180px 1fr;
+        border-top: 1px solid var(--border);
+      }
+      .hero-score {
+        padding: 16px;
+        border-right: 1px solid var(--border);
+        background: var(--accent-dim);
+      }
+      .big-score {
+        font-size: 54pt;
+        font-weight: 500;
+        letter-spacing: -0.04em;
+        line-height: 1;
+        margin: 4px 0;
+        color: var(--warn);
+      }
+      .score-suffix {
+        font-family: 'JetBrains Mono', monospace;
+        color: var(--dim);
+        font-size: 10pt;
+        margin-left: 4px;
+      }
+      .verdict-line {
+        font-weight: 500;
         font-size: 11pt;
-        line-height: 1.55;
-        color: #3a3a40;
+        letter-spacing: -0.01em;
+        margin-top: 4px;
       }
-      .dialog {
-        font-family: 'JetBrains Mono', monospace;
-        font-size: 10px;
+      .hero-verdict {
+        padding: 16px;
+      }
+      .hero-verdict p {
+        font-size: 10.5pt;
         line-height: 1.6;
-        border-left: 2px solid #c4f542;
-        padding-left: 12px;
-        margin: 16px 0;
+        margin: 8px 0 0;
       }
-      .law-block {
-        margin-bottom: 20px;
+      .stat-row {
+        display: grid;
+        grid-template-columns: 1fr 1fr 1fr;
+        gap: 10px;
+        border-top: 1px solid var(--border);
+        padding-top: 10px;
+        margin-top: 12px;
       }
-      .formula {
-        font-family: 'JetBrains Mono', monospace;
-        font-size: 13px;
-        color: #6b6b72;
-        margin-bottom: 8px;
-      }
-      .tag {
-        display: inline-block;
-        font-family: 'JetBrains Mono', monospace;
-        font-size: 10px;
-        text-transform: uppercase;
-        letter-spacing: 0.06em;
-        padding: 4px 8px;
-        border-radius: 4px;
-        background: rgba(196, 245, 66, 0.25);
-        color: #3d4a16;
-        margin-bottom: 8px;
-      }
-      .quote-page {
+      .stat {
         display: flex;
         flex-direction: column;
-        justify-content: center;
-        min-height: 240mm;
+      }
+      .stat-lbl {
+        display: flex;
+        align-items: center;
+        gap: 4px;
+        font-family: 'JetBrains Mono', monospace;
+        font-size: 7.5pt;
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+      }
+      .stat-val {
+        font-family: 'JetBrains Mono', monospace;
+        font-size: 14pt;
+        font-weight: 500;
+        margin-top: 4px;
+      }
+      .icon {
+        display: inline-block;
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+      }
+      /* --- mirror --- */
+      .section-label {
+        color: var(--dim);
+        margin-top: 18px;
+        margin-bottom: 8px;
+      }
+      .mirror .quote {
+        font-style: italic;
+        color: var(--muted);
+        font-size: 10.5pt;
+        line-height: 1.55;
+      }
+      .premise {
+        font-family: 'JetBrains Mono', monospace;
+        font-size: 8.5pt;
+        line-height: 1.7;
+      }
+      .premise .k {
+        color: var(--dim);
+        margin-right: 6px;
+      }
+      .premise .w {
+        color: var(--danger);
+      }
+      /* --- laws --- */
+      .law-card {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        padding: 12px 14px;
+      }
+      .law-head {
+        display: flex;
+        align-items: flex-start;
+        justify-content: space-between;
+        gap: 10px;
+      }
+      .law-title {
+        font-size: 11pt;
+        font-weight: 500;
+        letter-spacing: -0.01em;
+        margin: 0;
+      }
+      .law-formula {
+        font-family: 'JetBrains Mono', monospace;
+        font-size: 8.5pt;
+        color: var(--dim);
+        margin-top: 2px;
+      }
+      .badge {
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        padding: 3px 6px;
+        border-radius: 4px;
+        border: 1px solid;
+        font-family: 'JetBrains Mono', monospace;
+        font-size: 7pt;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+      }
+      .badge.ok {
+        color: var(--accent);
+        border-color: rgba(196, 245, 66, 0.33);
+      }
+      .badge.mid {
+        color: var(--warn);
+        border-color: rgba(255, 178, 61, 0.33);
+      }
+      .badge.bad {
+        color: var(--danger);
+        border-color: rgba(255, 77, 77, 0.33);
+      }
+      .law-desc {
+        font-size: 9.5pt;
+        line-height: 1.55;
+        color: var(--muted);
+        margin-top: 10px;
+      }
+      /* --- biases / alts --- */
+      .bias {
+        background: var(--elevated);
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        padding: 12px;
+      }
+      .bias-name {
+        color: var(--danger);
+        font-family: 'JetBrains Mono', monospace;
+        font-size: 8pt;
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+      }
+      .alt {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        padding: 12px 14px;
+        display: grid;
+        grid-template-columns: 30px 1fr;
+        gap: 8px;
+        align-items: start;
+      }
+      .alt-n {
+        color: var(--accent);
+        font-family: 'JetBrains Mono', monospace;
+        font-size: 10pt;
+        font-weight: 500;
+      }
+      .alt-title {
+        font-weight: 500;
+        font-size: 10.5pt;
+      }
+      .alt-desc {
+        color: var(--muted);
+        font-size: 9.5pt;
+        line-height: 1.55;
+        margin-top: 4px;
+      }
+      /* --- quote --- */
+      .quote-card {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 16px;
+        padding: 22px 24px;
+        text-align: center;
       }
       .quote-big {
-        font-size: 22px;
+        font-size: 15pt;
         font-weight: 500;
         line-height: 1.35;
         letter-spacing: -0.02em;
-        margin: 0 0 24px;
+        color: var(--fg);
       }
-      .footer-small {
-        font-size: 9px;
-        line-height: 1.5;
-        color: #6b6b72;
-        margin-top: auto;
-        padding-top: 12mm;
+      .quote-author {
+        color: var(--dim);
+        margin-top: 14px;
       }
-      ul.alt {
-        padding-left: 18px;
+      /* --- follow-up --- */
+      .followup {
+        background: var(--elevated);
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        padding: 12px 14px;
+        margin-top: 14px;
+        display: grid;
+        grid-template-columns: 14px 1fr;
+        gap: 10px;
+        align-items: flex-start;
       }
-      ul.alt li {
-        margin-bottom: 10px;
+      .check {
+        width: 12px;
+        height: 12px;
+        border: 1.5px solid var(--accent);
+        border-radius: 3px;
+        background: var(--bg);
       }
+      /* --- footer --- */
+      .disclaimer {
+        color: var(--dim);
+        font-size: 8.5pt;
+        line-height: 1.55;
+        border-top: 1px solid var(--border);
+        padding-top: 10px;
+        margin-top: 16px;
+      }
+      .sig {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-top: 10px;
+        color: var(--dim);
+      }
+      .stamp {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        border: 1px solid rgba(196, 245, 66, 0.33);
+        color: var(--accent);
+        padding: 4px 8px;
+        border-radius: 4px;
+        font-family: 'JetBrains Mono', monospace;
+        font-size: 7.5pt;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+      }
+      /* Keep sections from splitting awkwardly */
+      .no-break { page-break-inside: avoid; }
     </style>
   </head>
   <body>
     <article class="sheet">
-      <header>
-        <p class="logo">ЛОГИКА<span>.</span></p>
-        <p class="meta" style="margin-top: 24px">Анализ решения</p>
-        <h1 class="cover-title">Стоит ли менять работу на стартап?</h1>
-        <p class="meta">20 апреля 2026 · пользователь</p>
-        <div class="big-score">42<span class="accent" style="font-size: 28px; vertical-align: super">/100</span></div>
-        <p style="font-size: 14px; max-width: 42ch; margin-top: 8px">Решение частично логично. Два закона выдержаны, одно искажение доминирует.</p>
-      </header>
+      <!-- meta bar -->
+      <div class="meta-bar">
+        <div class="logo">ЛОГИКА<span>.</span></div>
+        <div class="mono">20 апреля 2026 · id LG-425E2 · стр 1 / 2</div>
+      </div>
+
+      <!-- Hero -->
+      <section class="card-lg hero no-break">
+        <div class="hero-top">
+          <div class="mono dim">Исходный запрос</div>
+          <div class="hero-question">«Стоит ли менять работу на стартап?»</div>
+        </div>
+        <div class="hero-grid">
+          <div class="hero-score">
+            <div class="mono dim">Оценка</div>
+            <div class="big-score">42<span class="score-suffix">/ 100</span></div>
+            <div class="verdict-line">Решение частично логично</div>
+          </div>
+          <div class="hero-verdict">
+            <div class="mono dim">Вердикт</div>
+            <p>
+              Два закона из четырёх выдержаны. Тождество и достаточное основание — <span class="warn">частично</span>. Исключённое третье — <span class="danger">не выдержано</span>:
+              альтернативы сведены к бинарному выбору. Обнаружено <strong>3</strong> когнитивных искажения.
+            </p>
+            <div class="stat-row">
+              <div class="stat">
+                <div class="stat-lbl accent"><span class="icon" style="background: var(--accent)"></span> Выдержано</div>
+                <div class="stat-val accent">1</div>
+              </div>
+              <div class="stat">
+                <div class="stat-lbl warn"><span class="icon" style="background: var(--warn)"></span> Частично</div>
+                <div class="stat-val warn">2</div>
+              </div>
+              <div class="stat">
+                <div class="stat-lbl danger"><span class="icon" style="background: var(--danger)"></span> Нарушено</div>
+                <div class="stat-val danger">1</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Mirror -->
+      <div class="section-label mono">Зеркало · твои слова vs структура</div>
+      <div class="two mirror no-break">
+        <div class="card">
+          <div class="mono dim" style="margin-bottom: 8px">Твои слова</div>
+          <div class="quote">
+            «Хочу уйти из корпорации в стартап: больше влияния и роста, но страшно потерять стабильность и репутацию надёжного человека».
+          </div>
+        </div>
+        <div class="card">
+          <div class="mono accent" style="margin-bottom: 8px">Что ты структурно сказал</div>
+          <div class="premise">
+            <div><span class="k">П1.</span> Хочу больше влияния и роста</div>
+            <div><span class="k">П2.</span> Стартап даёт это быстрее корпорации</div>
+            <div><span class="k">П3.</span> Корпорация даёт стабильность и репутацию</div>
+            <div><span class="k">∴ C.</span> Уйти → получить П1, потерять П3</div>
+            <div class="w">! Проверка: П2 — факт или предположение? П3 — твоя или чужая ценность?</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Laws -->
+      <div class="section-label mono">Четыре закона логики</div>
+      <div class="two">
+        <div class="law-card no-break">
+          <div class="law-head">
+            <div>
+              <h3 class="law-title">Тождество</h3>
+              <div class="law-formula">A = A</div>
+            </div>
+            <span class="badge mid">● частично</span>
+          </div>
+          <div class="law-desc">
+            «Стабильность» начала означать доход, затем превратилась в «репутацию». Понятие скользит — значит, им нельзя оперировать как константой.
+          </div>
+        </div>
+        <div class="law-card no-break">
+          <div class="law-head">
+            <div>
+              <h3 class="law-title">Непротиворечие</h3>
+              <div class="law-formula">A ≠ ¬A</div>
+            </div>
+            <span class="badge ok">● выдержан</span>
+          </div>
+          <div class="law-desc">
+            Ты не утверждаешь одновременно полный контроль и полную пассивность. Явных столкновений в одной плоскости нет.
+          </div>
+        </div>
+        <div class="law-card no-break">
+          <div class="law-head">
+            <div>
+              <h3 class="law-title">Исключённое третье</h3>
+              <div class="law-formula">A ∨ ¬A</div>
+            </div>
+            <span class="badge bad">● нарушен</span>
+          </div>
+          <div class="law-desc">
+            Сценарии «остаться» и «уйти» предъявлены как финальные. Промежуточные варианты (частичная занятость, контракт, смена роли внутри) не рассмотрены.
+          </div>
+        </div>
+        <div class="law-card no-break">
+          <div class="law-head">
+            <div>
+              <h3 class="law-title">Достаточное основание</h3>
+              <div class="law-formula">A → B</div>
+            </div>
+            <span class="badge mid">● частично</span>
+          </div>
+          <div class="law-desc">
+            Причины названы, но не отделены от эмоции. Нет независимых измеримых критериев «когда именно уходить правильно».
+          </div>
+        </div>
+      </div>
     </article>
 
     <article class="sheet">
-      <h2>Суть запроса</h2>
-      <p>
-        Хочу уйти из корпорации в стартап: больше влияния и роста, но страшно потерять стабильность и репутацию «надёжного
-        человека».
-      </p>
-      <h2 style="margin-top: 28px">Уточняющий диалог</h2>
-      <div class="dialog">
-        <div>Л: Ты принял это решение за последние 7 дней?</div>
-        <div>Т: Скорее за три недели, после провала проекта.</div>
-        <div>Л: Оно противоречит тому, что ты говорил себе раньше?</div>
-        <div>Т: Раньше я говорил «ещё год потерплю». Сейчас не хочу терпеть.</div>
-        <div>Л: Какой факт сейчас самый неудобный?</div>
-        <div>Т: Что я не считал деньги, а только эмоцию.</div>
+      <!-- meta bar -->
+      <div class="meta-bar">
+        <div class="logo">ЛОГИКА<span>.</span></div>
+        <div class="mono">20 апреля 2026 · id LG-425E2 · стр 2 / 2</div>
       </div>
-    </article>
 
-    <article class="sheet">
-      <h2>Закон тождества</h2>
-      <p class="formula">A = A</p>
-      <p>Если «стабильность» для тебя — это предсказуемый доход, то угроза доходу не может одновременно называться безразличной.</p>
-      <div class="law-block" style="margin-top: 20px">
-        <span class="tag">вердикт</span>
-        <p style="margin: 0">Частично: формулировки целей меняются под давлением свежего события.</p>
+      <!-- Biases -->
+      <div class="section-label mono">Когнитивные искажения</div>
+      <div class="three">
+        <div class="bias no-break">
+          <div class="bias-name">Свежесть события</div>
+          <p class="law-desc" style="margin-top: 8px">
+            Недавний провал проекта даёт непропорциональный вес негативу. Базовая линия не пересчитана.
+          </p>
+        </div>
+        <div class="bias no-break">
+          <div class="bias-name">Поиск подтверждения</div>
+          <p class="law-desc" style="margin-top: 8px">
+            Аргументы «за смену» копятся быстрее, чем контрпримеры стабильности. Сильный перекос выборки.
+          </p>
+        </div>
+        <div class="bias no-break">
+          <div class="bias-name">Чёрно-белое мышление</div>
+          <p class="law-desc" style="margin-top: 8px">
+            Корпорация сведена к «терпению», стартап — к «свободе». Серединных ролей и графиков не существует в модели.
+          </p>
+        </div>
       </div>
-      <h2 style="margin-top: 32px">Закон непротиворечия</h2>
-      <p class="formula">A ≠ ¬A</p>
-      <p>Ты не утверждаешь одновременно полный контроль и полную пассивность — прямого логического столкновения нет.</p>
-      <div class="law-block" style="margin-top: 16px">
-        <span class="tag">вердикт</span>
-        <p style="margin: 0">Выдержано на уровне явных утверждений.</p>
-      </div>
-    </article>
 
-    <article class="sheet">
-      <h2>Закон исключённого третьего</h2>
-      <p class="formula">A ∨ ¬A</p>
-      <p>Промежуточные сценарии (гибрид, отсрочка, частичная занятость) сведены к «уйти или остаться», хотя они меняют риск-профиль.</p>
-      <div class="law-block">
-        <span class="tag">вердикт</span>
-        <p style="margin: 0">Не выдержано: третьи варианты не исследованы как равноправные.</p>
+      <!-- Alternatives -->
+      <div class="section-label mono">Альтернативы, которые ты не рассматривал</div>
+      <div style="display: grid; gap: 8px">
+        <div class="alt no-break">
+          <div class="alt-n">01</div>
+          <div>
+            <div class="alt-title">Сценарий А — 90 дней с экспериментом</div>
+            <div class="alt-desc">Остаться с измеримым KPI и бюджетом. Снижает импульс, даёт данные для сравнения с настроением.</div>
+          </div>
+        </div>
+        <div class="alt no-break">
+          <div class="alt-n">02</div>
+          <div>
+            <div class="alt-title">Сценарий Б — финансовый буфер в числах</div>
+            <div class="alt-desc">Перевести «страшно» в «у меня X месяцев жизни на накопления». Убирает страх как единственный аргумент.</div>
+          </div>
+        </div>
+        <div class="alt no-break">
+          <div class="alt-n">03</div>
+          <div>
+            <div class="alt-title">Сценарий В — сменить контекст без смены работы</div>
+            <div class="alt-desc">Новая роль или команда внутри той же компании. Проверка гипотезы «мне тесно» без точки невозврата.</div>
+          </div>
+        </div>
       </div>
-      <h2 style="margin-top: 28px">Закон достаточного основания</h2>
-      <p class="formula">A → B</p>
-      <p>Причины названы, но не отделены от эмоциональной окраски. Недостаточно независимых измеримых критериев.</p>
-      <div class="law-block" style="margin-top: 16px">
-        <span class="tag">вердикт</span>
-        <p style="margin: 0">Частично: основание есть, проверки мало.</p>
-      </div>
-    </article>
 
-    <article class="sheet">
-      <h2>Когнитивные искажения</h2>
-      <div class="law-block">
-        <span class="tag">Свежесть события</span>
-        <p style="margin: 0">
-          «После провала проекта» — временная близость события усиливает вес негатива без пересчёта базовой линии.
-        </p>
-      </div>
-      <div class="law-block">
-        <span class="tag">Поиск подтверждения</span>
-        <p style="margin: 0">Аргументы в пользу смены подбираются быстрее, чем контрпримеры стабильности.</p>
-      </div>
-      <div class="law-block">
-        <span class="tag">Чёрно-белое мышление</span>
-        <p style="margin: 0">Корпорация сведена к «терпению», стартап — к «свободе», без спектра ролей и графиков.</p>
-      </div>
-    </article>
+      <!-- Quote -->
+      <div class="section-label mono">Резюме от автора формулы</div>
+      <section class="quote-card no-break">
+        <p class="quote-big">«Когда факты меняются — я меняю мнение. А ты?»</p>
+        <p class="mono quote-author">Джон Мейнард Кейнс</p>
+      </section>
 
-    <article class="sheet">
-      <h2>Альтернативы</h2>
-      <ul class="alt">
-        <li><strong>Сценарий А.</strong> Остаться на 90 дней с измеримым экспериментом (KPI, бюджет) — снижает импульс и даёт данные.</li>
-        <li><strong>Сценарий Б.</strong> Перейти в стартап на условиях частичной занятости или контракта — проверка гипотезы без точки невозврата.</li>
-        <li><strong>Сценарий В.</strong> Сменить корпорацию без смены роли — изоляция переменной «токсичная среда».</li>
-      </ul>
-      <p style="margin-top: 20px">Прогноз: сценарий А уменьшает цену ошибки; сценарий Б требует дисциплины в договоре; сценарий В — самый дорогой по времени поиска.</p>
-    </article>
+      <!-- Followup -->
+      <div class="followup no-break">
+        <div class="check"></div>
+        <div>
+          <div style="font-weight: 500">В пятницу Логика спросит: ты это сделал?</div>
+          <div class="law-desc" style="margin-top: 4px">
+            Единственный способ проверить, было ли решение рациональным — дождаться результата и пересравнить. Напомним один раз.
+          </div>
+        </div>
+      </div>
 
-    <article class="sheet quote-page">
-      <p class="quote-big">«Когда факты меняются, я меняю мнение. А вы?»</p>
-      <p class="meta">Кейнс</p>
-      <p style="margin-top: 32px; max-width: 48ch">
-        Рекомендация: зафиксируй три числа — буфер в месяцах, нижний порог дохода, срок проверки гипотезы. Пока числа не названы,
-        решение остаётся описанием настроения, а не планом.
-      </p>
-    </article>
-
-    <article class="sheet">
-      <h2>Служебная информация</h2>
-      <p class="footer-small">
-        Логика — ассистент для размышлений, а не финансовый, медицинский или юридический советник. Окончательное решение — за
-        тобой. Отчёт сгенерирован автоматически; цитаты и трактовки не заменяют профессиональную консультацию.
-      </p>
-      <p class="meta" style="margin-top: 24px">QR · поделиться · id сеанса</p>
+      <!-- Disclaimer -->
+      <div class="disclaimer">
+        Логика — ассистент для размышлений, а не финансовый, медицинский или юридический советник. Окончательное решение — за тобой.
+        Отчёт сгенерирован автоматически; трактовки не заменяют профессиональную консультацию. Данные хранятся 30 дней после окончания подписки, затем уничтожаются.
+      </div>
+      <div class="sig">
+        <div class="mono">
+          Отчёт · LG-425E2 · 20.04.2026 · поделиться: logika.app/r/LG-425E2
+        </div>
+        <div class="stamp">● Проверено логикой</div>
+      </div>
     </article>
   </body>
 </html>
