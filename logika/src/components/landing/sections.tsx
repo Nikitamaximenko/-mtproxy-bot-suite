@@ -1,5 +1,5 @@
 import { motion, useInView } from 'framer-motion'
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useRef, useState } from 'react'
 import { ChevronDown } from 'lucide-react'
 import { clsx } from 'clsx'
 import { useCountUp } from '../../hooks/useCountUp'
@@ -163,90 +163,28 @@ export function LawsSection() {
   )
 }
 
-const demoSteps: { role: 'user' | 'bot'; text: string }[] = [
-  { role: 'user', text: 'Хочу уволиться и уехать в другую страну.' },
-  { role: 'bot', text: 'Ты принял это решение за последние 7 дней?' },
-  { role: 'bot', text: 'Оно противоречит тому, что ты говорил себе полгода назад?' },
-  { role: 'bot', text: 'Что изменится, если ты останешься ещё на три месяца?' },
-  { role: 'bot', text: 'Ты ищешь побег или рост?' },
-  { role: 'bot', text: 'Какой факт сейчас самый неудобный для твоей истории?' },
-  { role: 'bot', text: 'Обнаружено: свежесть события, эмоциональное рассуждение.' },
-  { role: 'bot', text: 'Overall Score: 42 из 100 — решение частично логично.' },
-]
-
 export function HowItWorksSection() {
-  const [visible, setVisible] = useState(0)
-  const ref = useRef(null)
-  const inView = useInView(ref, { amount: 0.35 })
-
-  useEffect(() => {
-    if (!inView) return
-    const id = window.setInterval(() => {
-      setVisible((v) => (v < demoSteps.length - 1 ? v + 1 : v))
-    }, 900)
-    return () => window.clearInterval(id)
-  }, [inView])
-
-  const typed = useMemo(() => demoSteps.slice(0, visible + 1), [visible])
-
   return (
-    <section
-      ref={ref}
-      className="border-border bg-background border-y py-[120px] md:py-[200px]"
-    >
-      <div className="mx-auto grid max-w-[1280px] gap-12 px-4 md:grid-cols-2 md:px-6">
-        <div>
-          <p className="text-muted font-mono text-[13px] uppercase tracking-[0.08em]">Как это работает</p>
-          <h2 className="mt-4 text-[clamp(2rem,4vw,3rem)] font-medium tracking-[-0.02em]">
-            Четыре шага. Без утешений.
-          </h2>
-          <ol className="mt-10 space-y-6 text-lg text-muted">
-            <li>
-              <span className="text-foreground font-medium">Шаг 01.</span> Ты описываешь ситуацию.
-            </li>
-            <li>
-              <span className="text-foreground font-medium">Шаг 02.</span> Бот задаёт пять уточнений.
-            </li>
-            <li>
-              <span className="text-foreground font-medium">Шаг 03.</span> Анализ по законам и искажениям.
-            </li>
-            <li>
-              <span className="text-foreground font-medium">Шаг 04.</span> Ты получаешь отчёт. В цифрах.
-            </li>
-          </ol>
-        </div>
-        <div className="border-border bg-card flex max-h-[480px] flex-col rounded-[12px] border">
-          <div className="border-border border-b px-4 py-3 font-mono text-xs uppercase tracking-[0.08em] text-muted">
-            Демо-диалог
-          </div>
-          <div className="flex-1 space-y-3 overflow-y-auto p-4">
-            {typed.map((m, i) => (
-              <motion.div
-                key={i}
-                initial={{ opacity: 0, y: 8 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ duration: 0.35, ease }}
-                className={clsx(
-                  'max-w-[95%] rounded-[12px] px-4 py-3 text-[15px] leading-relaxed',
-                  m.role === 'user'
-                    ? 'bg-elevated ml-auto text-foreground'
-                    : 'bg-background mr-auto text-muted',
-                )}
-              >
-                {m.role === 'bot' && (
-                  <span className="text-accent mb-1 block font-mono text-[11px] uppercase tracking-[0.08em]">
-                    Логика
-                  </span>
-                )}
-                {m.text}
-              </motion.div>
-            ))}
-          </div>
-          <div className="border-border bg-elevated/60 flex items-center justify-between border-t px-4 py-3">
-            <span className="text-dim font-mono text-xs">Превью отчёта</span>
-            <span className="text-accent font-mono text-xs">PDF · готово к выгрузке</span>
-          </div>
-        </div>
+    <section className="border-border bg-background border-y py-[120px] md:py-[200px]">
+      <div className="mx-auto max-w-[1280px] px-4 md:px-6">
+        <p className="text-muted font-mono text-[13px] uppercase tracking-[0.08em]">Как это работает</p>
+        <h2 className="mt-4 text-[clamp(2rem,4vw,3rem)] font-medium tracking-[-0.02em]">
+          Четыре шага. Без утешений.
+        </h2>
+        <ol className="mt-10 max-w-2xl space-y-6 text-lg text-muted">
+          <li>
+            <span className="text-foreground font-medium">Шаг 01.</span> Ты описываешь ситуацию.
+          </li>
+          <li>
+            <span className="text-foreground font-medium">Шаг 02.</span> Бот задаёт пять уточнений.
+          </li>
+          <li>
+            <span className="text-foreground font-medium">Шаг 03.</span> Анализ по законам и искажениям.
+          </li>
+          <li>
+            <span className="text-foreground font-medium">Шаг 04.</span> Ты получаешь отчёт. В цифрах.
+          </li>
+        </ol>
       </div>
     </section>
   )
