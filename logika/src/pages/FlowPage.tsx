@@ -456,13 +456,27 @@ function FlowPage() {
 
   return (
     <div className="bg-background min-h-dvh">
-      <header className="border-border flex items-center justify-between border-b px-4 py-4 md:px-8">
-        <Link to="/" className="hover:text-accent transition-colors">
+      <header className="border-border flex items-center justify-between gap-3 border-b px-4 py-4 md:px-8">
+        <Link to="/" className="hover:text-accent min-w-0 shrink transition-colors">
           <Logo />
         </Link>
-        <Link to="/" className="text-dim hover:text-foreground font-mono text-[13px] uppercase tracking-[0.08em]">
-          На лендинг
-        </Link>
+        <div className="flex shrink-0 items-center gap-2 sm:gap-4">
+          {phase === 'cabinet' && apiMode && (
+            <button
+              type="button"
+              onClick={goToNewQuestion}
+              className="ease-brand bg-accent text-background hover:bg-accent-hover md:hidden rounded-[4px] px-3 py-2 text-sm font-medium transition-all"
+            >
+              Новый вопрос
+            </button>
+          )}
+          <Link
+            to="/"
+            className="text-dim hover:text-foreground whitespace-nowrap font-mono text-[11px] uppercase tracking-[0.08em] sm:text-[13px]"
+          >
+            На лендинг
+          </Link>
+        </div>
       </header>
       {flowError && (
         <div className="border-danger/30 bg-danger/10 text-danger border-b px-4 py-3 text-center text-sm">
