@@ -2966,51 +2966,69 @@ def _admin_activate_user(telegram_id: int, db: Session) -> None:
     платящих пользователей при toggle-on не перепровижинился клиент, если его
     по какой-то причине не было в 3X-UI. Теперь _ensure_xray_client вызывается
     в обеих ветках, так что админка реально синхронна с VPN-инфраструктурой.
+
+    FIX: после триала у одного telegram_id несколько строк (paid + trial). Раньше
+    обрабатывали только последнюю по created_at — платящая могла остаться suspended,
+    а /subscription отдавал её (больший expires_at) → тумблер «не работал».
     """
     now = utcnow()
 
-    sub = (
+    active_entitlements = (
         db.execute(
-            select(Subscription)
-            .where(Subscription.telegram_id == telegram_id)
-            .order_by(Subscription.created_at.desc())
-            .limit(1)
+            select(Subscription).where(
+                Subscription.telegram_id == telegram_id,
+                Subscription.payment_status.in_(SUBSCRIPTION_ACCESS_STATUSES),
+                Subscription.expires_at.is_not(None),
+                Subscription.expires_at > now,
+            )
         )
         .scalars()
-        .first()
+        .all()
     )
 
-    if sub is None:
-        token = uuid4()
-        sub = Subscription(
-            telegram_id=telegram_id,
-            payment_token=str(token),
-            payment_status="pending",
-        )
-        db.add(sub)
-        db.commit()
-        db.refresh(sub)
-
-    if (
-        sub.payment_status in SUBSCRIPTION_ACCESS_STATUSES
-        and sub.expires_at is not None
-        and sub.expires_at > now
-    ):
+    if active_entitlements:
         try:
-            _apply_proxy_credentials(sub)
+            for sub in active_entitlements:
+                _apply_proxy_credentials(sub)
+                sub.access_suspended = False
+                sub.access_blocked_reason = None
+                sub.last_subscription_reminder_at = None
+                sub.renewal_failed_notified = False
         except RuntimeError as e:
-            raise HTTPException(status_code=503, detail=str(e))
-        sub.access_suspended = False
-        sub.access_blocked_reason = None
-        sub.last_subscription_reminder_at = None
-        sub.renewal_failed_notified = False
+            raise HTTPException(status_code=503, detail=str(e)) from e
         db.commit()
-        logger.info("Admin restored access for paid/trial tg_id=%s (expires_at unchanged)", telegram_id)
+        logger.info(
+            "Admin restored access for tg_id=%s rows=%s",
+            telegram_id,
+            len(active_entitlements),
+        )
     else:
+        sub = (
+            db.execute(
+                select(Subscription)
+                .where(Subscription.telegram_id == telegram_id)
+                .order_by(Subscription.created_at.desc())
+                .limit(1)
+            )
+            .scalars()
+            .first()
+        )
+
+        if sub is None:
+            token = uuid4()
+            sub = Subscription(
+                telegram_id=telegram_id,
+                payment_token=str(token),
+                payment_status="pending",
+            )
+            db.add(sub)
+            db.commit()
+            db.refresh(sub)
+
         try:
             activate_subscription(sub)
         except RuntimeError as e:
-            raise HTTPException(status_code=503, detail=str(e))
+            raise HTTPException(status_code=503, detail=str(e)) from e
         db.commit()
         logger.info("Admin granted full activation for tg_id=%s", telegram_id)
 

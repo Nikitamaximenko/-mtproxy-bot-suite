@@ -200,6 +200,7 @@ function formatDate(iso: string | null) {
 function StatusBadge({ status }: { status: string }) {
   const colors: Record<string, string> = {
     paid: "bg-emerald-100 text-emerald-800",
+    trial: "bg-sky-100 text-sky-800",
     pending: "bg-yellow-100 text-yellow-800",
     expired: "bg-red-100 text-red-800",
   }
@@ -212,11 +213,11 @@ function StatusBadge({ status }: { status: string }) {
   )
 }
 
-/** Доступ как в API: paid, срок в будущем, без блокировки (suspend / причина блока). */
+/** Доступ как в API: paid или trial, срок в будущем, без блокировки (suspend / причина блока). */
 function isSubAccessActive(s: SubInfo): boolean {
   if (s.access_suspended) return false
   if (s.access_blocked_reason) return false
-  if (s.payment_status !== "paid") return false
+  if (s.payment_status !== "paid" && s.payment_status !== "trial") return false
   if (!s.expires_at) return false
   return new Date(s.expires_at).getTime() > Date.now()
 }
