@@ -1,0 +1,38 @@
+@import 'tailwindcss';
+
+@theme {
+  --font-sans: 'Inter', ui-sans-serif, system-ui, sans-serif;
+  --font-mono: 'JetBrains Mono', 'IBM Plex Mono', ui-monospace, monospace;
+
+  --color-background: #0a0a0b;
+  --color-card: #121214;
+  --color-elevated: #1a1a1d;
+  --color-border: #222226;
+  --color-border-hover: #2e2e34;
+  --color-foreground: #f5f5f7;
+  --color-muted: #9a9aa4;
+  --color-dim: #5a5a62;
+  --color-accent: #c4f542;
+  --color-accent-hover: #d4ff5c;
+  --color-danger: #ff4d4d;
+  --color-warn: #ffb23d;
+}
+
+@layer base {
+  html {
+    @apply bg-background text-foreground antialiased;
+    scroll-behavior: smooth;
+  }
+
+  body {
+    @apply m-0 min-h-dvh font-sans;
+  }
+
+  ::selection {
+    @apply bg-accent text-background;
+  }
+}
+
+.ease-brand {
+  transition-timing-function: cubic-bezier(0.32, 0.72, 0, 1);
+}

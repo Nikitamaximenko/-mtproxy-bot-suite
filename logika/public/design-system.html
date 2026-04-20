@@ -1,0 +1,437 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Логика — дизайн-система</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap"
+      rel="stylesheet"
+    />
+    <style>
+      :root {
+        --bg-primary: #0a0a0b;
+        --bg-secondary: #121214;
+        --bg-elevated: #1a1a1d;
+        --border: #222226;
+        --border-hover: #2e2e34;
+        --text-primary: #f5f5f7;
+        --text-secondary: #9a9aa4;
+        --text-tertiary: #5a5a62;
+        --accent: #c4f542;
+        --accent-glow: #c4f54233;
+        --accent-hover: #d4ff5c;
+        --logic-true: #c4f542;
+        --logic-false: #ff4d4d;
+        --logic-partial: #ffb23d;
+        --ease: cubic-bezier(0.32, 0.72, 0, 1);
+        --radius-sm: 4px;
+        --radius-md: 12px;
+        --radius-lg: 20px;
+        --max: 1280px;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        font-family: Inter, system-ui, sans-serif;
+        background: var(--bg-primary);
+        color: var(--text-primary);
+        line-height: 1.6;
+      }
+      .wrap {
+        max-width: var(--max);
+        margin: 0 auto;
+        padding: 48px 24px 120px;
+      }
+      h1.ds {
+        font-size: clamp(2rem, 4vw, 3rem);
+        font-weight: 500;
+        letter-spacing: -0.03em;
+        margin: 0 0 8px;
+      }
+      .lead {
+        color: var(--text-secondary);
+        max-width: 52ch;
+        margin-bottom: 48px;
+      }
+      section {
+        margin-bottom: 72px;
+      }
+      h2.ds {
+        font-size: 13px;
+        font-family: 'JetBrains Mono', monospace;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+        color: var(--text-tertiary);
+        margin: 0 0 24px;
+      }
+      .swatches {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+        gap: 16px;
+      }
+      .sw {
+        border-radius: var(--radius-md);
+        border: 1px solid var(--border);
+        overflow: hidden;
+        background: var(--bg-secondary);
+      }
+      .sw > div:first-child {
+        height: 72px;
+      }
+      .sw > div:last-child {
+        padding: 12px;
+        font-family: 'JetBrains Mono', monospace;
+        font-size: 11px;
+        color: var(--text-secondary);
+      }
+      .type-sample {
+        border: 1px solid var(--border);
+        border-radius: var(--radius-md);
+        padding: 24px;
+        background: var(--bg-secondary);
+        margin-bottom: 16px;
+      }
+      .h-hero {
+        font-size: clamp(3rem, 8vw, 6rem);
+        line-height: 0.95;
+        letter-spacing: -0.04em;
+        font-weight: 500;
+        margin: 0;
+      }
+      .h1 {
+        font-size: 48px;
+        line-height: 0.95;
+        letter-spacing: -0.03em;
+        font-weight: 500;
+        margin: 0;
+      }
+      .h2 {
+        font-size: 32px;
+        line-height: 1.05;
+        letter-spacing: -0.02em;
+        font-weight: 500;
+        margin: 0;
+      }
+      .h3 {
+        font-size: 24px;
+        line-height: 1.15;
+        letter-spacing: -0.01em;
+        font-weight: 500;
+        margin: 0;
+      }
+      .body-lg {
+        font-size: 20px;
+        line-height: 1.5;
+        color: var(--text-secondary);
+        margin: 0;
+      }
+      .body {
+        font-size: 16px;
+        line-height: 1.6;
+        color: var(--text-secondary);
+        margin: 0;
+      }
+      .cap {
+        font-family: 'JetBrains Mono', monospace;
+        font-size: 13px;
+        line-height: 1.4;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+        color: var(--text-tertiary);
+        margin: 0;
+      }
+      .row {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 12px;
+        align-items: center;
+      }
+      .btn {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        padding: 12px 20px;
+        border-radius: var(--radius-sm);
+        font-weight: 500;
+        font-size: 15px;
+        cursor: pointer;
+        border: none;
+        transition:
+          background 0.35s var(--ease),
+          box-shadow 0.35s var(--ease),
+          border-color 0.35s var(--ease),
+          color 0.35s var(--ease);
+      }
+      .btn-primary {
+        background: var(--accent);
+        color: #0a0a0b;
+        box-shadow: 0 0 24px rgba(196, 245, 66, 0.18);
+      }
+      .btn-primary:hover {
+        background: var(--accent-hover);
+        box-shadow: 0 0 32px rgba(196, 245, 66, 0.28);
+      }
+      .btn-primary:active {
+        transform: translateY(1px);
+      }
+      .btn-primary:disabled {
+        opacity: 0.4;
+        cursor: not-allowed;
+      }
+      .btn-secondary {
+        background: transparent;
+        color: var(--text-primary);
+        border: 1px solid var(--border);
+      }
+      .btn-secondary:hover {
+        border-color: var(--border-hover);
+      }
+      .btn-ghost {
+        background: none;
+        color: var(--text-secondary);
+        padding-left: 0;
+        padding-right: 0;
+        text-decoration: none;
+        border-bottom: 1px solid transparent;
+      }
+      .btn-ghost:hover {
+        color: var(--text-primary);
+        border-bottom-color: var(--accent);
+      }
+      .field {
+        max-width: 360px;
+      }
+      .label {
+        display: block;
+        font-size: 13px;
+        color: var(--text-tertiary);
+        margin-bottom: 8px;
+        font-family: 'JetBrains Mono', monospace;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+      }
+      .input {
+        width: 100%;
+        padding: 12px 14px;
+        border-radius: var(--radius-sm);
+        border: 1px solid var(--border);
+        background: var(--bg-secondary);
+        color: var(--text-primary);
+        font-size: 15px;
+        outline: none;
+        transition:
+          border-color 0.35s var(--ease),
+          box-shadow 0.35s var(--ease);
+      }
+      .input:focus {
+        border-color: var(--accent);
+        box-shadow: 0 0 0 2px var(--accent-glow);
+      }
+      .input:disabled {
+        opacity: 0.45;
+      }
+      .card {
+        border: 1px solid var(--border);
+        border-radius: var(--radius-md);
+        background: var(--bg-secondary);
+        padding: 24px;
+        max-width: 400px;
+      }
+      .card-elevated {
+        background: var(--bg-elevated);
+      }
+      .modal-backdrop {
+        position: relative;
+        border-radius: var(--radius-lg);
+        border: 1px dashed var(--border);
+        padding: 48px;
+        background: rgba(10, 10, 11, 0.6);
+      }
+      .modal {
+        max-width: 420px;
+        margin: 0 auto;
+        border-radius: var(--radius-lg);
+        border: 1px solid var(--border);
+        background: var(--bg-elevated);
+        padding: 28px;
+      }
+      .icons {
+        display: flex;
+        gap: 20px;
+        flex-wrap: wrap;
+        color: var(--text-secondary);
+      }
+      .icons svg {
+        width: 24px;
+        height: 24px;
+        stroke: currentColor;
+        fill: none;
+        stroke-width: 1.5;
+      }
+      .icons span {
+        width: 100%;
+        font-size: 12px;
+        color: var(--text-tertiary);
+        font-family: 'JetBrains Mono', monospace;
+      }
+      .semantic {
+        display: flex;
+        gap: 24px;
+        flex-wrap: wrap;
+      }
+      .pill {
+        font-family: 'JetBrains Mono', monospace;
+        font-size: 13px;
+        padding: 8px 12px;
+        border-radius: var(--radius-sm);
+      }
+    </style>
+  </head>
+  <body>
+    <div class="wrap">
+      <p class="cap">Шаг 1 · дизайн-система</p>
+      <h1 class="ds">Логика</h1>
+      <p class="lead">
+        Тёмный премиум-минимализм. Один акцент — электрический лайм. Без лишних украшений: глубина за счёт
+        слоёв фона и тонких границ.
+      </p>
+
+      <section>
+        <h2 class="ds">Цвета</h2>
+        <div class="swatches">
+          <div class="sw">
+            <div style="background: var(--bg-primary)"></div>
+            <div>фон<br />#0A0A0B</div>
+          </div>
+          <div class="sw">
+            <div style="background: var(--bg-secondary)"></div>
+            <div>карточки<br />#121214</div>
+          </div>
+          <div class="sw">
+            <div style="background: var(--bg-elevated)"></div>
+            <div>поднятый<br />#1A1A1D</div>
+          </div>
+          <div class="sw">
+            <div style="background: var(--border)"></div>
+            <div>граница<br />#222226</div>
+          </div>
+          <div class="sw">
+            <div style="background: var(--text-primary)"></div>
+            <div>текст<br />#F5F5F7</div>
+          </div>
+          <div class="sw">
+            <div style="background: var(--text-secondary)"></div>
+            <div>вторичный<br />#9A9AA4</div>
+          </div>
+          <div class="sw">
+            <div style="background: var(--accent)"></div>
+            <div>акцент<br />#C4F542</div>
+          </div>
+          <div class="sw">
+            <div style="background: var(--logic-false)"></div>
+            <div>риск<br />#FF4D4D</div>
+          </div>
+          <div class="sw">
+            <div style="background: var(--logic-partial)"></div>
+            <div>частично<br />#FFB23D</div>
+          </div>
+        </div>
+      </section>
+
+      <section>
+        <h2 class="ds">Типографика</h2>
+        <div class="type-sample">
+          <p class="h-hero">Ты думаешь, что решаешь сам.</p>
+        </div>
+        <div class="type-sample">
+          <p class="h1">Заголовок первого уровня</p>
+        </div>
+        <div class="type-sample">
+          <p class="h2">Заголовок второго уровня</p>
+        </div>
+        <div class="type-sample">
+          <p class="h3">Заголовок третьего уровня</p>
+        </div>
+        <div class="type-sample">
+          <p class="body-lg">Крупный текст для подзаголовков и вводных абзацев на лендинге.</p>
+        </div>
+        <div class="type-sample">
+          <p class="body">Основной текст интерфейса. Читаемость важнее эффекта.</p>
+        </div>
+        <div class="type-sample">
+          <p class="cap">подпись · mono · caps</p>
+        </div>
+      </section>
+
+      <section>
+        <h2 class="ds">Кнопки</h2>
+        <div class="row" style="margin-bottom: 16px">
+          <button type="button" class="btn btn-primary">Основная</button>
+          <button type="button" class="btn btn-primary" disabled>Неактивна</button>
+        </div>
+        <div class="row" style="margin-bottom: 16px">
+          <button type="button" class="btn btn-secondary">Вторичная</button>
+        </div>
+        <div class="row">
+          <a href="#" class="btn btn-ghost">Только текст</a>
+        </div>
+      </section>
+
+      <section>
+        <h2 class="ds">Поля и карточки</h2>
+        <div class="field">
+          <label class="label" for="ex">Запрос</label>
+          <input id="ex" class="input" type="text" placeholder="Опиши ситуацию" />
+        </div>
+        <div style="height: 24px"></div>
+        <div class="card">
+          <p class="h3" style="margin-bottom: 8px">Карточка</p>
+          <p class="body">Фон secondary, радиус 12px, тонкая граница. Без тяжёлых теней.</p>
+        </div>
+        <div style="height: 16px"></div>
+        <div class="card card-elevated">
+          <p class="body" style="margin: 0">Поднятый уровень — elevated для контраста с карточкой.</p>
+        </div>
+      </section>
+
+      <section>
+        <h2 class="ds">Модальное окно</h2>
+        <div class="modal-backdrop">
+          <div class="modal">
+            <p class="h3" style="margin-top: 0">Первый анализ готов</p>
+            <p class="body">Дальше — по подписке. Или останься на бесплатном тарифе и смотри правде в глаза реже.</p>
+            <div class="row" style="margin-top: 20px">
+              <button type="button" class="btn btn-primary">Продолжить</button>
+              <button type="button" class="btn btn-secondary">Закрыть</button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section>
+        <h2 class="ds">Семантика оценки</h2>
+        <div class="semantic">
+          <span class="pill" style="background: rgba(196, 245, 66, 0.12); color: var(--logic-true)">логично</span>
+          <span class="pill" style="background: rgba(255, 178, 61, 0.12); color: var(--logic-partial)">частично</span>
+          <span class="pill" style="background: rgba(255, 77, 77, 0.12); color: var(--logic-false)">нелогично</span>
+        </div>
+      </section>
+
+      <section>
+        <h2 class="ds">Иконки (геометрия, стиль lucide)</h2>
+        <div class="icons">
+          <svg viewBox="0 0 24 24"><path d="M4 12h16M12 4v16" /></svg>
+          <svg viewBox="0 0 24 24"><path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5" /></svg>
+          <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" /><path d="M12 7v6l4 2" /></svg>
+          <svg viewBox="0 0 24 24"><path d="M4 4h16v16H4zM9 9h6v6H9z" /></svg>
+          <span>В продукте используется пакет lucide-react; здесь — линейные контуры без метафор «мозга» и «лампы».</span>
+        </div>
+      </section>
+    </div>
+  </body>
+</html>

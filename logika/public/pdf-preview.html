@@ -1,0 +1,250 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Логика — превью отчёта PDF</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap"
+      rel="stylesheet"
+    />
+    <style>
+      @page {
+        size: A4 portrait;
+        margin: 16mm;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        background: #1a1a1d;
+        font-family: Inter, system-ui, sans-serif;
+        color: #1a1a1d;
+      }
+      .sheet {
+        width: 210mm;
+        min-height: 297mm;
+        margin: 0 auto 12mm;
+        padding: 18mm 16mm;
+        background: #faf7f0;
+        page-break-after: always;
+        box-shadow: 0 8px 40px rgba(0, 0, 0, 0.25);
+      }
+      .sheet:last-child {
+        page-break-after: auto;
+      }
+      .logo {
+        font-weight: 600;
+        letter-spacing: -0.03em;
+        font-size: 14px;
+      }
+      .logo span {
+        color: #c4f542;
+      }
+      .accent {
+        color: #6b7f2a;
+      }
+      .big-score {
+        font-size: 72px;
+        font-weight: 600;
+        letter-spacing: -0.04em;
+        line-height: 1;
+        margin: 24px 0 8px;
+        color: #ffb23d;
+      }
+      h1.cover-title {
+        font-size: 28px;
+        font-weight: 500;
+        letter-spacing: -0.02em;
+        margin: 48px 0 16px;
+        max-width: 36ch;
+      }
+      .meta {
+        font-family: 'JetBrains Mono', monospace;
+        font-size: 11px;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+        color: #6b6b72;
+      }
+      h2 {
+        font-size: 18px;
+        font-weight: 600;
+        margin: 0 0 16px;
+        letter-spacing: -0.02em;
+      }
+      p,
+      li {
+        font-size: 11pt;
+        line-height: 1.55;
+        color: #3a3a40;
+      }
+      .dialog {
+        font-family: 'JetBrains Mono', monospace;
+        font-size: 10px;
+        line-height: 1.6;
+        border-left: 2px solid #c4f542;
+        padding-left: 12px;
+        margin: 16px 0;
+      }
+      .law-block {
+        margin-bottom: 20px;
+      }
+      .formula {
+        font-family: 'JetBrains Mono', monospace;
+        font-size: 13px;
+        color: #6b6b72;
+        margin-bottom: 8px;
+      }
+      .tag {
+        display: inline-block;
+        font-family: 'JetBrains Mono', monospace;
+        font-size: 10px;
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+        padding: 4px 8px;
+        border-radius: 4px;
+        background: rgba(196, 245, 66, 0.25);
+        color: #3d4a16;
+        margin-bottom: 8px;
+      }
+      .quote-page {
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+        min-height: 240mm;
+      }
+      .quote-big {
+        font-size: 22px;
+        font-weight: 500;
+        line-height: 1.35;
+        letter-spacing: -0.02em;
+        margin: 0 0 24px;
+      }
+      .footer-small {
+        font-size: 9px;
+        line-height: 1.5;
+        color: #6b6b72;
+        margin-top: auto;
+        padding-top: 12mm;
+      }
+      ul.alt {
+        padding-left: 18px;
+      }
+      ul.alt li {
+        margin-bottom: 10px;
+      }
+    </style>
+  </head>
+  <body>
+    <article class="sheet">
+      <header>
+        <p class="logo">ЛОГИКА<span>.</span></p>
+        <p class="meta" style="margin-top: 24px">Анализ решения</p>
+        <h1 class="cover-title">Стоит ли менять работу на стартап?</h1>
+        <p class="meta">20 апреля 2026 · пользователь</p>
+        <div class="big-score">42<span class="accent" style="font-size: 28px; vertical-align: super">/100</span></div>
+        <p style="font-size: 14px; max-width: 42ch; margin-top: 8px">Решение частично логично. Два закона выдержаны, одно искажение доминирует.</p>
+      </header>
+    </article>
+
+    <article class="sheet">
+      <h2>Суть запроса</h2>
+      <p>
+        Хочу уйти из корпорации в стартап: больше влияния и роста, но страшно потерять стабильность и репутацию «надёжного
+        человека».
+      </p>
+      <h2 style="margin-top: 28px">Уточняющий диалог</h2>
+      <div class="dialog">
+        <div>Л: Ты принял это решение за последние 7 дней?</div>
+        <div>Т: Скорее за три недели, после провала проекта.</div>
+        <div>Л: Оно противоречит тому, что ты говорил себе раньше?</div>
+        <div>Т: Раньше я говорил «ещё год потерплю». Сейчас не хочу терпеть.</div>
+        <div>Л: Какой факт сейчас самый неудобный?</div>
+        <div>Т: Что я не считал деньги, а только эмоцию.</div>
+      </div>
+    </article>
+
+    <article class="sheet">
+      <h2>Закон тождества</h2>
+      <p class="formula">A = A</p>
+      <p>Если «стабильность» для тебя — это предсказуемый доход, то угроза доходу не может одновременно называться безразличной.</p>
+      <div class="law-block" style="margin-top: 20px">
+        <span class="tag">вердикт</span>
+        <p style="margin: 0">Частично: формулировки целей меняются под давлением свежего события.</p>
+      </div>
+      <h2 style="margin-top: 32px">Закон непротиворечия</h2>
+      <p class="formula">A ≠ ¬A</p>
+      <p>Ты не утверждаешь одновременно полный контроль и полную пассивность — прямого логического столкновения нет.</p>
+      <div class="law-block" style="margin-top: 16px">
+        <span class="tag">вердикт</span>
+        <p style="margin: 0">Выдержано на уровне явных утверждений.</p>
+      </div>
+    </article>
+
+    <article class="sheet">
+      <h2>Закон исключённого третьего</h2>
+      <p class="formula">A ∨ ¬A</p>
+      <p>Промежуточные сценарии (гибрид, отсрочка, частичная занятость) сведены к «уйти или остаться», хотя они меняют риск-профиль.</p>
+      <div class="law-block">
+        <span class="tag">вердикт</span>
+        <p style="margin: 0">Не выдержано: третьи варианты не исследованы как равноправные.</p>
+      </div>
+      <h2 style="margin-top: 28px">Закон достаточного основания</h2>
+      <p class="formula">A → B</p>
+      <p>Причины названы, но не отделены от эмоциональной окраски. Недостаточно независимых измеримых критериев.</p>
+      <div class="law-block" style="margin-top: 16px">
+        <span class="tag">вердикт</span>
+        <p style="margin: 0">Частично: основание есть, проверки мало.</p>
+      </div>
+    </article>
+
+    <article class="sheet">
+      <h2>Когнитивные искажения</h2>
+      <div class="law-block">
+        <span class="tag">Свежесть события</span>
+        <p style="margin: 0">
+          «После провала проекта» — временная близость события усиливает вес негатива без пересчёта базовой линии.
+        </p>
+      </div>
+      <div class="law-block">
+        <span class="tag">Поиск подтверждения</span>
+        <p style="margin: 0">Аргументы в пользу смены подбираются быстрее, чем контрпримеры стабильности.</p>
+      </div>
+      <div class="law-block">
+        <span class="tag">Чёрно-белое мышление</span>
+        <p style="margin: 0">Корпорация сведена к «терпению», стартап — к «свободе», без спектра ролей и графиков.</p>
+      </div>
+    </article>
+
+    <article class="sheet">
+      <h2>Альтернативы</h2>
+      <ul class="alt">
+        <li><strong>Сценарий А.</strong> Остаться на 90 дней с измеримым экспериментом (KPI, бюджет) — снижает импульс и даёт данные.</li>
+        <li><strong>Сценарий Б.</strong> Перейти в стартап на условиях частичной занятости или контракта — проверка гипотезы без точки невозврата.</li>
+        <li><strong>Сценарий В.</strong> Сменить корпорацию без смены роли — изоляция переменной «токсичная среда».</li>
+      </ul>
+      <p style="margin-top: 20px">Прогноз: сценарий А уменьшает цену ошибки; сценарий Б требует дисциплины в договоре; сценарий В — самый дорогой по времени поиска.</p>
+    </article>
+
+    <article class="sheet quote-page">
+      <p class="quote-big">«Когда факты меняются, я меняю мнение. А вы?»</p>
+      <p class="meta">Кейнс</p>
+      <p style="margin-top: 32px; max-width: 48ch">
+        Рекомендация: зафиксируй три числа — буфер в месяцах, нижний порог дохода, срок проверки гипотезы. Пока числа не названы,
+        решение остаётся описанием настроения, а не планом.
+      </p>
+    </article>
+
+    <article class="sheet">
+      <h2>Служебная информация</h2>
+      <p class="footer-small">
+        Логика — ассистент для размышлений, а не финансовый, медицинский или юридический советник. Окончательное решение — за
+        тобой. Отчёт сгенерирован автоматически; цитаты и трактовки не заменяют профессиональную консультацию.
+      </p>
+      <p class="meta" style="margin-top: 24px">QR · поделиться · id сеанса</p>
+    </article>
+  </body>
+</html>
