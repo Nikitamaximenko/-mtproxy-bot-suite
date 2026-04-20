@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 # Версия для аудита отчётов и регрессий
-PROMPT_VERSION = "v2.1-cascade-opus"
+PROMPT_VERSION = "v2.2-conclusion-field"
 
 SAFETY_AND_SCOPE = """
 ## Безопасность и границы продукта
@@ -87,6 +87,7 @@ def user_payload_analysis(
 {quotes_corpus_block}
 
 Сформируй отчёт по схеме. Если данных недостаточно — честно отрази это в score и формулировках.
+Поле summary — развёрнутое обоснование. Поле conclusion — обязательный итог для пользователя в конце: что из анализа важнее всего для его решения (2–6 предложений), без дублирования summary дословно.
 """
 
 
@@ -109,5 +110,6 @@ def user_payload_critique(
 {quotes_corpus_block}
 
 Выполни self-critique: перечисли риски необоснованности, затем выдай финальный final_report с поправками.
+В final_report сохрани или усиль поле conclusion — чёткий финальный вывод для пользователя.
 Цитата только из корпуса с верным source_id или null.
 """

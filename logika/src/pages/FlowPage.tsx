@@ -838,6 +838,19 @@ function FlowPage() {
               </footer>
             </blockquote>
 
+            <div className="border-accent/40 bg-elevated/80 mt-12 rounded-2xl border border-l-4 px-5 py-6 sm:px-8">
+              <h3 className="text-dim font-mono text-[12px] uppercase tracking-[0.1em]">
+                Финальный вывод
+              </h3>
+              <p className="text-foreground mt-4 text-left text-[17px] font-medium leading-relaxed tracking-[-0.01em] md:text-lg">
+                {apiMode && apiReport?.conclusion && String(apiReport.conclusion).trim()
+                  ? String(apiReport.conclusion).trim()
+                  : apiMode && apiReport?.verdict_short
+                    ? String(apiReport.verdict_short)
+                    : 'Сведи вывод к одному ясному следующему шагу: что проверить, что принять или что отложить — исходя из твоих же формулировок выше.'}
+              </p>
+            </div>
+
             <div className="mt-12 flex flex-wrap gap-4">
               {apiMode && apiSessionId ? (
                 <button

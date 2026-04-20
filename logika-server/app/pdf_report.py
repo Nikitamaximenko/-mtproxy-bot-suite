@@ -146,6 +146,15 @@ def build_pdf_bytes(report: dict[str, Any], dilemma: str) -> bytes:
     qt = _esc(str(q.get("text", "")))
     auth = _esc(str(q.get("author", "")))
     story.append(_p(f"«{qt}» — {auth}", body))
+
+    conclusion = str(report.get("conclusion") or "").strip()
+    if conclusion:
+        story.append(Spacer(1, 0.45 * cm))
+        story.append(_p("<b>Финальный вывод</b>", h2))
+        for para in conclusion.split("\n\n"):
+            if para.strip():
+                story.append(_p(_esc(para.strip()), body))
+
     story.append(Spacer(1, 0.8 * cm))
     story.append(
         _p(

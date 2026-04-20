@@ -282,5 +282,6 @@ def _demo_report() -> dict[str, Any]:
         "alternatives": ["Уточнить цифры", "Отложить решение", "Собрать факты"],
         "quote": {"text": "Мыслю, следовательно существую.", "author": "Декарт", "source_id": None},
         "summary": "Подключи ANTHROPIC_API_KEY на сервере для полного отчёта.",
+        "conclusion": "Итог: без ключа API полный анализ недоступен — задай переменную на сервере и повтори запрос.",
         "prompt_version": PROMPT_VERSION,
     }
