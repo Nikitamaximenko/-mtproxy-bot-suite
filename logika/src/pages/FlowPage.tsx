@@ -7,10 +7,15 @@ import { HeroFork } from '../components/landing/HeroFork'
 import { useCountUp } from '../hooks/useCountUp'
 import {
   type CabinetResponse,
+  clearLocalAuth,
   downloadPdf,
   fetchCabinet,
   fetchMe,
+  fetchSession,
+  getToken,
   hasApi,
+  LOGIKA_ACTIVE_SESSION_KEY,
+  persistActiveSessionId,
   replySession,
   requestCode,
   requestEmailCode,
@@ -80,8 +85,20 @@ function maskEmailNorm(s: string) {
   return `${lm}@${domain}`
 }
 
+function normalizeApiThread(
+  raw: Array<{ role?: string; content?: unknown }>,
+): Array<{ role: 'user' | 'assistant'; content: string }> {
+  return raw.map((m) => ({
+    role: m.role === 'user' ? 'user' : 'assistant',
+    content: String(m.content ?? ''),
+  }))
+}
+
 function FlowPage() {
   const apiMode = hasApi()
+  const [authBootstrapping, setAuthBootstrapping] = useState(
+    () => Boolean(apiMode && getToken()),
+  )
   const [phase, setPhase] = useState<Phase>('phone')
   const [authChannel, setAuthChannel] = useState<'phone' | 'email'>('phone')
   const [phone, setPhone] = useState('')
@@ -107,6 +124,60 @@ function FlowPage() {
   const [apiSessionId, setApiSessionId] = useState<string | null>(null)
   const [apiThread, setApiThread] = useState<Array<{ role: 'user' | 'assistant'; content: string }>>([])
   const [apiReport, setApiReport] = useState<Record<string, unknown> | null>(null)
+
+  useEffect(() => {
+    if (!apiMode) {
+      setAuthBootstrapping(false)
+      return
+    }
+    const token = getToken()
+    if (!token) {
+      setAuthBootstrapping(false)
+      return
+    }
+    let cancel = false
+    setAuthBootstrapping(true)
+    void (async () => {
+      try {
+        await fetchMe()
+        if (cancel) return
+        const sid = (() => {
+          try {
+            return localStorage.getItem(LOGIKA_ACTIVE_SESSION_KEY)
+          } catch {
+            return null
+          }
+        })()
+        if (sid) {
+          try {
+            const s = await fetchSession(sid)
+            if (cancel) return
+            if (s.phase === 'clarifying' && Array.isArray(s.messages) && s.messages.length > 0) {
+              setApiSessionId(s.session_id)
+              setApiThread(normalizeApiThread(s.messages))
+              setFirstQ(s.dilemma)
+              setPhase('chat')
+              return
+            }
+            persistActiveSessionId(null)
+          } catch {
+            persistActiveSessionId(null)
+          }
+        }
+        setPhase('cabinet')
+      } catch {
+        if (!cancel) {
+          clearLocalAuth()
+          setPhase('phone')
+        }
+      } finally {
+        if (!cancel) setAuthBootstrapping(false)
+      }
+    })()
+    return () => {
+      cancel = true
+    }
+  }, [apiMode])
 
   useEffect(() => {
     if (phase !== 'analyze') return
@@ -186,6 +257,7 @@ function FlowPage() {
         setDraft('')
         const res = await replySession(apiSessionId, t)
         if ('done' in res && res.done && res.report) {
+          persistActiveSessionId(null)
           setApiReport(res.report as Record<string, unknown>)
           setPhase('analyze')
           window.setTimeout(() => setPhase('report'), 2200)
@@ -249,6 +321,36 @@ function FlowPage() {
     setPhase('onb1')
   }
 
+  const goToNewQuestion = () => {
+    setFirstQ('')
+    setApiSessionId(null)
+    setApiThread([])
+    setApiReport(null)
+    setAnswers([])
+    setDraft('')
+    persistActiveSessionId(null)
+    setFlowError(null)
+    setPhase('onb4')
+  }
+
+  const handleLogout = () => {
+    clearLocalAuth()
+    setPhone('')
+    setEmail('')
+    setCode('')
+    setFirstQ('')
+    setApiSessionId(null)
+    setApiThread([])
+    setApiReport(null)
+    setCabinetData(null)
+    setMeProfile(null)
+    setAnswers([])
+    setDraft('')
+    setFlowError(null)
+    setCabinetTab('history')
+    setPhase('phone')
+  }
+
   const startChatFromOnboarding = async () => {
     const d = firstQ.trim()
     if (d.length < 8) return
@@ -258,6 +360,7 @@ function FlowPage() {
       try {
         const r = await startSession(d)
         setApiSessionId(r.session_id)
+        persistActiveSessionId(r.session_id)
         setApiThread([
           { role: 'user', content: d },
           { role: 'assistant', content: r.bot_message },
@@ -271,6 +374,28 @@ function FlowPage() {
       return
     }
     setPhase('chat')
+  }
+
+  if (authBootstrapping) {
+    return (
+      <div className="bg-background min-h-dvh">
+        <header className="border-border flex items-center justify-between border-b px-4 py-4 md:px-8">
+          <Link to="/" className="hover:text-accent transition-colors">
+            <Logo />
+          </Link>
+          <Link
+            to="/"
+            className="text-dim hover:text-foreground font-mono text-[13px] uppercase tracking-[0.08em]"
+          >
+            На лендинг
+          </Link>
+        </header>
+        <div className="text-muted flex min-h-[calc(100dvh-72px)] flex-col items-center justify-center gap-3 font-mono text-[13px] uppercase tracking-[0.08em]">
+          <span className="bg-accent inline-block h-2 w-2 animate-pulse rounded-full" />
+          Загрузка аккаунта…
+        </div>
+      </div>
+    )
   }
 
   return (
@@ -734,7 +859,10 @@ function FlowPage() {
               )}
               <button
                 type="button"
-                onClick={() => setPhase('cabinet')}
+                onClick={() => {
+                  persistActiveSessionId(null)
+                  setPhase('cabinet')
+                }}
                 className="ease-brand bg-accent text-background hover:bg-accent-hover rounded-[4px] px-5 py-3 font-medium transition-all duration-300"
               >
                 В кабинет
@@ -815,10 +943,24 @@ function FlowPage() {
                 >
                   Настройки
                 </button>
+                <button
+                  type="button"
+                  onClick={goToNewQuestion}
+                  className="text-accent hover:text-accent-hover mt-4 w-full rounded-[4px] px-3 py-2 text-left font-mono text-[13px] uppercase tracking-[0.08em] transition-colors"
+                >
+                  Новый вопрос
+                </button>
               </nav>
               <div className="mt-auto border-t border-border pt-4 text-sm text-muted">
                 <p>Ты</p>
-                <p className="text-dim text-xs">Подписка · Выход</p>
+                <p className="text-dim text-xs">Подписка</p>
+                <button
+                  type="button"
+                  onClick={handleLogout}
+                  className="text-muted hover:text-foreground mt-2 w-full text-left text-xs transition-colors"
+                >
+                  Выйти
+                </button>
               </div>
             </aside>
             <div className="flex-1 p-4 md:p-10">

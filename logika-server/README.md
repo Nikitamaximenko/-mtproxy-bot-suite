@@ -37,6 +37,7 @@ uvicorn app.main:app --reload --port 8000
 - `POST /v1/auth/verify` — `{ "phone", "code" }` **или** `{ "email", "code" }` → JWT
 - `POST /v1/sessions/start` — заголовок `Authorization: Bearer …`, тело `{ "dilemma": "…" }`
 - `POST /v1/sessions/{id}/reply` — `{ "text": "…" }`
+- `GET /v1/sessions/{id}` — полная сессия (диалог, фаза, отчёт) для владельца; для восстановления UI после перезагрузки
 - `GET /v1/sessions/{id}/pdf` — скачивание PDF
 - `GET /v1/me` — профиль (телефон, почта, имя) по JWT
 - `GET /v1/cabinet` — история сессий и агрегированная статистика для личного кабинета

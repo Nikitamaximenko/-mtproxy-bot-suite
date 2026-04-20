@@ -1,5 +1,23 @@
 const TOKEN_KEY = 'logika_access_token'
 
+/** UUID активной сессии чата — восстановление после перезагрузки страницы. */
+export const LOGIKA_ACTIVE_SESSION_KEY = 'logika_active_session_id'
+
+export function persistActiveSessionId(sessionId: string | null) {
+  try {
+    if (sessionId) localStorage.setItem(LOGIKA_ACTIVE_SESSION_KEY, sessionId)
+    else localStorage.removeItem(LOGIKA_ACTIVE_SESSION_KEY)
+  } catch {
+    /* ignore */
+  }
+}
+
+/** Выход: токен и привязка к черновику сессии. */
+export function clearLocalAuth() {
+  setToken(null)
+  persistActiveSessionId(null)
+}
+
 export function getApiBase(): string {
   const u = import.meta.env.VITE_LOGIKA_API_URL as string | undefined
   return (u || '').replace(/\/$/, '')
@@ -111,6 +129,19 @@ export async function replySession(sessionId: string, text: string) {
     | { bot_message: string; done: false }
     | { done: true; report: Record<string, unknown> }
   >(`/v1/sessions/${sessionId}/reply`, { method: 'POST', json: { text } })
+}
+
+export type SessionDetail = {
+  session_id: string
+  dilemma: string
+  messages: Array<{ role: string; content: string }>
+  phase: string
+  report: Record<string, unknown> | null
+  score: number | null
+}
+
+export async function fetchSession(sessionId: string): Promise<SessionDetail> {
+  return req<SessionDetail>(`/v1/sessions/${sessionId}`)
 }
 
 export type CabinetSession = {

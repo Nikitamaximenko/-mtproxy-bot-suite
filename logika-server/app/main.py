@@ -345,6 +345,25 @@ def create_app() -> FastAPI:
         db.commit()
         return {"done": True, "report": rep}
 
+    @app.get("/v1/sessions/{session_id}")
+    def get_session(
+        session_id: uuid.UUID,
+        db: Session = Depends(get_db),
+        user: LogikaUser = Depends(get_bearer_user),
+    ) -> dict[str, Any]:
+        """Полная сессия для восстановления UI после перезагрузки (черновик чата или отчёт)."""
+        sess = db.get(LogikaChatSession, session_id)
+        if sess is None or sess.user_id != user.id:
+            raise HTTPException(404, "Сессия не найдена")
+        return {
+            "session_id": str(sess.id),
+            "dilemma": sess.dilemma,
+            "messages": sess.messages or [],
+            "phase": sess.phase,
+            "report": sess.report,
+            "score": sess.score,
+        }
+
     @app.get("/v1/me")
     def get_me(user: LogikaUser = Depends(get_bearer_user)) -> dict[str, str | None]:
         return {
