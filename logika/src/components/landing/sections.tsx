@@ -16,17 +16,10 @@ export function Ticker() {
   const line = [...items, '——'].join(' · ')
   return (
     <div className="border-border relative mt-10 overflow-hidden border-t border-b py-3">
-      <div className="animate-marquee flex whitespace-nowrap font-mono text-[13px] uppercase tracking-[0.08em] text-muted">
+      <div className="animate-landing-marquee flex whitespace-nowrap font-mono text-[13px] uppercase tracking-[0.08em] text-muted">
         <span className="pr-16">{line}</span>
         <span className="pr-16">{line}</span>
       </div>
-      <style>{`
-        @keyframes marquee {
-          0% { transform: translateX(0); }
-          100% { transform: translateX(-50%); }
-        }
-        .animate-marquee { animation: marquee 32s linear infinite; }
-      `}</style>
     </div>
   )
 }

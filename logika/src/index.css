@@ -36,3 +36,23 @@
 .ease-brand {
   transition-timing-function: cubic-bezier(0.32, 0.72, 0, 1);
 }
+
+@keyframes landing-marquee {
+  0% {
+    transform: translateX(0);
+  }
+  100% {
+    transform: translateX(-50%);
+  }
+}
+
+.animate-landing-marquee {
+  animation: landing-marquee 32s linear infinite;
+  will-change: transform;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-landing-marquee {
+    animation: none;
+  }
+}

@@ -1,42 +1,96 @@
 import { motion } from 'framer-motion'
 import Lenis from 'lenis'
-import { useEffect, useRef } from 'react'
+import { lazy, Suspense, useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { Logo } from '../components/Logo'
 import { HeroFork } from '../components/landing/HeroFork'
-import {
-  FaqSection,
-  HowItWorksSection,
-  LawsSection,
-  QuotesSection,
-  ReviewsSection,
-  StatsSection,
-  TariffsSection,
-  Ticker,
-} from '../components/landing/sections'
+import { Ticker } from '../components/landing/sections'
+
+const LandingRest = lazy(() => import('./LandingRest'))
 
 const ease = [0.32, 0.72, 0, 1] as const
 
 /** Подгружает чанк потока до клика — быстрее переход с лендинга. */
 function prefetchPotokChunk() {
-  void import('../pages/FlowPage')
+  void import('./FlowPage')
+}
+
+function BelowFoldSkeleton() {
+  return (
+    <div className="bg-background" aria-hidden>
+      {[0, 1, 2, 3].map((i) => (
+        <div
+          key={i}
+          className="border-border/40 mx-auto max-w-[1280px] animate-pulse border-b px-4 py-16 md:px-6 md:py-24"
+        >
+          <div className="bg-border/30 h-8 max-w-md rounded" />
+          <div className="bg-border/20 mt-8 h-48 rounded-[12px]" />
+          <div className="bg-border/15 mt-6 h-32 rounded-[12px]" />
+        </div>
+      ))}
+    </div>
+  )
 }
 
 export function LandingPage() {
   const lenisRef = useRef<InstanceType<typeof Lenis> | null>(null)
+  const [deferBelowFold, setDeferBelowFold] = useState(false)
 
+  /** Нижний блок — отдельный чанк, после первой отрисовки / простоя main thread. */
   useEffect(() => {
-    const lenis = new Lenis({ duration: 1.1, smoothWheel: true })
-    lenisRef.current = lenis
+    let cancelled = false
+    const start = () => {
+      if (!cancelled) setDeferBelowFold(true)
+    }
+    if (typeof requestIdleCallback !== 'undefined') {
+      const id = requestIdleCallback(start, { timeout: 450 })
+      return () => {
+        cancelled = true
+        cancelIdleCallback(id)
+      }
+    }
+    const t = window.setTimeout(start, 120)
+    return () => {
+      cancelled = true
+      window.clearTimeout(t)
+    }
+  }, [])
+
+  /** Lenis не конкурирует с первым кадром героя и парсингом JS. */
+  useEffect(() => {
+    let lenis: InstanceType<typeof Lenis> | null = null
     let raf = 0
-    const tick = (time: number) => {
-      lenis.raf(time)
+    let cancelled = false
+    let usedIdle = false
+    let scheduleId = 0
+
+    const startLenis = () => {
+      if (cancelled) return
+      lenis = new Lenis({ duration: 1.15, smoothWheel: true })
+      lenisRef.current = lenis
+      const tick = (time: number) => {
+        lenis?.raf(time)
+        raf = requestAnimationFrame(tick)
+      }
       raf = requestAnimationFrame(tick)
     }
-    raf = requestAnimationFrame(tick)
+
+    if (typeof requestIdleCallback !== 'undefined') {
+      usedIdle = true
+      scheduleId = requestIdleCallback(startLenis, { timeout: 900 })
+    } else {
+      scheduleId = window.setTimeout(startLenis, 280) as unknown as number
+    }
+
     return () => {
+      cancelled = true
       cancelAnimationFrame(raf)
-      lenis.destroy()
+      if (usedIdle) {
+        cancelIdleCallback(scheduleId)
+      } else {
+        window.clearTimeout(scheduleId)
+      }
+      lenis?.destroy()
       lenisRef.current = null
     }
   }, [])
@@ -143,43 +197,13 @@ export function LandingPage() {
         </div>
       </section>
 
-      <StatsSection />
-
-      <LawsSection />
-
-      <HowItWorksSection />
-
-      <QuotesSection />
-
-      <section id="tariffs">
-        <TariffsSection />
-      </section>
-
-      <FaqSection />
-
-      <ReviewsSection />
-
-      <section className="flex min-h-[70dvh] flex-col items-center justify-center px-4 py-[120px] text-center md:py-[200px]">
-        <motion.h2
-          initial={{ opacity: 0, y: 20 }}
-          whileInView={{ opacity: 1, y: 0 }}
-          viewport={{ once: true }}
-          transition={{ duration: 0.6, ease }}
-          className="max-w-[900px] text-[clamp(2.5rem,8vw,5.5rem)] font-medium leading-[0.95] tracking-[-0.04em]"
-        >
-          Хватит думать,
-          <br />
-          что ты думаешь.
-        </motion.h2>
-        <Link
-          to="/potok"
-          onMouseEnter={prefetchPotokChunk}
-          className="ease-brand bg-accent text-background hover:bg-accent-hover mt-12 inline-flex items-center rounded-[4px] px-8 py-3 font-medium transition-all duration-300"
-        >
-          Задать первый вопрос
-          <span className="ml-2">→</span>
-        </Link>
-      </section>
+      {deferBelowFold ? (
+        <Suspense fallback={<BelowFoldSkeleton />}>
+          <LandingRest />
+        </Suspense>
+      ) : (
+        <BelowFoldSkeleton />
+      )}
 
       <footer className="border-border border-t py-12">
         <div className="mx-auto flex max-w-[1280px] flex-col items-start justify-between gap-8 px-4 md:flex-row md:items-center md:px-6">
