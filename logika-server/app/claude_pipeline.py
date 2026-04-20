@@ -135,12 +135,15 @@ async def next_clarifying_question(
     settings: Settings,
     dilemma: str,
     prior_messages: list[dict[str, str]],
+    *,
+    clarify_index: int,
+    clarify_total: int,
 ) -> str:
     if not settings.anthropic_api_key:
         if settings.anthropic_allow_demo_without_key:
-            n = len([m for m in prior_messages if m.get("role") == "assistant"])
             return (
-                f"[Демо без ключа API] Вопрос {n + 1}: что для тебя важнее — ясность или одобрение?"
+                f"[Демо без ключа API] Уточнение {clarify_index}/{clarify_total}: "
+                "что для тебя важнее — ясность или одобрение?"
             )
         raise RuntimeError(
             "На сервере не задан ANTHROPIC_API_KEY (Railway → Variables сервиса с logika-server). "
@@ -152,6 +155,18 @@ async def next_clarifying_question(
     ]
     for m in prior_messages:
         api_messages.append({"role": m["role"], "content": m["content"]})
+
+    idx = max(1, min(clarify_index, clarify_total))
+    meta_lines = [
+        f"Служебно: сейчас нужен уточняющий вопрос №{idx} из {clarify_total} в этой сессии.",
+        "Сформулируй ровно один короткий вопрос на «ты», без вступлений и без итогов.",
+    ]
+    if idx > 1:
+        meta_lines.append(
+            "Пользователь уже ответил на предыдущие уточнения — не используй формулировки "
+            "«первый вопрос», «для начала», «начнём», «вот первый вопрос»; продолжай углубление по фактам диалога."
+        )
+    api_messages.append({"role": "user", "content": "\n".join(meta_lines)})
 
     client = get_async_anthropic(settings.anthropic_api_key)
     resp = await client.messages.create(

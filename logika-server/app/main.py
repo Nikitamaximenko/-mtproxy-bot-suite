@@ -292,7 +292,13 @@ def create_app() -> FastAPI:
         db.commit()
         db.refresh(sess)
         try:
-            q1 = await next_clarifying_question(settings, sess.dilemma, [])
+            q1 = await next_clarifying_question(
+                settings,
+                sess.dilemma,
+                [],
+                clarify_index=1,
+                clarify_total=settings.questions_count,
+            )
         except Exception as e:
             logger.exception("Claude Q1")
             db.delete(sess)
@@ -322,7 +328,13 @@ def create_app() -> FastAPI:
 
         if n_user < settings.questions_count:
             try:
-                nxt = await next_clarifying_question(settings, sess.dilemma, msgs)
+                nxt = await next_clarifying_question(
+                    settings,
+                    sess.dilemma,
+                    msgs,
+                    clarify_index=n_user + 1,
+                    clarify_total=settings.questions_count,
+                )
             except Exception as e:
                 logger.exception("Claude Qn")
                 raise HTTPException(502, str(e)) from e

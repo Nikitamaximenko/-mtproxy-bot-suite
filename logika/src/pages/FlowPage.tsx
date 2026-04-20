@@ -127,6 +127,8 @@ function FlowPage() {
   /** Просмотр отчёта из кабинета — без анимации счёта и без paywall */
   const [reportFromHistory, setReportFromHistory] = useState(false)
   const [reportDocumentDate, setReportDocumentDate] = useState<string | null>(null)
+  /** Новый вопрос из кабинета — другие заголовки на шаге ввода дилеммы */
+  const [entryFromCabinetNewQuestion, setEntryFromCabinetNewQuestion] = useState(false)
   const [apiSessionId, setApiSessionId] = useState<string | null>(null)
   const [apiThread, setApiThread] = useState<Array<{ role: 'user' | 'assistant'; content: string }>>([])
   const [apiReport, setApiReport] = useState<Record<string, unknown> | null>(null)
@@ -340,6 +342,7 @@ function FlowPage() {
         } else {
           await verifyCode({ email: email.trim(), code })
         }
+        setEntryFromCabinetNewQuestion(false)
         setPhase('onb1')
       } catch (e) {
         setFlowError(e instanceof Error ? e.message : 'Неверный код')
@@ -348,6 +351,7 @@ function FlowPage() {
       }
       return
     }
+    setEntryFromCabinetNewQuestion(false)
     setPhase('onb1')
   }
 
@@ -362,6 +366,7 @@ function FlowPage() {
     setFlowError(null)
     setReportFromHistory(false)
     setReportDocumentDate(null)
+    setEntryFromCabinetNewQuestion(true)
     setPhase('onb4')
   }
 
@@ -380,6 +385,7 @@ function FlowPage() {
     setDraft('')
     setFlowError(null)
     setCabinetTab('history')
+    setEntryFromCabinetNewQuestion(false)
     setPhase('phone')
   }
 
@@ -421,6 +427,7 @@ function FlowPage() {
           { role: 'user', content: d },
           { role: 'assistant', content: r.bot_message },
         ])
+        setEntryFromCabinetNewQuestion(false)
         setPhase('chat')
       } catch (e) {
         setFlowError(e instanceof Error ? e.message : 'Не удалось начать сессию')
@@ -429,6 +436,7 @@ function FlowPage() {
       }
       return
     }
+    setEntryFromCabinetNewQuestion(false)
     setPhase('chat')
   }
 
@@ -658,9 +666,13 @@ function FlowPage() {
                 )}
                 {phase === 'onb4' && (
                   <div>
-                    <h2 className="text-3xl font-medium tracking-[-0.02em] md:text-4xl">Твой первый вопрос</h2>
+                    <h2 className="text-3xl font-medium tracking-[-0.02em] md:text-4xl">
+                      {entryFromCabinetNewQuestion ? 'Новая дилемма' : 'Сформулируй дилемму'}
+                    </h2>
                     <p className="text-muted mt-4 text-lg">
-                      Опиши дилемму. Как другу. Без самоцензуры. Чем честнее — тем точнее анализ.
+                      {entryFromCabinetNewQuestion
+                        ? 'Опиши новую ситуацию так же честно, как в прошлый раз — чем конкретнее формулировка, тем точнее разбор.'
+                        : 'Опиши дилемму. Как другу. Без самоцензуры. Чем честнее — тем точнее анализ.'}
                     </p>
                     <textarea
                       value={firstQ}
@@ -698,7 +710,7 @@ function FlowPage() {
             <div className="mb-4">
               <div className="text-dim flex items-center justify-between font-mono text-[13px] uppercase tracking-[0.08em]">
                 <span>
-                  Вопрос{' '}
+                  Уточнение{' '}
                   {apiMode
                     ? Math.min(
                         apiThread.filter((m) => m.role === 'assistant').length,

@@ -1,6 +1,6 @@
 import { motion } from 'framer-motion'
 import Lenis from 'lenis'
-import { useEffect } from 'react'
+import { useEffect, useRef } from 'react'
 import { Link } from 'react-router-dom'
 import { Logo } from '../components/Logo'
 import { HeroFork } from '../components/landing/HeroFork'
@@ -23,8 +23,11 @@ function prefetchPotokChunk() {
 }
 
 export function LandingPage() {
+  const lenisRef = useRef<InstanceType<typeof Lenis> | null>(null)
+
   useEffect(() => {
     const lenis = new Lenis({ duration: 1.1, smoothWheel: true })
+    lenisRef.current = lenis
     let raf = 0
     const tick = (time: number) => {
       lenis.raf(time)
@@ -34,8 +37,20 @@ export function LandingPage() {
     return () => {
       cancelAnimationFrame(raf)
       lenis.destroy()
+      lenisRef.current = null
     }
   }, [])
+
+  const scrollToSection = (hash: string, e: React.MouseEvent<HTMLAnchorElement>) => {
+    e.preventDefault()
+    const el = document.querySelector(hash) as HTMLElement | null
+    const lenis = lenisRef.current
+    if (lenis && el) {
+      lenis.scrollTo(el, { offset: -88 })
+    } else if (el) {
+      el.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    }
+  }
 
   return (
     <div className="bg-background min-h-dvh">
@@ -45,10 +60,18 @@ export function LandingPage() {
             <Logo />
           </Link>
           <nav className="text-muted flex items-center gap-4 font-mono text-[11px] uppercase tracking-[0.08em] sm:gap-8 sm:text-[13px] md:gap-8">
-            <a href="#product" className="hover:text-foreground transition-colors duration-300">
+            <a
+              href="#product"
+              className="hover:text-foreground transition-colors duration-300"
+              onClick={(e) => scrollToSection('#product', e)}
+            >
               Продукт
             </a>
-            <a href="#tariffs" className="hidden hover:text-foreground transition-colors duration-300 sm:inline">
+            <a
+              href="#tariffs"
+              className="hidden hover:text-foreground transition-colors duration-300 sm:inline"
+              onClick={(e) => scrollToSection('#tariffs', e)}
+            >
               Тарифы
             </a>
             <Link

@@ -56,7 +56,9 @@ async def main() -> int:
 
     print("\n=== 2) Первый уточняющий вопрос (Sonnet) ===")
     t0 = time.perf_counter()
-    q1 = await next_clarifying_question(s, dilemma, [])
+    q1 = await next_clarifying_question(
+        s, dilemma, [], clarify_index=1, clarify_total=s.questions_count
+    )
     print(f"    {q1[:600]}{'…' if len(q1) > 600 else ''}")
     print(f"    ({time.perf_counter() - t0:.1f}s)")
 
