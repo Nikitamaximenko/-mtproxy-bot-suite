@@ -5,8 +5,8 @@ import { Link } from 'react-router-dom'
 import { Logo } from '../components/Logo'
 import { HeroFork } from '../components/landing/HeroFork'
 import {
+  ArgumentMap,
   FaqSection,
-  HowItWorksSection,
   LawsSection,
   QuotesSection,
   ReviewsSection,
@@ -68,11 +68,19 @@ export function LandingPage() {
         </div>
         <div className="relative mx-auto grid max-w-[1280px] grid-cols-12 gap-6 px-4 pb-24 pt-12 md:px-6 md:pt-20">
           <div className="col-span-12">
+            <motion.p
+              initial={{ opacity: 0, y: 12 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.5, ease }}
+              className="text-accent font-mono text-[13px] uppercase tracking-[0.12em]"
+            >
+              Внешний рациональный контур
+            </motion.p>
             <motion.h1
               initial={{ opacity: 0, y: 24 }}
               animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.7, ease }}
-              className="max-w-[980px] text-[clamp(2.75rem,10vw,8rem)] font-medium leading-[0.95] tracking-[-0.04em]"
+              transition={{ duration: 0.7, delay: 0.05, ease }}
+              className="mt-5 max-w-[980px] text-[clamp(2.75rem,10vw,8rem)] font-medium leading-[0.95] tracking-[-0.04em]"
             >
               Ты думаешь,
               <br />
@@ -81,27 +89,28 @@ export function LandingPage() {
             <motion.p
               initial={{ opacity: 0, y: 16 }}
               animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.6, delay: 0.12, ease }}
-              className="text-muted mt-8 max-w-xl text-lg leading-relaxed md:text-xl"
+              transition={{ duration: 0.6, delay: 0.14, ease }}
+              className="text-muted mt-8 max-w-[640px] text-lg leading-relaxed md:text-xl"
             >
-              ИИ, обученный на сотне книг по логике. Он покажет, насколько твоё решение — действительно
-              твоё.
+              Логика — не чат с ИИ. Это зеркало твоего рассуждения:
+              разбирает ответ по четырём законам, находит противоречия,
+              называет искажения и отдаёт отчёт, за который не стыдно перед собой.
             </motion.p>
             <motion.div
               initial={{ opacity: 0, y: 12 }}
               animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.55, delay: 0.2, ease }}
+              transition={{ duration: 0.55, delay: 0.22, ease }}
               className="mt-12 flex flex-col gap-4 sm:flex-row sm:items-center"
             >
               <Link
                 to="/potok"
                 className="ease-brand bg-accent text-background hover:bg-accent-hover inline-flex items-center justify-center rounded-[4px] px-6 py-3 font-medium shadow-[0_0_32px_rgba(196,245,66,0.22)] transition-all duration-300"
               >
-                Задать первый вопрос
+                Разобрать первое решение
                 <span className="ml-2">→</span>
               </Link>
               <span className="text-dim font-mono text-[13px] uppercase tracking-[0.08em]">
-                бесплатно, без карты
+                бесплатно · без карты · 4 минуты
               </span>
             </motion.div>
             <Ticker />
@@ -113,7 +122,7 @@ export function LandingPage() {
 
       <LawsSection />
 
-      <HowItWorksSection />
+      <ArgumentMap />
 
       <QuotesSection />
 
@@ -126,17 +135,30 @@ export function LandingPage() {
       <ReviewsSection />
 
       <section className="flex min-h-[70dvh] flex-col items-center justify-center px-4 py-[120px] text-center md:py-[200px]">
+        <motion.p
+          initial={{ opacity: 0, y: 12 }}
+          whileInView={{ opacity: 1, y: 0 }}
+          viewport={{ once: true }}
+          transition={{ duration: 0.5, ease }}
+          className="text-dim font-mono text-[13px] uppercase tracking-[0.12em]"
+        >
+          Одно решение. Сегодня.
+        </motion.p>
         <motion.h2
           initial={{ opacity: 0, y: 20 }}
           whileInView={{ opacity: 1, y: 0 }}
           viewport={{ once: true }}
           transition={{ duration: 0.6, ease }}
-          className="max-w-[900px] text-[clamp(2.5rem,8vw,5.5rem)] font-medium leading-[0.95] tracking-[-0.04em]"
+          className="mt-6 max-w-[900px] text-[clamp(2.5rem,8vw,5.5rem)] font-medium leading-[0.95] tracking-[-0.04em]"
         >
           Хватит думать,
           <br />
           что ты думаешь.
         </motion.h2>
+        <p className="text-muted mt-8 max-w-[540px] text-lg leading-relaxed">
+          Назови дилемму, которую ты носишь в голове дольше недели.
+          Через четыре минуты — структурированный ответ, который ты сам себе не собрал.
+        </p>
         <Link
           to="/potok"
           className="ease-brand bg-accent text-background hover:bg-accent-hover mt-12 inline-flex items-center rounded-[4px] px-8 py-3 font-medium transition-all duration-300"
@@ -144,6 +166,9 @@ export function LandingPage() {
           Задать первый вопрос
           <span className="ml-2">→</span>
         </Link>
+        <span className="text-dim mt-6 font-mono text-[13px] uppercase tracking-[0.08em]">
+          займёт 4 минуты · отчёт останется с тобой
+        </span>
       </section>
 
       <footer className="border-border border-t py-12">
