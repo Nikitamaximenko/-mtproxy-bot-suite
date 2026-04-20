@@ -131,6 +131,13 @@ def create_app() -> FastAPI:
             bool(s.anthropic_api_key),
             s.anthropic_allow_demo_without_key,
         )
+        logger.info(
+            "LLM perf: fast_analysis=%s effective_router=%s effective_self_critique=%s questions_model=%s",
+            s.fast_analysis,
+            s.enable_router and not s.fast_analysis,
+            s.enable_self_critique and not s.fast_analysis,
+            s.anthropic_model_questions,
+        )
 
     @app.get("/health")
     def health() -> dict[str, str]:

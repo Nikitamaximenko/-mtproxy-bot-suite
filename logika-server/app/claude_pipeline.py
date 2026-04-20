@@ -1,7 +1,8 @@
-"""Каскад: Haiku (роутер) → Opus 4.7 (вопросы) → Opus (анализ + JSON) → Opus (self-critique). Модели — см. Settings."""
+"""Каскад: Haiku (роутер) → Sonnet/Opus (вопросы) → Opus (анализ + JSON) → Opus (self-critique). Модели — см. Settings."""
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import re
@@ -9,6 +10,7 @@ from typing import Any
 
 from anthropic import AsyncAnthropic
 
+from app.anthropic_client import get_async_anthropic
 from app.config import Settings
 from app.data.quotes_corpus import retrieve_quotes_for_context
 from app.prompts.master import (
@@ -23,6 +25,38 @@ from app.prompts.master import SAFETY_AND_SCOPE as _SAFE
 from app.schemas.report import AnalysisReport, SelfCritiqueResult, analysis_json_schema, critique_json_schema
 
 logger = logging.getLogger(__name__)
+
+
+def _use_router(s: Settings) -> bool:
+    return s.enable_router and not s.fast_analysis
+
+
+def _use_self_critique(s: Settings) -> bool:
+    return s.enable_self_critique and not s.fast_analysis
+
+
+def _analysis_thinking(s: Settings) -> bool:
+    if s.fast_analysis:
+        return False
+    return s.anthropic_analysis_thinking
+
+
+def _critique_thinking(s: Settings) -> bool:
+    if s.fast_analysis:
+        return False
+    return s.anthropic_critique_thinking
+
+
+def _resolved_effort(s: Settings) -> str:
+    if s.fast_analysis:
+        return "medium"
+    return s.opus_effort
+
+
+def _analysis_max_tokens(s: Settings) -> int:
+    if s.fast_analysis:
+        return min(s.anthropic_analysis_max_tokens, 8192)
+    return s.anthropic_analysis_max_tokens
 
 
 def _text_blocks(resp: Any) -> str:
@@ -77,9 +111,9 @@ async def _messages_create(
 
 async def route_intent(settings: Settings, dilemma: str) -> dict[str, Any]:
     """Дешёвый фильтр: категория + можно ли тратить дорогой анализ."""
-    if not settings.anthropic_api_key or not settings.enable_router:
+    if not settings.anthropic_api_key or not _use_router(settings):
         return {"actionable": True, "category": "unknown", "note": "router off"}
-    client = AsyncAnthropic(api_key=settings.anthropic_api_key)
+    client = get_async_anthropic(settings.anthropic_api_key)
     user = f"""Дилемма пользователя (одним абзацем):
 {dilemma}
 
@@ -119,7 +153,7 @@ async def next_clarifying_question(
     for m in prior_messages:
         api_messages.append({"role": m["role"], "content": m["content"]})
 
-    client = AsyncAnthropic(api_key=settings.anthropic_api_key)
+    client = get_async_anthropic(settings.anthropic_api_key)
     resp = await client.messages.create(
         model=settings.anthropic_model_questions,
         max_tokens=500,
@@ -149,12 +183,16 @@ async def analyze_session(
         lines.append(f"{who}: {c}")
     transcript_text = "\n".join(lines)
 
-    await route_intent(settings, dilemma)
+    async def _quotes_block() -> str:
+        return await asyncio.to_thread(retrieve_quotes_for_context, dilemma, "", 8)
 
-    quotes_block = retrieve_quotes_for_context(dilemma, verdict_keywords="", k=8)
+    quotes_block, _route_meta = await asyncio.gather(
+        _quotes_block(),
+        route_intent(settings, dilemma),
+    )
     user_1 = user_payload_analysis(dilemma, transcript_text, quotes_block)
 
-    client = AsyncAnthropic(api_key=settings.anthropic_api_key)
+    client = get_async_anthropic(settings.anthropic_api_key)
     schema = analysis_json_schema()
 
     resp1 = await _messages_create(
@@ -162,10 +200,10 @@ async def analyze_session(
         model=settings.anthropic_model_analysis,
         system=cached_system_blocks(),
         user=user_1,
-        max_tokens=12000,
-        thinking=True,
+        max_tokens=_analysis_max_tokens(settings),
+        thinking=_analysis_thinking(settings),
         output_json_schema=schema,
-        effort=settings.opus_effort,
+        effort=_resolved_effort(settings),
     )
     raw1 = _text_blocks(resp1)
     try:
@@ -174,12 +212,13 @@ async def analyze_session(
         draft = AnalysisReport.model_validate(_parse_json_loose(raw1))
     draft_dict = draft.model_dump()
 
-    if not settings.enable_self_critique:
+    if not _use_self_critique(settings):
         out = draft_dict
         out["prompt_version"] = PROMPT_VERSION
         out["models"] = {
             "questions": settings.anthropic_model_questions,
             "analysis": settings.anthropic_model_analysis,
+            "fast_analysis": settings.fast_analysis,
         }
         return out
 
@@ -201,10 +240,10 @@ async def analyze_session(
             }
         ],
         user=user_2,
-        max_tokens=12000,
-        thinking=True,
+        max_tokens=_analysis_max_tokens(settings),
+        thinking=_critique_thinking(settings),
         output_json_schema=crit_schema,
-        effort=settings.opus_effort,
+        effort=_resolved_effort(settings),
     )
     raw2 = _text_blocks(resp2)
     try:
@@ -224,6 +263,7 @@ async def analyze_session(
         "questions": settings.anthropic_model_questions,
         "analysis": settings.anthropic_model_analysis,
         "critique": settings.anthropic_model_critique,
+        "fast_analysis": settings.fast_analysis,
     }
     return final
 

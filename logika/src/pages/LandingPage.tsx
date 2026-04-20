@@ -17,6 +17,11 @@ import {
 
 const ease = [0.32, 0.72, 0, 1] as const
 
+/** Подгружает чанк потока до клика — быстрее переход с лендинга. */
+function prefetchPotokChunk() {
+  void import('../pages/FlowPage')
+}
+
 export function LandingPage() {
   useEffect(() => {
     const lenis = new Lenis({ duration: 1.1, smoothWheel: true })
@@ -46,12 +51,17 @@ export function LandingPage() {
             <a href="#tariffs" className="hover:text-foreground transition-colors duration-300">
               Тарифы
             </a>
-            <Link to="/potok" className="hover:text-foreground transition-colors duration-300">
+            <Link
+              to="/potok"
+              onMouseEnter={prefetchPotokChunk}
+              className="hover:text-foreground transition-colors duration-300"
+            >
               Войти
             </Link>
           </nav>
           <Link
             to="/potok"
+            onMouseEnter={prefetchPotokChunk}
             className="ease-brand bg-accent text-background hover:bg-accent-hover rounded-[4px] px-4 py-2 text-sm font-medium shadow-[0_0_24px_rgba(196,245,66,0.18)] transition-all duration-300"
           >
             Задать вопрос
@@ -95,6 +105,7 @@ export function LandingPage() {
             >
               <Link
                 to="/potok"
+                onMouseEnter={prefetchPotokChunk}
                 className="ease-brand bg-accent text-background hover:bg-accent-hover inline-flex items-center justify-center rounded-[4px] px-6 py-3 font-medium shadow-[0_0_32px_rgba(196,245,66,0.22)] transition-all duration-300"
               >
                 Задать первый вопрос
@@ -139,6 +150,7 @@ export function LandingPage() {
         </motion.h2>
         <Link
           to="/potok"
+          onMouseEnter={prefetchPotokChunk}
           className="ease-brand bg-accent text-background hover:bg-accent-hover mt-12 inline-flex items-center rounded-[4px] px-8 py-3 font-medium transition-all duration-300"
         >
           Задать первый вопрос

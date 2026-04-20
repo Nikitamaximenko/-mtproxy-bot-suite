@@ -40,14 +40,21 @@ class Settings(BaseSettings):
 
     # Каскад: переопредели под актуальные id в Anthropic Console
     anthropic_model_router: str = "claude-haiku-4-5-20251001"
-    # Уточняющие вопросы: по запросу — тот же Opus 4.7, что и отчёт (дороже Sonnet).
-    anthropic_model_questions: str = "claude-opus-4-7"
+    # Уточняющие вопросы: по умолчанию Sonnet (быстрее Opus); для максимальной глубины задай Opus в env.
+    anthropic_model_questions: str = "claude-sonnet-4-5-20250929"
     anthropic_model_analysis: str = "claude-opus-4-7"
     anthropic_model_critique: str = "claude-opus-4-7"
     opus_effort: str = "high"  # low|medium|high|xhigh|max — усилие рассуждения (structured output)
+    # Макс. токены ответа анализа (ниже — чуть быстрее и дешевле).
+    anthropic_analysis_max_tokens: int = 12000
+    # Adaptive thinking для structured JSON (дорого по времени). FAST_ANALYSIS отключает.
+    anthropic_analysis_thinking: bool = True
+    anthropic_critique_thinking: bool = True
 
     enable_router: bool = True
     enable_self_critique: bool = True
+    # Один флаг: Sonnet-вопросы берутся из env; router/critique/thinking выключаются; effort ниже.
+    fast_analysis: bool = False
 
     questions_count: int = 5
 

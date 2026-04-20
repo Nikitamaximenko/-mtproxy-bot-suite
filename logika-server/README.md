@@ -12,6 +12,14 @@
 
 Версия методологии: `app/prompts/master.py` → `PROMPT_VERSION`.
 
+## Производительность LLM
+
+- Уточняющие вопросы по умолчанию идут в **Sonnet** (`ANTHROPIC_MODEL_QUESTIONS`), итоговый отчёт — **Opus** с structured output и (если не отключено) adaptive thinking.
+- **`FAST_ANALYSIS=true`** (Railway Variables): отключает роутер Haiku, второй проход self-critique и adaptive thinking на анализе; effort снижается до `medium`; лимит токенов анализа не выше 8192. Для максимального качества оставь `FAST_ANALYSIS=false`, при необходимости задай `ANTHROPIC_MODEL_QUESTIONS=claude-opus-4-7` и `ENABLE_SELF_CRITIQUE=true`.
+- **`ANTHROPIC_ANALYSIS_THINKING`** / **`ANTHROPIC_CRITIQUE_THINKING`** — точечное отключение thinking без полного fast-режима.
+- Цитаты и вызов роутера (если включён) выполняются **параллельно** (`asyncio.gather`), клиент Anthropic **переиспользуется** в процессе.
+- Потоковая отдача ответов (SSE) в API **не реализована** — при появлении метрик латентности можно вынести в отдельную задачу.
+
 ## Локальный запуск
 
 ```bash
@@ -54,6 +62,13 @@ uvicorn app.main:app --reload --port 8000
 | `ANTHROPIC_API_KEY` | Ключ [Anthropic Console](https://console.anthropic.com/) — **обязателен** для Sonnet/Opus; без него раньше включался демо-режим в чате. |
 | `ANTHROPIC_ALLOW_DEMO_WITHOUT_KEY` | Только локалка: `true` = шаблон без Claude. На **production не задавай** (по умолчанию `false`). |
 | `ANTHROPIC_MODEL` | По умолчанию `claude-opus-4-7` |
+| `ANTHROPIC_MODEL_QUESTIONS` | По умолчанию Sonnet — см. раздел «Производительность LLM». |
+| `ANTHROPIC_ANALYSIS_MAX_TOKENS` | Лимит ответа анализа (по умолчанию `12000`). |
+| `ANTHROPIC_ANALYSIS_THINKING` | `true`/`false` — adaptive thinking у первого Opus (JSON-отчёт). |
+| `ANTHROPIC_CRITIQUE_THINKING` | `true`/`false` — thinking у шага self-critique. |
+| `FAST_ANALYSIS` | `true` — быстрый пресет (см. «Производительность LLM»). |
+| `ENABLE_ROUTER` | `false` — не вызывать Haiku до анализа. |
+| `ENABLE_SELF_CRITIQUE` | `false` — один проход Opus без второго «ревизора». |
 | `PUBLIC_API_URL` | Публичный URL этого сервиса (опционально для ссылок) |
 
 4. Deploy: Nixpacks подхватит `requirements.txt` и `Procfile`.
