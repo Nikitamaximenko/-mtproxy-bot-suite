@@ -24,6 +24,11 @@ cd logika && pnpm dev
 cd logika && pnpm build
 ```
 
+## Деплой на Vercel
+
+1. Создай проект, **Root Directory** = `logika`, пресет **Vite** (или Static: `pnpm install`, `pnpm build`, выходная папка `dist`).
+2. Файл `vercel.json` отдаёт `index.html` для клиентских маршрутов (например прямой заход на `/potok`). Статические файлы из `public/` (`design-system.html`, `pdf-preview.html`) обслуживаются как обычно.
+
 ## Стек
 
 Vite, React 19, TypeScript, Tailwind CSS v4, Framer Motion, Lenis, lucide-react (в React-части), Recharts в кабинете (статистика).

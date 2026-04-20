@@ -45,7 +45,7 @@ const analyzeLines = [
 
 const ease = [0.32, 0.72, 0, 1] as const
 
-export function FlowPage() {
+function FlowPage() {
   const [phase, setPhase] = useState<Phase>('phone')
   const [phone, setPhone] = useState('')
   const [code, setCode] = useState('')
@@ -656,3 +656,5 @@ function Bubble({ role, text }: { role: 'user' | 'bot'; text: string }) {
     </div>
   )
 }
+
+export default FlowPage
