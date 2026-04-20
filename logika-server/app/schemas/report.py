@@ -2,9 +2,34 @@
 
 from __future__ import annotations
 
-from typing import Literal
+import copy
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
+
+
+def _anthropic_strict_object_schema(schema: dict[str, Any]) -> dict[str, Any]:
+    """Anthropic structured output: objects need additionalProperties: false; integers cannot use min/max."""
+
+    def walk(node: Any) -> None:
+        if isinstance(node, dict):
+            if node.get("type") == "object":
+                node["additionalProperties"] = False
+            if node.get("type") == "integer":
+                node.pop("minimum", None)
+                node.pop("maximum", None)
+            if node.get("type") == "array":
+                node.pop("minItems", None)
+                node.pop("maxItems", None)
+            for v in node.values():
+                walk(v)
+        elif isinstance(node, list):
+            for x in node:
+                walk(x)
+
+    out = copy.deepcopy(schema)
+    walk(out)
+    return out
 
 
 class LawItem(BaseModel):
@@ -56,8 +81,8 @@ class SelfCritiqueResult(BaseModel):
 
 
 def analysis_json_schema() -> dict:
-    return AnalysisReport.model_json_schema()
+    return _anthropic_strict_object_schema(AnalysisReport.model_json_schema())
 
 
 def critique_json_schema() -> dict:
-    return SelfCritiqueResult.model_json_schema()
+    return _anthropic_strict_object_schema(SelfCritiqueResult.model_json_schema())
