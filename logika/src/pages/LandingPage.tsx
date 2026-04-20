@@ -44,11 +44,11 @@ export function LandingPage() {
           <Link to="/" className="hover:text-accent transition-colors duration-300">
             <Logo />
           </Link>
-          <nav className="text-muted hidden items-center gap-8 font-mono text-[13px] uppercase tracking-[0.08em] md:flex">
+          <nav className="text-muted flex items-center gap-4 font-mono text-[11px] uppercase tracking-[0.08em] sm:gap-8 sm:text-[13px] md:gap-8">
             <a href="#product" className="hover:text-foreground transition-colors duration-300">
               Продукт
             </a>
-            <a href="#tariffs" className="hover:text-foreground transition-colors duration-300">
+            <a href="#tariffs" className="hidden hover:text-foreground transition-colors duration-300 sm:inline">
               Тарифы
             </a>
             <Link
@@ -56,13 +56,13 @@ export function LandingPage() {
               onMouseEnter={prefetchPotokChunk}
               className="hover:text-foreground transition-colors duration-300"
             >
-              Войти
+              Кабинет
             </Link>
           </nav>
           <Link
             to="/potok"
             onMouseEnter={prefetchPotokChunk}
-            className="ease-brand bg-accent text-background hover:bg-accent-hover rounded-[4px] px-4 py-2 text-sm font-medium shadow-[0_0_24px_rgba(196,245,66,0.18)] transition-all duration-300"
+            className="ease-brand bg-accent text-background hover:bg-accent-hover rounded-[4px] px-3 py-2 text-sm font-medium shadow-[0_0_24px_rgba(196,245,66,0.18)] transition-all duration-300 sm:px-4"
           >
             Задать вопрос
           </Link>
@@ -174,6 +174,13 @@ export function LandingPage() {
             <a href="#" className="hover:text-foreground transition-colors duration-300">
               Telegram
             </a>
+            <Link
+              to="/potok"
+              onMouseEnter={prefetchPotokChunk}
+              className="hover:text-foreground transition-colors duration-300"
+            >
+              Личный кабинет
+            </Link>
           </div>
           <div className="flex items-center gap-4 text-sm text-dim">
             <span>© {new Date().getFullYear()} Логика</span>

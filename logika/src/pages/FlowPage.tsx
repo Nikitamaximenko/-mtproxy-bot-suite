@@ -16,6 +16,7 @@ import {
   getToken,
   hasApi,
   LOGIKA_ACTIVE_SESSION_KEY,
+  LogikaHttpError,
   persistActiveSessionId,
   replySession,
   requestCode,
@@ -169,11 +170,19 @@ function FlowPage() {
             persistActiveSessionId(null)
           }
         }
+        setFlowError(null)
         setPhase('cabinet')
-      } catch {
-        if (!cancel) {
+      } catch (e) {
+        if (cancel) return
+        const unauthorized = e instanceof LogikaHttpError && e.status === 401
+        if (unauthorized) {
           clearLocalAuth()
+          setFlowError(null)
           setPhase('phone')
+        } else {
+          const msg = e instanceof Error ? e.message : 'Ошибка проверки сессии'
+          setFlowError(msg)
+          setPhase('cabinet')
         }
       } finally {
         if (!cancel) setAuthBootstrapping(false)

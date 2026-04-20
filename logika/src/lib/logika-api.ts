@@ -44,6 +44,17 @@ export function setToken(t: string | null) {
   }
 }
 
+/** HTTP-ошибки API с кодом ответа (для отличия 401 от сетевых сбоев). */
+export class LogikaHttpError extends Error {
+  readonly status: number
+
+  constructor(message: string, status: number) {
+    super(message)
+    this.name = 'LogikaHttpError'
+    this.status = status
+  }
+}
+
 function mapNetworkError(e: unknown): Error {
   const msg = e instanceof Error ? e.message : String(e)
   if (
@@ -88,7 +99,7 @@ async function req<T>(
     } catch {
       /* ignore */
     }
-    throw new Error(msg)
+    throw new LogikaHttpError(msg, r.status)
   }
   if (r.status === 204) return undefined as T
   return r.json() as Promise<T>
