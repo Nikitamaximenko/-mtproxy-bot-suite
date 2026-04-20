@@ -9,6 +9,7 @@ type SubscriptionData = {
   expires_at?: string | null
   proxy_link?: string | null
   suspended?: boolean
+  is_trial?: boolean
 }
 
 type VpnData = {
@@ -468,6 +469,7 @@ export default function MiniAppPage() {
   }
 
   const isPaid = !!sub?.active
+  const isTrial = !!sub?.is_trial
   const proxyLink = sub?.proxy_link ?? null
   const expiresAt = sub?.expires_at ?? null
 
@@ -638,6 +640,11 @@ export default function MiniAppPage() {
                 Активна
               </span>
             </div>
+            {isTrial ? (
+              <p className="text-xs font-semibold mb-2 px-2 py-1.5 inline-block rounded-lg" style={{ background: "#EFF6FF", color: "#1D4ED8" }}>
+                🎁 Пробный период — после окончания оформите подписку
+              </p>
+            ) : null}
             <div style={{ height: "1px", background: "#E5E7EB", margin: "12px 0" }} />
             <div className="flex items-center justify-between mb-1.5">
               <span className="text-xs" style={{ color: "#6B7280" }}>Действует до</span>
@@ -647,7 +654,9 @@ export default function MiniAppPage() {
             </div>
             <div className="flex items-center justify-between">
               <span className="text-xs" style={{ color: "#6B7280" }}>Тариф</span>
-              <span className="text-xs font-semibold" style={{ color: "#111827" }}>299 ₽/мес</span>
+              <span className="text-xs font-semibold" style={{ color: "#111827" }}>
+                {isTrial ? "Бесплатно · далее 299 ₽/мес" : "299 ₽/мес"}
+              </span>
             </div>
           </div>
 

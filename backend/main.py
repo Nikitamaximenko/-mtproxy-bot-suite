@@ -52,6 +52,10 @@ DATABASE_URL = _db_url_raw if _db_url_raw else "sqlite:///./app.db"
 # Payments (lava.top Public API)
 # Docs: https://developers.lava.top/en and Swagger https://gate.lava.top/docs
 PAYMENT_AMOUNT_RUB = int(os.getenv("PAYMENT_AMOUNT_RUB", "299").strip() or "299")
+# Пробный период только через Telegram-бота (привязка к telegram_id), см. POST /bot/grant-trial
+TRIAL_DAYS = max(1, int(os.getenv("TRIAL_DAYS", "1").strip() or "1"))
+# Статусы подписки с полным доступом (прокси + VPN), пока не истёк срок и нет блокировки
+SUBSCRIPTION_ACCESS_STATUSES: tuple[str, ...] = ("paid", "trial")
 
 LAVA_TOP_API_BASE_URL = (os.getenv("LAVA_TOP_API_BASE_URL") or "https://gate.lava.top").rstrip("/")
 LAVA_TOP_API_KEY = (os.getenv("LAVA_TOP_API_KEY") or "").strip()  # used to call lava.top Public API (X-Api-Key)
@@ -189,10 +193,12 @@ class User(Base):
     nudge_1_sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     nudge_2_sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     nudge_3_sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # Один бесплатный триал на telegram_id (выдаётся только из бота); не сбрасывается после истечения
+    trial_consumed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
 # FIX: "expired" added — it was missing from the original type
-PaymentStatus = Literal["pending", "paid", "expired"]
+PaymentStatus = Literal["pending", "paid", "expired", "trial"]
 
 # Почему снят доступ (для ежедневных напоминаний только renewal_failed).
 BLOCK_REASON_RENEWAL_FAILED = "renewal_failed"
@@ -376,6 +382,11 @@ def _migrate() -> None:
                     conn.execute(text("ALTER TABLE users ADD COLUMN nudge_3_sent_at DATETIME"))
             if "email" not in existing:
                 conn.execute(text("ALTER TABLE users ADD COLUMN email VARCHAR(255)"))
+            if "trial_consumed_at" not in existing:
+                if engine.dialect.name == "postgresql":
+                    conn.execute(text("ALTER TABLE users ADD COLUMN trial_consumed_at TIMESTAMPTZ"))
+                else:
+                    conn.execute(text("ALTER TABLE users ADD COLUMN trial_consumed_at DATETIME"))
 
     # vpn_peers: new table, created by create_all on first run; no ALTER needed for existing columns.
 
@@ -497,6 +508,89 @@ def track_ref(payload: TrackRefRequest, db: Session = Depends(get_db)) -> OkResp
         if changed:
             db.commit()
     return OkResponse(ok=True)
+
+
+class GrantTrialRequest(BaseModel):
+    telegram_id: int = Field(..., ge=1)
+    username: str | None = Field(default=None, max_length=64)
+    first_name: str | None = Field(default=None, max_length=64)
+
+
+class GrantTrialResponse(BaseModel):
+    ok: bool
+    error: str | None = None
+    expires_at: datetime | None = None
+    already_active: bool = False
+
+
+@app.post("/bot/grant-trial", response_model=GrantTrialResponse)
+def bot_grant_trial(payload: GrantTrialRequest, req: Request, db: Session = Depends(get_db)) -> GrantTrialResponse:
+    """Выдача пробного доступа только для вызовов с INTERNAL_API_TOKEN (Telegram-бот)."""
+    _require_internal_token(req)
+    tg_id = int(payload.telegram_id)
+    now = utcnow()
+
+    user_stmt = select(User).where(User.telegram_id == tg_id)
+    if engine.dialect.name == "postgresql":
+        user_stmt = user_stmt.with_for_update()
+    user = db.execute(user_stmt).scalar_one_or_none()
+    if user is None:
+        user = User(
+            telegram_id=tg_id,
+            username=payload.username,
+            first_name=payload.first_name,
+        )
+        db.add(user)
+        db.flush()
+
+    active = (
+        db.execute(
+            select(Subscription)
+            .where(
+                Subscription.telegram_id == tg_id,
+                Subscription.payment_status.in_(SUBSCRIPTION_ACCESS_STATUSES),
+                Subscription.expires_at.is_not(None),
+                Subscription.expires_at > now,
+                Subscription.access_suspended == False,  # noqa: E712
+                Subscription.access_blocked_reason.is_(None),
+            )
+            .order_by(Subscription.expires_at.desc())
+            .limit(1)
+        )
+        .scalars()
+        .first()
+    )
+    if active:
+        if active.payment_status == "trial":
+            if user.trial_consumed_at is None:
+                user.trial_consumed_at = now
+            db.commit()
+            return GrantTrialResponse(ok=True, expires_at=active.expires_at, already_active=True)
+        db.commit()
+        return GrantTrialResponse(ok=False, error="already_subscribed")
+
+    if user.trial_consumed_at is not None:
+        db.commit()
+        return GrantTrialResponse(ok=False, error="trial_already_used")
+
+    token = uuid4()
+    sub = Subscription(
+        telegram_id=tg_id,
+        payment_token=str(token),
+        payment_status="pending",
+    )
+    db.add(sub)
+    db.flush()
+    try:
+        activate_trial_subscription(sub)
+    except RuntimeError as e:
+        db.rollback()
+        raise HTTPException(status_code=503, detail=str(e)) from e
+    user.trial_consumed_at = now
+    db.commit()
+
+    _provision_vpn_after_payment(tg_id, db)
+    return GrantTrialResponse(ok=True, expires_at=sub.expires_at, already_active=False)
 
 
 class MarketingOptOutRequest(BaseModel):
@@ -756,7 +850,7 @@ def activate_subscription(sub: Subscription, *, recurring: bool = False) -> None
 
     # Идемпотентность: пропуск только если доступ реально полный (не блокировка renewal/admin).
     if (
-        sub.payment_status == "paid"
+        sub.payment_status in SUBSCRIPTION_ACCESS_STATUSES
         and sub.expires_at
         and sub.expires_at > now
         and not sub.access_suspended
@@ -771,6 +865,26 @@ def activate_subscription(sub: Subscription, *, recurring: bool = False) -> None
     sub.access_blocked_reason = None
     sub.last_subscription_reminder_at = None
     sub.renewal_failed_notified = False
+
+
+def activate_trial_subscription(sub: Subscription) -> None:
+    """Один раз из бота: MTProxy + срок TRIAL_DAYS, статус trial (не путать с оплатой Lava)."""
+    now = utcnow()
+    _apply_proxy_credentials(sub)
+    sub.payment_status = "trial"
+    sub.expires_at = now + timedelta(days=TRIAL_DAYS)
+    sub.access_suspended = False
+    sub.access_blocked_reason = None
+    sub.last_subscription_reminder_at = None
+    sub.renewal_failed_notified = False
+    sub.notified_expiring = False
+    sub.notified_expired = False
+    logger.info(
+        "activate_trial_subscription: tg_id=%s expires=%s days=%s",
+        sub.telegram_id,
+        sub.expires_at,
+        TRIAL_DAYS,
+    )
 
 
 def _miniapp_public_url(tg_id: int) -> str:
@@ -842,7 +956,7 @@ def _process_sales_nudges() -> None:
         now = utcnow()
         paid_rows = db.execute(
             select(Subscription.telegram_id)
-            .where(Subscription.payment_status.in_(["paid", "expired"]))
+            .where(Subscription.payment_status.in_(["paid", "expired", "trial"]))
             .distinct()
         ).scalars().all()
         paid_set = set(paid_rows)
@@ -1019,6 +1133,22 @@ def _notify_expired(tg_id: int) -> None:
     ), {"inline_keyboard": buttons})
 
 
+def _notify_trial_expired(tg_id: int) -> None:
+    """Окончание бесплатного дня из бота — тот же CTA, что и после платной подписки."""
+    buttons: list[list[dict[str, str]]] = [
+        [{"text": "\U0001f4b3 \u041e\u0444\u043e\u0440\u043c\u0438\u0442\u044c \u043f\u043e\u0434\u043f\u0438\u0441\u043a\u0443", "callback_data": "menu:subscribe"}],
+    ]
+    _send_tg(
+        tg_id,
+        (
+            "\u23f0 <b>\u041f\u0440\u043e\u0431\u043d\u044b\u0439 \u0434\u0435\u043d\u044c \u0437\u0430\u043a\u043e\u043d\u0447\u0438\u043b\u0441\u044f</b>\n\n"
+            "\u0414\u043e\u0441\u0442\u0443\u043f \u043a MTProxy \u0438 VPN \u043f\u0440\u0438\u043e\u0441\u0442\u0430\u043d\u043e\u0432\u043b\u0435\u043d.\n\n"
+            "\u041e\u0444\u043e\u0440\u043c\u0438\u0442\u0435 \u043f\u043e\u0434\u043f\u0438\u0441\u043a\u0443 \u2014 \u0447\u0442\u043e\u0431\u044b \u043f\u0440\u043e\u0434\u043e\u043b\u0436\u0438\u0442\u044c \u0431\u0435\u0437 \u043e\u0433\u0440\u0430\u043d\u0438\u0447\u0435\u043d\u0438\u0439."
+        ),
+        {"inline_keyboard": buttons},
+    )
+
+
 def _renewal_failed_notify_text(*, first: bool) -> str:
     if first:
         return (
@@ -1134,7 +1264,7 @@ def _process_expiration_notifications() -> None:
 
         expired = db.execute(
             select(Subscription).where(
-                Subscription.payment_status == "paid",
+                Subscription.payment_status.in_(SUBSCRIPTION_ACCESS_STATUSES),
                 Subscription.expires_at.is_not(None),
                 Subscription.expires_at <= now,
                 Subscription.notified_expired == False,  # noqa: E712
@@ -1142,8 +1272,11 @@ def _process_expiration_notifications() -> None:
         ).scalars().all()
 
         for sub in expired:
-            logger.info("Sending expired notification to tg_id=%s", sub.telegram_id)
-            _notify_expired(sub.telegram_id)
+            logger.info("Sending expired notification to tg_id=%s trial=%s", sub.telegram_id, sub.payment_status)
+            if sub.payment_status == "trial":
+                _notify_trial_expired(sub.telegram_id)
+            else:
+                _notify_expired(sub.telegram_id)
             sub.notified_expired = True
             sub.payment_status = "expired"
             sub.renewal_failed_notified = False
@@ -1162,14 +1295,14 @@ def _process_expiration_notifications() -> None:
         # Раньше при истечении не выставляли payment_status=expired — починить БД без повторной рассылки.
         stale_paid = db.execute(
             select(Subscription).where(
-                Subscription.payment_status == "paid",
+                Subscription.payment_status.in_(SUBSCRIPTION_ACCESS_STATUSES),
                 Subscription.expires_at.is_not(None),
                 Subscription.expires_at <= now,
                 Subscription.notified_expired == True,  # noqa: E712
             )
         ).scalars().all()
         for sub in stale_paid:
-            logger.info("Backfill expired status for tg_id=%s (was paid after notify)", sub.telegram_id)
+            logger.info("Backfill expired status for tg_id=%s (was active after notify)", sub.telegram_id)
             sub.payment_status = "expired"
             sub.renewal_failed_notified = False
             sub.access_suspended = True
@@ -1792,6 +1925,7 @@ class SubscriptionResponse(BaseModel):
     expires_at: datetime | None = None
     proxy_link: str | None = None
     suspended: bool = False
+    is_trial: bool = False
 
 
 @app.get("/subscription/{telegram_id}", response_model=SubscriptionResponse)
@@ -1811,7 +1945,7 @@ def get_subscription(telegram_id: int, req: Request, db: Session = Depends(get_d
             select(Subscription)
             .where(
                 Subscription.telegram_id == int(telegram_id),
-                Subscription.payment_status == "paid",
+                Subscription.payment_status.in_(SUBSCRIPTION_ACCESS_STATUSES),
                 Subscription.expires_at.is_not(None),
                 Subscription.expires_at > now,
             )
@@ -1823,18 +1957,25 @@ def get_subscription(telegram_id: int, req: Request, db: Session = Depends(get_d
     )
 
     if not sub:
-        return SubscriptionResponse(active=False, expires_at=None, proxy_link=None, suspended=False)
+        return SubscriptionResponse(active=False, expires_at=None, proxy_link=None, suspended=False, is_trial=False)
 
     if sub.access_suspended or sub.access_blocked_reason:
-        return SubscriptionResponse(active=False, expires_at=sub.expires_at, proxy_link=None, suspended=True)
+        return SubscriptionResponse(
+            active=False, expires_at=sub.expires_at, proxy_link=None, suspended=True, is_trial=False
+        )
 
+    is_trial = sub.payment_status == "trial"
     if not (sub.proxy_server and sub.proxy_port and sub.proxy_secret):
-        return SubscriptionResponse(active=True, expires_at=sub.expires_at, proxy_link=None, suspended=False)
+        return SubscriptionResponse(
+            active=True, expires_at=sub.expires_at, proxy_link=None, suspended=False, is_trial=is_trial
+        )
 
     proxy_link: str | None = None
     if has_token:
         proxy_link = f"tg://proxy?server={sub.proxy_server}&port={sub.proxy_port}&secret={sub.proxy_secret}"
-    return SubscriptionResponse(active=True, expires_at=sub.expires_at, proxy_link=proxy_link, suspended=False)
+    return SubscriptionResponse(
+        active=True, expires_at=sub.expires_at, proxy_link=proxy_link, suspended=False, is_trial=is_trial
+    )
 
 
 class CheckTokenResponse(BaseModel):
@@ -1846,7 +1987,7 @@ class CheckTokenResponse(BaseModel):
 @app.get("/subscription/token/{token}", response_model=CheckTokenResponse)
 def check_token(token: UUID, db: Session = Depends(get_db)) -> CheckTokenResponse:
     sub = db.execute(select(Subscription).where(Subscription.payment_token == str(token))).scalar_one_or_none()
-    if sub is None or sub.payment_status != "paid":
+    if sub is None or sub.payment_status not in SUBSCRIPTION_ACCESS_STATUSES:
         return CheckTokenResponse(found=False)
     now = utcnow()
     if sub.expires_at is None or sub.expires_at <= now:
@@ -1959,7 +2100,7 @@ def subscription_by_email(email: str, db: Session = Depends(get_db)):
         select(Subscription)
         .where(
             Subscription.telegram_id == user.telegram_id,
-            Subscription.payment_status == "paid",
+            Subscription.payment_status.in_(SUBSCRIPTION_ACCESS_STATUSES),
             Subscription.expires_at.is_not(None),
             Subscription.expires_at > now,
         )
@@ -1977,7 +2118,12 @@ def subscription_by_email(email: str, db: Session = Depends(get_db)):
     if sub.proxy_server and sub.proxy_port and sub.proxy_secret:
         proxy_link = f"tg://proxy?server={sub.proxy_server}&port={sub.proxy_port}&secret={sub.proxy_secret}"
 
-    return {"active": True, "proxy_link": proxy_link, "expires_at": sub.expires_at}
+    return {
+        "active": True,
+        "proxy_link": proxy_link,
+        "expires_at": sub.expires_at,
+        "is_trial": sub.payment_status == "trial",
+    }
 
 
 # ── wg-easy helpers ──────────────────────────────────────────────────────────
@@ -2327,7 +2473,7 @@ def _active_sub_for_vpn(telegram_id: int, db: Session) -> bool:
         select(Subscription.id)
         .where(
             Subscription.telegram_id == telegram_id,
-            Subscription.payment_status == "paid",
+            Subscription.payment_status.in_(SUBSCRIPTION_ACCESS_STATUSES),
             Subscription.expires_at > now,
             Subscription.access_suspended == False,  # noqa: E712
             Subscription.access_blocked_reason.is_(None),
@@ -2735,7 +2881,7 @@ def _admin_deactivate_user(telegram_id: int, db: Session) -> int:
     subs = db.execute(
         select(Subscription).where(
             Subscription.telegram_id == telegram_id,
-            Subscription.payment_status == "paid",
+            Subscription.payment_status.in_(SUBSCRIPTION_ACCESS_STATUSES),
         )
     ).scalars().all()
     for sub in subs:
@@ -2845,7 +2991,11 @@ def _admin_activate_user(telegram_id: int, db: Session) -> None:
         db.commit()
         db.refresh(sub)
 
-    if sub.payment_status == "paid" and sub.expires_at is not None and sub.expires_at > now:
+    if (
+        sub.payment_status in SUBSCRIPTION_ACCESS_STATUSES
+        and sub.expires_at is not None
+        and sub.expires_at > now
+    ):
         try:
             _apply_proxy_credentials(sub)
         except RuntimeError as e:
@@ -2855,7 +3005,7 @@ def _admin_activate_user(telegram_id: int, db: Session) -> None:
         sub.last_subscription_reminder_at = None
         sub.renewal_failed_notified = False
         db.commit()
-        logger.info("Admin restored access for paid tg_id=%s (expires_at unchanged)", telegram_id)
+        logger.info("Admin restored access for paid/trial tg_id=%s (expires_at unchanged)", telegram_id)
     else:
         try:
             activate_subscription(sub)
@@ -2996,7 +3146,7 @@ def admin_self_test_toggle(
             #  — до этого у юзера не было paid (нечего деактивировать),
             #  — или сейчас подписка suspended=True, no proxy,
             #    И VPN-клиент либо отсутствует, либо помечен inactive.
-            if not before.exists or before.payment_status != "paid":
+            if not before.exists or before.payment_status not in SUBSCRIPTION_ACCESS_STATUSES:
                 deactivate_ok = True
             else:
                 sub_ok = (
@@ -3019,7 +3169,7 @@ def admin_self_test_toggle(
                 now = utcnow()
                 sub_ok = (
                     after_act.exists is True
-                    and after_act.payment_status == "paid"
+                    and after_act.payment_status in SUBSCRIPTION_ACCESS_STATUSES
                     and after_act.access_suspended is False
                     and after_act.access_blocked_reason is None
                     and after_act.has_proxy is True
@@ -3184,7 +3334,7 @@ def internal_diag_subscription(
             select(Subscription)
             .where(
                 Subscription.telegram_id == int(telegram_id),
-                Subscription.payment_status == "paid",
+                Subscription.payment_status.in_(SUBSCRIPTION_ACCESS_STATUSES),
                 Subscription.expires_at.is_not(None),
                 Subscription.expires_at > now,
             )
@@ -3322,7 +3472,7 @@ def admin_stats(req: Request, db: Session = Depends(get_db)) -> AdminStatsRespon
         return and_(*p)
 
     active_conds = _sub_conds(
-        Subscription.payment_status == "paid",
+        Subscription.payment_status.in_(SUBSCRIPTION_ACCESS_STATUSES),
         Subscription.expires_at.is_not(None),
         Subscription.expires_at > now,
         Subscription.access_suspended == False,  # noqa: E712
@@ -3487,7 +3637,7 @@ def admin_funnel(req: Request, db: Session = Depends(get_db)) -> FunnelStatsResp
     # Active now
     active_now_conds = [
         Subscription.telegram_id > 0,
-        Subscription.payment_status == "paid",
+        Subscription.payment_status.in_(SUBSCRIPTION_ACCESS_STATUSES),
         Subscription.expires_at.is_not(None),
         Subscription.expires_at > now,
         Subscription.access_suspended == False,  # noqa: E712

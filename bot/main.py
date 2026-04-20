@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import html
+import json
 import logging
 import os
 import time
@@ -129,6 +130,7 @@ def main_menu_kb(tg_id: int) -> InlineKeyboardMarkup:
     ]
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="🧊 2 в 1 — Прокси + VPN", web_app=WebAppInfo(url=_miniapp_url(tg_id)))],
+        [InlineKeyboardButton(text="🎁 Бесплатный день", callback_data="menu:trial")],
         [InlineKeyboardButton(text="ℹ️ Инструкция", callback_data="menu:help")],
         row3,
     ])
@@ -195,9 +197,9 @@ def format_dt(dt_str: str | None) -> str:
 HELP_GENERAL = (
     "🛡 <b>Как подключить VPN через Happ</b>\n"
     "\n"
-    "<b>Шаг 1 — Оплата</b>\n"
-    "Нажми «VPN — от 299 ₽» в меню и оплати картой или СБП.\n"
-    "Подписка активируется автоматически.\n"
+    "<b>Шаг 1 — Доступ</b>\n"
+    "Один раз можно взять <b>бесплатный день</b> (кнопка в меню) или сразу оформить подписку в мини-приложении — оплата банковской картой.\n"
+    "Доступ активируется автоматически.\n"
     "\n"
     "<b>Шаг 2 — Скачай Happ</b>\n"
     '• Android: <a href="https://play.google.com/store/apps/details?id=com.happproxy">Google Play</a>\n'
@@ -281,6 +283,31 @@ async def backend_post_json(session: aiohttp.ClientSession, path: str, payload: 
         return data
 
 
+async def backend_grant_trial(
+    session: aiohttp.ClientSession,
+    telegram_id: int,
+    username: str | None,
+    first_name: str | None,
+) -> tuple[int, dict[str, Any]]:
+    """POST /bot/grant-trial — только с INTERNAL_API_TOKEN на бэкенде."""
+    url = f"{BACKEND_BASE_URL}/bot/grant-trial"
+    headers = {**_internal_headers(), "Content-Type": "application/json"}
+    async with session.post(
+        url,
+        json={"telegram_id": telegram_id, "username": username, "first_name": first_name},
+        headers=headers,
+        timeout=aiohttp.ClientTimeout(total=20),
+    ) as resp:
+        raw = await resp.text()
+        try:
+            data = json.loads(raw) if raw else {}
+        except json.JSONDecodeError:
+            data = {"error": "bad_response", "raw": raw[:240]}
+        if not isinstance(data, dict):
+            data = {}
+        return resp.status, data
+
+
 def _parse_proxy_link(link: str) -> tuple[str, str, str]:
     from urllib.parse import parse_qs, urlparse
     parsed = urlparse(link)
@@ -331,6 +358,79 @@ def _get_session(dp: Dispatcher) -> aiohttp.ClientSession:
 
 
 # ── Handlers ──
+
+
+async def send_grant_trial_result(
+    message: Message,
+    session: aiohttp.ClientSession,
+    *,
+    tg_id: int,
+    username: str | None,
+    first_name: str | None,
+) -> None:
+    status, data = await backend_grant_trial(session, tg_id, username, first_name)
+    if status >= 400:
+        detail = data.get("detail") if isinstance(data.get("detail"), str) else None
+        _log.warning("grant_trial http %s: %s", status, data)
+        await message.answer(
+            detail
+            or "Сервис временно не смог выдать пробный период. Попробуйте позже или оформите подписку в мини-приложении.",
+            reply_markup=main_menu_kb(tg_id),
+        )
+        return
+    if not data.get("ok"):
+        err = str(data.get("error") or "")
+        if err == "trial_already_used":
+            await message.answer(
+                "🎁 <b>Пробный день уже был использован</b>\n\n"
+                "Один бесплатный день на аккаунт Telegram — дальше только полная подписка.\n"
+                "Оформите её в мини-приложении.",
+                parse_mode="HTML",
+                reply_markup=InlineKeyboardMarkup(
+                    inline_keyboard=[
+                        [
+                            InlineKeyboardButton(
+                                text="🧊 Оформить подписку",
+                                web_app=WebAppInfo(url=_miniapp_url(tg_id)),
+                            )
+                        ],
+                        [InlineKeyboardButton(text="🏠 Главное меню", callback_data="menu:main")],
+                    ]
+                ),
+            )
+            return
+        if err == "already_subscribed":
+            await message.answer(
+                "✅ У вас уже есть активная подписка.\n\nОткройте личный кабинет:",
+                reply_markup=status_active_kb(tg_id),
+            )
+            return
+        await message.answer(
+            "Не получилось активировать пробный период. Попробуйте позже или напишите в поддержку.",
+            reply_markup=main_menu_kb(tg_id),
+        )
+        return
+
+    exp_raw = data.get("expires_at")
+    exp_human = "скоро"
+    if isinstance(exp_raw, str):
+        exp_human = format_dt(exp_raw)
+    if data.get("already_active"):
+        await message.answer(
+            f"🎁 <b>Пробный период уже активен</b> до <b>{exp_human}</b>\n\n"
+            "Личный кабинет — кнопка ниже.",
+            parse_mode="HTML",
+            reply_markup=status_active_kb(tg_id),
+        )
+        return
+    await message.answer(
+        f"🎁 <b>Пробный день активирован!</b>\n\n"
+        f"Доступ до: <b>{exp_human}</b>\n\n"
+        "📡 MTProxy для Telegram и 🛡 VPN — в личном кабинете. "
+        "Когда срок закончится, оформите подписку, чтобы не потерять доступ.",
+        parse_mode="HTML",
+        reply_markup=status_active_kb(tg_id),
+    )
 
 
 async def cmd_start(message: Message, session: aiohttp.ClientSession, state: FSMContext) -> None:
@@ -431,7 +531,8 @@ async def cmd_start(message: Message, session: aiohttp.ClientSession, state: FSM
         "\n"
         "<b>Персональный доступ</b> — только ты на своём канале, без чужих пользователей.\n"
         "\n"
-        f"<b>10 ₽/день · {PRICE_RUB} ₽/мес · Отмена в любой момент</b>",
+        f"<b>10 ₽/день · {PRICE_RUB} ₽/мес · Отмена в любой момент</b>\n\n"
+        f"🎁 Один <b>бесплатный день</b> — кнопка в меню ниже (только здесь, в боте).",
         parse_mode="HTML",
         reply_markup=main_menu_kb(tg_id),
     )
@@ -495,6 +596,7 @@ async def cmd_status(message: Message, session: aiohttp.ClientSession, tg_id: in
         return
 
     expires_at = format_dt(data.get("expires_at"))
+    is_trial = bool(data.get("is_trial"))
     proxy_link = data.get("proxy_link")
     status_text = (
         f"✅ <b>Подписка 2 в 1 активна</b>\n"
@@ -503,8 +605,12 @@ async def cmd_status(message: Message, session: aiohttp.ClientSession, tg_id: in
         f"🛡 VPN — там же (вкладка «VPN»), кнопка ниже\n"
         f"\n"
         f"📅 Действует до: {expires_at}\n"
-        f"💳 Тариф: {PRICE_RUB} ₽/мес · 10 ₽/день\n"
-        f"🖥 Устройств: до 10 на аккаунте\n"
+        + (
+            f"🎁 <b>Пробный день</b> — затем {PRICE_RUB} ₽/мес\n"
+            if is_trial
+            else f"💳 Тариф: {PRICE_RUB} ₽/мес · 10 ₽/день\n"
+        )
+        + f"🖥 Устройств: до 10 на аккаунте\n"
         f"❓ Отмена — через кнопку «Поддержка» в боте"
     )
     if not proxy_link:
@@ -579,6 +685,21 @@ async def main() -> None:
         session = _get_session(dp)
         tg_id = message.from_user.id if message.from_user else 0
         await cmd_status(message, session, tg_id)
+
+    @dp.message(Command("trial"))
+    async def _trial(message: Message) -> None:
+        session = _get_session(dp)
+        tg_id = message.from_user.id if message.from_user else 0
+        if not tg_id:
+            await message.answer("Не удалось определить ваш Telegram ID.")
+            return
+        await send_grant_trial_result(
+            message,
+            session,
+            tg_id=tg_id,
+            username=message.from_user.username if message.from_user else None,
+            first_name=message.from_user.first_name if message.from_user else None,
+        )
 
     @dp.message(Command("help"))
     async def _help(message: Message) -> None:
@@ -701,6 +822,17 @@ async def main() -> None:
         if action == "help":
             await msg.answer(HELP_GENERAL, parse_mode="HTML", reply_markup=help_kb())
             await query.answer()
+            return
+
+        if action == "trial":
+            await query.answer()
+            await send_grant_trial_result(
+                msg,
+                session,
+                tg_id=query.from_user.id,
+                username=query.from_user.username if query.from_user else None,
+                first_name=query.from_user.first_name if query.from_user else None,
+            )
             return
 
         if action == "status":

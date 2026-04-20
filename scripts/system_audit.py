@@ -202,14 +202,19 @@ def main() -> int:
         exp = parse_iso(s.get("expires_at"))
         payment_status = s.get("payment_status")
         suspended = bool(s.get("access_suspended"))
-        is_active_now = payment_status == "paid" and exp is not None and exp > now and not suspended
+        is_active_now = (
+            payment_status in ("paid", "trial")
+            and exp is not None
+            and exp > now
+            and not suspended
+        )
 
         if is_active_now:
             paid_rows.append(s)
         else:
             expired_or_suspended_rows.append(s)
 
-        if payment_status == "paid":
+        if payment_status in ("paid", "trial"):
             per_tg_paid_count[tg] = per_tg_paid_count.get(tg, 0) + 1
 
     log(
