@@ -76,6 +76,11 @@ def create_app() -> FastAPI:
             s.smsaero_test_mode,
             s.smsaero_allow_log_only,
         )
+        logger.info(
+            "Anthropic: configured=%s demo_without_key=%s",
+            bool(s.anthropic_api_key),
+            s.anthropic_allow_demo_without_key,
+        )
 
     @app.get("/health")
     def health() -> dict[str, str]:

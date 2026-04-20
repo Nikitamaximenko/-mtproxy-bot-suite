@@ -21,6 +21,8 @@ class Settings(BaseSettings):
     smsaero_test_mode: bool = False
 
     anthropic_api_key: str = ""
+    # Локально true — шаблонные ответы без Claude. На Railway prod держи false и задай ANTHROPIC_API_KEY.
+    anthropic_allow_demo_without_key: bool = False
     # Общий fallback (если где-то ожидается одна модель)
     anthropic_model: str = "claude-opus-4-7"
 
@@ -36,9 +38,9 @@ class Settings(BaseSettings):
 
     questions_count: int = 5
 
-    @field_validator("smsaero_email", "smsaero_api_key", mode="before")
+    @field_validator("smsaero_email", "smsaero_api_key", "anthropic_api_key", mode="before")
     @classmethod
-    def _strip_sms_secrets(cls, v: object) -> object:
+    def _strip_secrets(cls, v: object) -> object:
         if isinstance(v, str):
             return v.strip()
         return v

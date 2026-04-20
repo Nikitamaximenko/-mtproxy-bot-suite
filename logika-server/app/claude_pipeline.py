@@ -103,9 +103,14 @@ async def next_clarifying_question(
     prior_messages: list[dict[str, str]],
 ) -> str:
     if not settings.anthropic_api_key:
-        n = len([m for m in prior_messages if m.get("role") == "assistant"])
-        return (
-            f"[Демо без ключа API] Вопрос {n + 1}: что для тебя важнее — ясность или одобрение?"
+        if settings.anthropic_allow_demo_without_key:
+            n = len([m for m in prior_messages if m.get("role") == "assistant"])
+            return (
+                f"[Демо без ключа API] Вопрос {n + 1}: что для тебя важнее — ясность или одобрение?"
+            )
+        raise RuntimeError(
+            "На сервере не задан ANTHROPIC_API_KEY (Railway → Variables сервиса с logika-server). "
+            "Для локальной разработки без ключа: ANTHROPIC_ALLOW_DEMO_WITHOUT_KEY=true",
         )
 
     api_messages: list[dict[str, Any]] = [
@@ -130,7 +135,12 @@ async def analyze_session(
     transcript: list[dict[str, str]],
 ) -> dict[str, Any]:
     if not settings.anthropic_api_key:
-        return _demo_report()
+        if settings.anthropic_allow_demo_without_key:
+            return _demo_report()
+        raise RuntimeError(
+            "На сервере не задан ANTHROPIC_API_KEY (Railway → Variables). "
+            "Либо ANTHROPIC_ALLOW_DEMO_WITHOUT_KEY=true только для локалки."
+        )
 
     lines = [f"Дилемма: {dilemma}", "", "Диалог:"]
     for m in transcript:
