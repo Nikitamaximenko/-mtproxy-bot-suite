@@ -10,8 +10,10 @@ import os
 import sys
 import time
 
-# Укороченный прогон (только один проход Opus) — export SMOKE_FAST=1
+# Укороченный прогон (без второго Opus self-critique) — SMOKE_FAST=1
 FAST = os.getenv("SMOKE_FAST", "").lower() in ("1", "true", "yes")
+# По умолчанию не тратим Haiku на роутер (отдельная модель); полный каскад: SMOKE_USE_ROUTER=1
+USE_ROUTER = os.getenv("SMOKE_USE_ROUTER", "").lower() in ("1", "true", "yes")
 
 
 def _bootstrap() -> None:
@@ -23,6 +25,7 @@ def _bootstrap() -> None:
     load_dotenv(os.path.join(root, ".env"))
     if FAST:
         os.environ["ENABLE_SELF_CRITIQUE"] = "false"
+    if not USE_ROUTER:
         os.environ["ENABLE_ROUTER"] = "false"
     from app.config import get_settings
 
@@ -46,9 +49,12 @@ async def main() -> int:
     )
 
     print("=== 1) Router (Haiku) ===")
-    t0 = time.perf_counter()
-    r = await route_intent(s, dilemma)
-    print(f"    {r}  ({time.perf_counter() - t0:.1f}s)")
+    if not s.enable_router:
+        print("    (пропуск: ENABLE_ROUTER=false; полный тест: SMOKE_USE_ROUTER=1 python ...)")
+    else:
+        t0 = time.perf_counter()
+        r = await route_intent(s, dilemma)
+        print(f"    {r}  ({time.perf_counter() - t0:.1f}s)")
 
     print("\n=== 2) Первый уточняющий вопрос (Sonnet) ===")
     t0 = time.perf_counter()
