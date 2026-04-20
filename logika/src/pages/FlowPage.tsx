@@ -856,11 +856,6 @@ function FlowPage() {
             <p className="text-muted mt-8 max-w-md text-center font-mono text-sm uppercase tracking-[0.08em]">
               {analyzeLines[analyzeLine]}
             </p>
-            {apiMode && busy && (
-              <p className="text-muted mt-6 max-w-md text-center text-[15px] leading-relaxed">
-                Идёт запрос к серверу: модель собирает отчёт по законам и искажениям. Не закрывайте вкладку.
-              </p>
-            )}
           </motion.section>
         )}
 
