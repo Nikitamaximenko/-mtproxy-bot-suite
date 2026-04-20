@@ -3,6 +3,7 @@ import { clsx } from 'clsx'
 import { lazy, Suspense, useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { Logo } from '../components/Logo'
+import { VoiceDictateButton } from '../components/VoiceDictateButton'
 import { ReportView } from '../components/report/ReportView'
 import { HeroFork } from '../components/landing/HeroFork'
 import { useCountUp } from '../hooks/useCountUp'
@@ -681,6 +682,19 @@ function FlowPage() {
                       rows={5}
                       className="border-border bg-elevated focus:border-accent focus:ring-accent/30 mt-8 w-full rounded-[12px] border p-4 text-[15px] leading-relaxed outline-none transition-all duration-300 focus:ring-2"
                     />
+                    <VoiceDictateButton
+                      className="mt-4"
+                      showHint
+                      disabled={busy}
+                      onAppend={(text) => {
+                        setFirstQ((prev) => {
+                          const t = text.trim()
+                          if (!t) return prev
+                          const p = prev.trim()
+                          return p ? `${p} ${t}` : t
+                        })
+                      }}
+                    />
                     <button
                       type="button"
                       onClick={() => void startChatFromOnboarding()}
@@ -796,6 +810,18 @@ function FlowPage() {
                   placeholder="Ответ…"
                   disabled={busy}
                   className="border-border bg-elevated focus:border-accent min-w-0 flex-1 rounded-[12px] border px-3 py-3 text-left text-base leading-normal text-foreground outline-none transition-colors [-webkit-tap-highlight-color:transparent] disabled:opacity-50 sm:px-4 sm:text-[15px]"
+                />
+                <VoiceDictateButton
+                  compact
+                  disabled={busy}
+                  onAppend={(text) => {
+                    setDraft((prev) => {
+                      const t = text.trim()
+                      if (!t) return prev
+                      const p = prev.trim()
+                      return p ? `${p} ${t}` : t
+                    })
+                  }}
                 />
                 <button
                   type="button"
