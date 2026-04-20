@@ -2,6 +2,16 @@
 
 Бэкенд для приложения «Логика»: PostgreSQL, вход по SMS через [SMS Aero](https://smsaero.ru/integration/documentation/api/), отчёты и уточняющие вопросы через **Anthropic Claude** (по умолчанию `claude-opus-4-7`), выдача PDF (ReportLab).
 
+## Архитектура LLM (юнит-экономика)
+
+- **Router (Haiku)** — лёгкая классификация дилеммы (вкл. `ENABLE_ROUTER`).
+- **Уточняющие вопросы (Sonnet)** — дешевле Opus, тот же UX диалога.
+- **Глубокий анализ (Opus + adaptive thinking + JSON Schema)** — законы, искажения, альтернативы; мастер-промпт с **prompt caching** на статике.
+- **Self-critique (второй Opus)** — проверка слабых мест и финальный `final_report` (вкл. `ENABLE_SELF_CRITIQUE`).
+- **Цитаты** — только из курируемого корпуса `app/data/quotes_corpus.py` с `source_id`; расширение до RAG/эмбеддингов — следующий шаг.
+
+Версия методологии: `app/prompts/master.py` → `PROMPT_VERSION`.
+
 ## Локальный запуск
 
 ```bash
