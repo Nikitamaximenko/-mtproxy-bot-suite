@@ -362,6 +362,8 @@ def create_app() -> FastAPI:
             "phase": sess.phase,
             "report": sess.report,
             "score": sess.score,
+            "created_at": sess.created_at.isoformat() if sess.created_at else None,
+            "updated_at": sess.updated_at.isoformat() if sess.updated_at else None,
         }
 
     @app.get("/v1/me")

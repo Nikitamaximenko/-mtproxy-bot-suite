@@ -3,6 +3,7 @@ import { clsx } from 'clsx'
 import { lazy, Suspense, useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { Logo } from '../components/Logo'
+import { ReportView } from '../components/report/ReportView'
 import { HeroFork } from '../components/landing/HeroFork'
 import { useCountUp } from '../hooks/useCountUp'
 import {
@@ -122,6 +123,9 @@ function FlowPage() {
   } | null>(null)
   const [flowError, setFlowError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
+  /** Просмотр отчёта из кабинета — без анимации счёта и без paywall */
+  const [reportFromHistory, setReportFromHistory] = useState(false)
+  const [reportDocumentDate, setReportDocumentDate] = useState<string | null>(null)
   const [apiSessionId, setApiSessionId] = useState<string | null>(null)
   const [apiThread, setApiThread] = useState<Array<{ role: 'user' | 'assistant'; content: string }>>([])
   const [apiReport, setApiReport] = useState<Record<string, unknown> | null>(null)
@@ -222,7 +226,9 @@ function FlowPage() {
   }, [phase, apiMode])
 
   const score = Number(apiReport?.overall_score ?? 42)
-  const scoreView = useCountUp(score, phase === 'report')
+  const scoreAnimated = useCountUp(score, phase === 'report' && !reportFromHistory)
+  const scoreForReport =
+    phase === 'report' && reportFromHistory ? score : scoreAnimated
 
   const chartData = useMemo(() => {
     if (!cabinetData?.stats?.monthly?.length) return []
@@ -266,6 +272,8 @@ function FlowPage() {
         const res = await replySession(apiSessionId, t)
         if ('done' in res && res.done && res.report) {
           persistActiveSessionId(null)
+          setReportFromHistory(false)
+          setReportDocumentDate(new Date().toISOString())
           setApiReport(res.report as Record<string, unknown>)
           if (!isFinalClarifyingReply) {
             setPhase('analyze')
@@ -343,6 +351,8 @@ function FlowPage() {
     setDraft('')
     persistActiveSessionId(null)
     setFlowError(null)
+    setReportFromHistory(false)
+    setReportDocumentDate(null)
     setPhase('onb4')
   }
 
@@ -362,6 +372,30 @@ function FlowPage() {
     setFlowError(null)
     setCabinetTab('history')
     setPhase('phone')
+  }
+
+  const openSessionReportFromCabinet = async (sessionId: string) => {
+    if (!apiMode) return
+    setFlowError(null)
+    setBusy(true)
+    try {
+      const s = await fetchSession(sessionId)
+      if (s.phase !== 'done' || !s.report) {
+        setFlowError('Отчёт ещё не сформирован или сессия не завершена.')
+        return
+      }
+      setApiSessionId(s.session_id)
+      setApiReport(s.report as Record<string, unknown>)
+      setFirstQ(s.dilemma)
+      setReportFromHistory(true)
+      setReportDocumentDate(s.updated_at ?? s.created_at ?? null)
+      persistActiveSessionId(null)
+      setPhase('report')
+    } catch (e) {
+      setFlowError(e instanceof Error ? e.message : 'Не удалось загрузить отчёт')
+    } finally {
+      setBusy(false)
+    }
   }
 
   const startChatFromOnboarding = async () => {
@@ -771,109 +805,13 @@ function FlowPage() {
             animate={{ opacity: 1, y: 0 }}
             className="mx-auto w-full max-w-3xl px-4 py-10 sm:px-6 md:py-14"
           >
-            <div className="border-border bg-card/40 rounded-2xl border px-5 py-8 sm:px-8 md:px-10">
-              <p className="text-dim font-mono text-[12px] uppercase tracking-[0.1em]">Overall Score</p>
-              <div className="mt-3 flex flex-wrap items-baseline gap-2">
-                <motion.span
-                  className="text-[clamp(3rem,14vw,5.5rem)] font-medium leading-none tracking-[-0.04em]"
-                  style={{ color: score < 40 ? '#ff4d4d' : score < 70 ? '#ffb23d' : '#c4f542' }}
-                >
-                  {scoreView}
-                </motion.span>
-                <span className="text-muted text-2xl font-medium md:text-3xl">/100</span>
-              </div>
-              <p className="mt-6 text-left text-xl font-medium leading-snug tracking-[-0.02em] md:text-2xl">
-                {String(apiReport?.verdict_short ?? 'Решение частично логично')}
-              </p>
-              <p className="text-muted mt-5 max-w-prose text-left text-base leading-relaxed">
-                {apiMode && apiReport?.summary
-                  ? String(apiReport.summary)
-                  : 'Твои аргументы проверены по четырём законам логики и типичным искажениям.'}
-              </p>
-            </div>
-
-            <div className="mt-12 grid gap-4 sm:grid-cols-2">
-              {(Array.isArray(apiReport?.laws) && apiReport!.laws!.length > 0
-                ? (apiReport!.laws as { name?: string; status?: string; comment?: string }[])
-                : [
-                    { name: 'Тождество', status: 'частично', comment: '…' },
-                    { name: 'Непротиворечие', status: 'да', comment: '…' },
-                    { name: 'Исключённое третье', status: 'нет', comment: '…' },
-                    { name: 'Достаточное основание', status: 'частично', comment: '…' },
-                  ]
-              ).map((row, idx) => (
-                <div
-                  key={`${row.name ?? idx}-${idx}`}
-                  className="border-border bg-card flex h-full flex-col rounded-xl border p-5 text-left"
-                >
-                  <div className="flex flex-wrap items-start justify-between gap-2">
-                    <h3 className="text-[15px] font-medium leading-snug">{row.name}</h3>
-                    <span className="text-dim shrink-0 font-mono text-[11px] uppercase tracking-[0.08em]">
-                      {row.status}
-                    </span>
-                  </div>
-                  <p className="text-muted mt-3 text-sm leading-relaxed">{row.comment}</p>
-                </div>
-              ))}
-            </div>
-
-            <div className="mt-12">
-              <h3 className="text-dim font-mono text-[12px] uppercase tracking-[0.1em]">Искажения</h3>
-              <ul className="mt-4 space-y-3">
-                {(Array.isArray(apiReport?.biases) && apiReport!.biases!.length > 0
-                  ? (apiReport!.biases as { name?: string; hint?: string }[])
-                  : [{ name: '—', hint: 'Нет данных' }]
-                ).map((x, i) => (
-                  <li
-                    key={i}
-                    className="border-border bg-elevated rounded-[12px] border px-4 py-3 text-sm text-muted"
-                  >
-                    <span className="text-foreground">{x.name}</span>
-                    {x.hint ? ` — ${x.hint}` : ''}
-                  </li>
-                ))}
-              </ul>
-            </div>
-
-            <div className="mt-12">
-              <h3 className="text-dim font-mono text-[12px] uppercase tracking-[0.1em]">Альтернативы</h3>
-              <ol className="mt-4 list-decimal space-y-3 pl-5 text-[15px] leading-relaxed text-muted">
-                {(Array.isArray(apiReport?.alternatives) && apiReport!.alternatives!.length > 0
-                  ? (apiReport!.alternatives as string[])
-                  : [
-                      'Остаться на 90 дней с измеримым экспериментом.',
-                      'Уточнить финансовый буфер цифрами.',
-                      'Сменить контекст без смены работы.',
-                    ]
-                ).map((line) => (
-                  <li key={line}>{line}</li>
-                ))}
-              </ol>
-            </div>
-
-            <blockquote className="border-border bg-card mt-14 rounded-2xl border p-6 text-left text-xl font-medium leading-snug tracking-[-0.02em] sm:p-8 md:text-2xl">
-              {apiReport?.quote && typeof apiReport.quote === 'object' && apiReport.quote !== null
-                ? String((apiReport.quote as { text?: string }).text ?? '—')
-                : 'Когда факты меняются, я меняю мнение.'}
-              <footer className="text-dim mt-6 font-mono text-[12px] uppercase tracking-[0.1em]">
-                {apiReport?.quote && typeof apiReport.quote === 'object' && apiReport.quote !== null
-                  ? String((apiReport.quote as { author?: string }).author ?? '')
-                  : 'Кейнс'}
-              </footer>
-            </blockquote>
-
-            <div className="border-accent/40 bg-elevated/80 mt-12 rounded-2xl border border-l-4 px-5 py-6 sm:px-8">
-              <h3 className="text-dim font-mono text-[12px] uppercase tracking-[0.1em]">
-                Финальный вывод
-              </h3>
-              <p className="text-foreground mt-4 text-left text-[17px] font-medium leading-relaxed tracking-[-0.01em] md:text-lg">
-                {apiMode && apiReport?.conclusion && String(apiReport.conclusion).trim()
-                  ? String(apiReport.conclusion).trim()
-                  : apiMode && apiReport?.verdict_short
-                    ? String(apiReport.verdict_short)
-                    : 'Сведи вывод к одному ясному следующему шагу: что проверить, что принять или что отложить — исходя из твоих же формулировок выше.'}
-              </p>
-            </div>
+            <ReportView
+              report={apiReport}
+              apiMode={apiMode}
+              scoreDisplay={scoreForReport}
+              dilemma={firstQ.trim() || undefined}
+              documentDateIso={reportDocumentDate}
+            />
 
             <div className="mt-12 flex flex-wrap gap-4">
               {apiMode && apiSessionId ? (
@@ -909,7 +847,7 @@ function FlowPage() {
               </button>
             </div>
 
-            {showPaywall && (
+            {showPaywall && !reportFromHistory && (
               <div className="bg-background/75 fixed inset-0 z-40 flex items-end justify-center backdrop-blur-sm md:items-center">
                 <motion.div
                   initial={{ y: 40, opacity: 0 }}
@@ -1061,13 +999,24 @@ function FlowPage() {
                         </p>
                         <div className="mt-6 flex flex-wrap gap-3">
                           {s.phase === 'done' && (
-                            <button
-                              type="button"
-                              onClick={() => void downloadPdf(s.session_id)}
-                              className="text-accent text-sm font-medium"
-                            >
-                              Скачать PDF
-                            </button>
+                            <>
+                              <button
+                                type="button"
+                                onClick={() => void openSessionReportFromCabinet(s.session_id)}
+                                disabled={busy}
+                                className="ease-brand bg-accent text-background hover:bg-accent-hover rounded-[4px] px-4 py-2 text-sm font-medium transition-all disabled:opacity-50"
+                              >
+                                Открыть отчёт
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => void downloadPdf(s.session_id)}
+                                disabled={busy}
+                                className="text-accent hover:text-accent-hover text-sm font-medium underline-offset-4 transition-colors hover:underline disabled:opacity-50"
+                              >
+                                Скачать PDF
+                              </button>
+                            </>
                           )}
                         </div>
                       </div>

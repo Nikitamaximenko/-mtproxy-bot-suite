@@ -138,6 +138,8 @@ export type SessionDetail = {
   phase: string
   report: Record<string, unknown> | null
   score: number | null
+  created_at?: string | null
+  updated_at?: string | null
 }
 
 export async function fetchSession(sessionId: string): Promise<SessionDetail> {
