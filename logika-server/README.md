@@ -43,6 +43,7 @@ uvicorn app.main:app --reload --port 8000
 | `SMSAERO_EMAIL` | Логин кабинета SMS Aero |
 | `SMSAERO_API_KEY` | API-ключ |
 | `SMSAERO_SIGN` | Подпись отправителя из кабинета |
+| `SMSAERO_ALLOW_LOG_ONLY` | На проде **не задавай** или `false`. Если `true` при пустых ключах — код только в логах Railway, SMS не уйдёт. |
 | `ANTHROPIC_API_KEY` | Ключ [Anthropic Console](https://console.anthropic.com/) |
 | `ANTHROPIC_MODEL` | По умолчанию `claude-opus-4-7` |
 | `PUBLIC_API_URL` | Публичный URL этого сервиса (опционально для ссылок) |

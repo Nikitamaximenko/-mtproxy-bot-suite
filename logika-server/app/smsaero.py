@@ -20,9 +20,13 @@ def _sms_url(email: str, api_key: str, host: str, selector: str) -> str:
 
 async def send_otp_sms(settings: Settings, phone_digits: str, code: str) -> None:
     if not settings.smsaero_email or not settings.smsaero_api_key:
-        logger.warning("SMS Aero не настроен — код в логах")
-        logger.info("OTP для %s: %s", phone_digits, code)
-        return
+        if settings.smsaero_allow_log_only:
+            logger.warning("SMS Aero не настроен — код только в логах (SMSAERO_ALLOW_LOG_ONLY)")
+            logger.info("OTP для %s: %s", phone_digits, code)
+            return
+        raise RuntimeError(
+            "SMS не настроен: задайте SMSAERO_EMAIL и SMSAERO_API_KEY в Railway (или только для локалки SMSAERO_ALLOW_LOG_ONLY=true)",
+        )
 
     text = f"Код входа Логика: {code}"
     payload = {
