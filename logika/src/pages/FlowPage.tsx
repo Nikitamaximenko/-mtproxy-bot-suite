@@ -15,6 +15,14 @@ import { Link } from 'react-router-dom'
 import { Logo } from '../components/Logo'
 import { HeroFork } from '../components/landing/HeroFork'
 import { useCountUp } from '../hooks/useCountUp'
+import {
+  downloadPdf,
+  hasApi,
+  replySession,
+  requestCode,
+  startSession,
+  verifyCode,
+} from '../lib/logika-api'
 
 type Phase =
   | 'phone'
@@ -46,6 +54,7 @@ const analyzeLines = [
 const ease = [0.32, 0.72, 0, 1] as const
 
 function FlowPage() {
+  const apiMode = hasApi()
   const [phase, setPhase] = useState<Phase>('phone')
   const [phone, setPhone] = useState('')
   const [code, setCode] = useState('')
@@ -55,9 +64,20 @@ function FlowPage() {
   const [analyzeLine, setAnalyzeLine] = useState(0)
   const [showPaywall, setShowPaywall] = useState(true)
   const [cabinetTab, setCabinetTab] = useState<'history' | 'stats' | 'settings'>('history')
+  const [flowError, setFlowError] = useState<string | null>(null)
+  const [busy, setBusy] = useState(false)
+  const [apiSessionId, setApiSessionId] = useState<string | null>(null)
+  const [apiThread, setApiThread] = useState<Array<{ role: 'user' | 'assistant'; content: string }>>([])
+  const [apiReport, setApiReport] = useState<Record<string, unknown> | null>(null)
 
   useEffect(() => {
     if (phase !== 'analyze') return
+    if (apiMode) {
+      const id = window.setInterval(() => {
+        setAnalyzeLine((i) => (i + 1) % analyzeLines.length)
+      }, 900)
+      return () => clearInterval(id)
+    }
     const id = window.setInterval(() => {
       setAnalyzeLine((i) => (i + 1) % analyzeLines.length)
     }, 900)
@@ -66,9 +86,9 @@ function FlowPage() {
       clearInterval(id)
       clearTimeout(done)
     }
-  }, [phase])
+  }, [phase, apiMode])
 
-  const score = 42
+  const score = Number(apiReport?.overall_score ?? 42)
   const scoreView = useCountUp(score, phase === 'report')
 
   const chartData = useMemo(
@@ -87,13 +107,96 @@ function FlowPage() {
     { name: 'Чёрно-белое', v: 7 },
   ]
 
-  const submitAnswer = () => {
+  const submitAnswer = async () => {
     const t = draft.trim()
-    if (!t || answers.length >= 5) return
+    if (!t) return
+    if (apiMode && apiSessionId) {
+      if (apiThread.filter((m) => m.role === 'user').length >= 6) return
+      setBusy(true)
+      setFlowError(null)
+      try {
+        const nextThread = [...apiThread, { role: 'user' as const, content: t }]
+        setApiThread(nextThread)
+        setDraft('')
+        const res = await replySession(apiSessionId, t)
+        if ('done' in res && res.done && res.report) {
+          setApiReport(res.report as Record<string, unknown>)
+          setPhase('analyze')
+          window.setTimeout(() => setPhase('report'), 2200)
+        } else if ('bot_message' in res && res.bot_message) {
+          setApiThread([...nextThread, { role: 'assistant', content: res.bot_message }])
+        }
+      } catch (e) {
+        setFlowError(e instanceof Error ? e.message : 'Ошибка запроса')
+        setApiThread((th) => th.slice(0, -1))
+      } finally {
+        setBusy(false)
+      }
+      return
+    }
+    if (answers.length >= 5) return
     const next = [...answers, t]
     setAnswers(next)
     setDraft('')
     if (next.length === 5) setPhase('analyze')
+  }
+
+  const sendPhone = async () => {
+    setFlowError(null)
+    if (apiMode) {
+      setBusy(true)
+      try {
+        await requestCode(phone)
+        setPhase('code')
+      } catch (e) {
+        setFlowError(e instanceof Error ? e.message : 'Не удалось отправить код')
+      } finally {
+        setBusy(false)
+      }
+      return
+    }
+    setPhase('code')
+  }
+
+  const sendVerify = async () => {
+    setFlowError(null)
+    if (apiMode) {
+      setBusy(true)
+      try {
+        await verifyCode(phone, code)
+        setPhase('onb1')
+      } catch (e) {
+        setFlowError(e instanceof Error ? e.message : 'Неверный код')
+      } finally {
+        setBusy(false)
+      }
+      return
+    }
+    setPhase('onb1')
+  }
+
+  const startChatFromOnboarding = async () => {
+    const d = firstQ.trim()
+    if (d.length < 8) return
+    setFlowError(null)
+    if (apiMode) {
+      setBusy(true)
+      try {
+        const r = await startSession(d)
+        setApiSessionId(r.session_id)
+        setApiThread([
+          { role: 'user', content: d },
+          { role: 'assistant', content: r.bot_message },
+        ])
+        setPhase('chat')
+      } catch (e) {
+        setFlowError(e instanceof Error ? e.message : 'Не удалось начать сессию')
+      } finally {
+        setBusy(false)
+      }
+      return
+    }
+    setPhase('chat')
   }
 
   return (
@@ -106,6 +209,11 @@ function FlowPage() {
           На лендинг
         </Link>
       </header>
+      {flowError && (
+        <div className="border-danger/30 bg-danger/10 text-danger border-b px-4 py-3 text-center text-sm">
+          {flowError}
+        </div>
+      )}
 
       <AnimatePresence mode="wait">
         {(phase === 'phone' || phase === 'code') && (
@@ -140,8 +248,9 @@ function FlowPage() {
                   </label>
                   <button
                     type="button"
-                    onClick={() => setPhase('code')}
-                    className="ease-brand bg-accent text-background hover:bg-accent-hover mt-8 w-full rounded-[4px] py-3 font-medium transition-all duration-300"
+                    onClick={() => void sendPhone()}
+                    disabled={busy || phone.replace(/\D/g, '').length < 10}
+                    className="ease-brand bg-accent text-background hover:bg-accent-hover mt-8 w-full rounded-[4px] py-3 font-medium transition-all duration-300 disabled:opacity-40"
                   >
                     Получить код
                     <span className="ml-1">→</span>
@@ -163,8 +272,8 @@ function FlowPage() {
                   />
                   <button
                     type="button"
-                    onClick={() => setPhase('onb1')}
-                    disabled={code.length < 4}
+                    onClick={() => void sendVerify()}
+                    disabled={code.length < 4 || busy}
                     className="ease-brand bg-accent text-background hover:bg-accent-hover mt-8 w-full rounded-[4px] py-3 font-medium transition-all duration-300 disabled:opacity-40"
                   >
                     Войти
@@ -235,8 +344,8 @@ function FlowPage() {
                     />
                     <button
                       type="button"
-                      onClick={() => setPhase('chat')}
-                      disabled={firstQ.trim().length < 8}
+                      onClick={() => void startChatFromOnboarding()}
+                      disabled={firstQ.trim().length < 8 || busy}
                       className="ease-brand bg-accent text-background hover:bg-accent-hover mt-6 rounded-[4px] px-6 py-3 font-medium transition-all duration-300 disabled:opacity-40"
                     >
                       Отправить
@@ -261,28 +370,66 @@ function FlowPage() {
           >
             <div className="mb-4">
               <div className="text-dim flex items-center justify-between font-mono text-[13px] uppercase tracking-[0.08em]">
-                <span>Вопрос {Math.min(answers.length + 1, 5)} из 5</span>
-                <span>{Math.round(((answers.length + 1) / 5) * 100)}%</span>
+                <span>
+                  Вопрос{' '}
+                  {apiMode
+                    ? Math.min(
+                        apiThread.filter((m) => m.role === 'assistant').length,
+                        5,
+                      )
+                    : Math.min(answers.length + 1, 5)}{' '}
+                  из 5
+                </span>
+                <span>
+                  {Math.round(
+                    ((apiMode
+                      ? Math.min(apiThread.filter((m) => m.role === 'assistant').length, 5)
+                      : answers.length + 1) /
+                      5) *
+                      100,
+                  )}
+                  %
+                </span>
               </div>
               <div className="bg-border mt-2 h-1 w-full rounded-full">
                 <motion.div
                   className="bg-accent h-1 rounded-full"
                   initial={{ width: 0 }}
-                  animate={{ width: `${((answers.length + 1) / 5) * 100}%` }}
+                  animate={{
+                    width: `${
+                      ((apiMode
+                        ? Math.min(apiThread.filter((m) => m.role === 'assistant').length, 5)
+                        : answers.length + 1) /
+                        5) *
+                      100
+                    }%`,
+                  }}
                   transition={{ duration: 0.4, ease }}
                 />
               </div>
             </div>
             <div className="flex-1 space-y-4 overflow-y-auto pb-28">
-              <Bubble role="user" text={firstQ} />
-              {answers.map((a, i) => (
-                <div key={i} className="space-y-4">
-                  <Bubble role="bot" text={botQuestions[i]} />
-                  <Bubble role="user" text={a} />
-                </div>
-              ))}
-              {answers.length < 5 && (
-                <Bubble role="bot" text={botQuestions[answers.length]} />
+              {apiMode ? (
+                apiThread.map((m, i) => (
+                  <Bubble
+                    key={i}
+                    role={m.role === 'assistant' ? 'bot' : 'user'}
+                    text={m.content}
+                  />
+                ))
+              ) : (
+                <>
+                  <Bubble role="user" text={firstQ} />
+                  {answers.map((a, i) => (
+                    <div key={i} className="space-y-4">
+                      <Bubble role="bot" text={botQuestions[i]} />
+                      <Bubble role="user" text={a} />
+                    </div>
+                  ))}
+                  {answers.length < 5 && (
+                    <Bubble role="bot" text={botQuestions[answers.length]} />
+                  )}
+                </>
               )}
             </div>
             <div className="border-border bg-background/90 fixed bottom-0 left-0 right-0 border-t p-4 backdrop-blur-md">
@@ -293,16 +440,18 @@ function FlowPage() {
                   onKeyDown={(e) => {
                     if (e.key === 'Enter' && !e.shiftKey) {
                       e.preventDefault()
-                      submitAnswer()
+                      void submitAnswer()
                     }
                   }}
                   placeholder="Ответ…"
-                  className="border-border bg-elevated focus:border-accent flex-1 rounded-[12px] border px-4 py-3 text-[15px] outline-none transition-colors duration-300"
+                  disabled={busy}
+                  className="border-border bg-elevated focus:border-accent flex-1 rounded-[12px] border px-4 py-3 text-[15px] outline-none transition-colors duration-300 disabled:opacity-50"
                 />
                 <button
                   type="button"
-                  onClick={submitAnswer}
-                  className="ease-brand bg-accent text-background hover:bg-accent-hover rounded-[4px] px-4 py-3 font-medium transition-all duration-300"
+                  onClick={() => void submitAnswer()}
+                  disabled={busy}
+                  className="ease-brand bg-accent text-background hover:bg-accent-hover rounded-[4px] px-4 py-3 font-medium transition-all duration-300 disabled:opacity-50"
                 >
                   Ответить
                 </button>
@@ -350,25 +499,37 @@ function FlowPage() {
                 {scoreView}
                 <span className="text-muted text-[0.35em] align-super">/100</span>
               </motion.div>
-              <p className="mt-6 text-2xl font-medium tracking-[-0.02em]">Решение частично логично</p>
+              <p className="mt-6 text-2xl font-medium tracking-[-0.02em]">
+                {String(apiReport?.verdict_short ?? 'Решение частично логично')}
+              </p>
               <p className="text-muted mt-4 max-w-lg text-lg">
-                Твои аргументы выдержали 2 из 4 законов логики. Обнаружено 3 когнитивных искажения.
+                {apiMode && apiReport?.summary
+                  ? String(apiReport.summary)
+                  : 'Твои аргументы проверены по четырём законам логики и типичным искажениям.'}
               </p>
             </div>
 
             <div className="mt-16 grid gap-4 md:grid-cols-2">
-              {[
-                { t: 'Тождество', s: 'частично', d: 'Формулировка запроса меняется под давлением новизны.' },
-                { t: 'Непротиворечие', s: 'да', d: 'Нет прямого столкновения утверждений в одной плоскости.' },
-                { t: 'Исключённое третье', s: 'нет', d: 'Промежуточные состояния описаны как окончательные.' },
-                { t: 'Достаточное основание', s: 'частично', d: 'Причины названы, но не проверены на независимость.' },
-              ].map((row) => (
-                <div key={row.t} className="border-border bg-card rounded-[12px] border p-6">
+              {(Array.isArray(apiReport?.laws) && apiReport!.laws!.length > 0
+                ? (apiReport!.laws as { name?: string; status?: string; comment?: string }[])
+                : [
+                    { name: 'Тождество', status: 'частично', comment: '…' },
+                    { name: 'Непротиворечие', status: 'да', comment: '…' },
+                    { name: 'Исключённое третье', status: 'нет', comment: '…' },
+                    { name: 'Достаточное основание', status: 'частично', comment: '…' },
+                  ]
+              ).map((row, idx) => (
+                <div
+                  key={`${row.name ?? idx}-${idx}`}
+                  className="border-border bg-card rounded-[12px] border p-6"
+                >
                   <div className="flex items-center justify-between gap-3">
-                    <h3 className="font-medium">{row.t}</h3>
-                    <span className="text-dim font-mono text-xs uppercase tracking-[0.08em]">{row.s}</span>
+                    <h3 className="font-medium capitalize">{row.name}</h3>
+                    <span className="text-dim font-mono text-xs uppercase tracking-[0.08em]">
+                      {row.status}
+                    </span>
                   </div>
-                  <p className="text-muted mt-3 text-sm leading-relaxed">{row.d}</p>
+                  <p className="text-muted mt-3 text-sm leading-relaxed">{row.comment}</p>
                 </div>
               ))}
             </div>
@@ -376,9 +537,16 @@ function FlowPage() {
             <div className="mt-12">
               <h3 className="text-lg font-medium">Искажения</h3>
               <ul className="mt-4 space-y-3">
-                {['Свежесть события', 'Поиск подтверждения', 'Чёрно-белое мышление'].map((x) => (
-                  <li key={x} className="border-border bg-elevated rounded-[12px] border px-4 py-3 text-sm text-muted">
-                    {x}
+                {(Array.isArray(apiReport?.biases) && apiReport!.biases!.length > 0
+                  ? (apiReport!.biases as { name?: string; hint?: string }[])
+                  : [{ name: '—', hint: 'Нет данных' }]
+                ).map((x, i) => (
+                  <li
+                    key={i}
+                    className="border-border bg-elevated rounded-[12px] border px-4 py-3 text-sm text-muted"
+                  >
+                    <span className="text-foreground">{x.name}</span>
+                    {x.hint ? ` — ${x.hint}` : ''}
                   </li>
                 ))}
               </ul>
@@ -387,28 +555,49 @@ function FlowPage() {
             <div className="mt-12">
               <h3 className="text-lg font-medium">Альтернативы</h3>
               <ol className="mt-4 list-decimal space-y-4 pl-5 text-muted">
-                <li>Остаться на 90 дней с измеримым экспериментом — снижает импульс.</li>
-                <li>Уточнить финансовый буфер цифрами — убирает страх как единственный аргумент.</li>
-                <li>Сменить контекст без смены работы — проверка гипотезы без точки невозврата.</li>
+                {(Array.isArray(apiReport?.alternatives) && apiReport!.alternatives!.length > 0
+                  ? (apiReport!.alternatives as string[])
+                  : [
+                      'Остаться на 90 дней с измеримым экспериментом.',
+                      'Уточнить финансовый буфер цифрами.',
+                      'Сменить контекст без смены работы.',
+                    ]
+                ).map((line) => (
+                  <li key={line}>{line}</li>
+                ))}
               </ol>
             </div>
 
             <blockquote className="border-border bg-card mt-16 rounded-[20px] border p-10 text-center text-2xl font-medium leading-snug tracking-[-0.02em] md:text-3xl">
-              Когда факты меняются, я меняю мнение.
+              {apiReport?.quote && typeof apiReport.quote === 'object' && apiReport.quote !== null
+                ? String((apiReport.quote as { text?: string }).text ?? '—')
+                : 'Когда факты меняются, я меняю мнение.'}
               <footer className="text-dim mt-8 font-mono text-[13px] uppercase tracking-[0.08em]">
-                Кейнс
+                {apiReport?.quote && typeof apiReport.quote === 'object' && apiReport.quote !== null
+                  ? String((apiReport.quote as { author?: string }).author ?? '')
+                  : 'Кейнс'}
               </footer>
             </blockquote>
 
             <div className="mt-12 flex flex-wrap gap-4">
-              <a
-                href="/pdf-preview.html"
-                target="_blank"
-                rel="noreferrer"
-                className="ease-brand border-border hover:border-border-hover rounded-[4px] border px-5 py-3 font-medium transition-colors duration-300"
-              >
-                Скачать PDF
-              </a>
+              {apiMode && apiSessionId ? (
+                <button
+                  type="button"
+                  onClick={() => void downloadPdf(apiSessionId)}
+                  className="ease-brand border-border hover:border-border-hover rounded-[4px] border px-5 py-3 font-medium transition-colors duration-300"
+                >
+                  Скачать PDF
+                </button>
+              ) : (
+                <a
+                  href="/pdf-preview.html"
+                  target="_blank"
+                  rel="noreferrer"
+                  className="ease-brand border-border hover:border-border-hover rounded-[4px] border px-5 py-3 font-medium transition-colors duration-300"
+                >
+                  Скачать PDF
+                </a>
+              )}
               <button
                 type="button"
                 onClick={() => setPhase('cabinet')}

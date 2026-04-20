@@ -27,7 +27,10 @@ cd logika && pnpm build
 ## Деплой на Vercel
 
 1. Создай проект, **Root Directory** = `logika`, пресет **Vite** (или Static: `pnpm install`, `pnpm build`, выходная папка `dist`).
-2. Файл `vercel.json` отдаёт `index.html` для клиентских маршрутов (например прямой заход на `/potok`). Статические файлы из `public/` (`design-system.html`, `pdf-preview.html`) обслуживаются как обычно.
+2. В **Environment Variables** добавь `VITE_LOGIKA_API_URL` = публичный URL API на Railway (без `/` в конце), например `https://logika-api.up.railway.app`.
+3. Файл `vercel.json` отдаёт `index.html` для клиентских маршрутов. Статика из `public/` (`design-system.html`, `pdf-preview.html`) работает как отдельные файлы.
+
+Бэкенд с БД и SMS: репозиторий `logika-server/` — см. [logika-server/README.md](../logika-server/README.md).
 
 ## CI (опционально)
 
