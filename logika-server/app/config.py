@@ -18,6 +18,8 @@ class Settings(BaseSettings):
     smsaero_sign: str = "SMS Aero"
     # Локально true: код только в логах uvicorn. На Railway в prod оставь false и задай SMSAERO_*.
     smsaero_allow_log_only: bool = False
+    # true = метод sms/testsend (без реальной отправки по правилам SMS Aero; см. документацию).
+    smsaero_test_mode: bool = False
 
     anthropic_api_key: str = ""
     # Общий fallback (если где-то ожидается одна модель)
