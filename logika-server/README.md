@@ -1,6 +1,6 @@
 # Logika API
 
-Бэкенд для приложения «Логика»: PostgreSQL, вход по SMS через [SMS Aero](https://smsaero.ru/integration/documentation/api/), уточняющие вопросы и отчёт через **Claude Opus 4.7** (настраивается через `ANTHROPIC_MODEL_*`), выдача PDF (ReportLab).
+Бэкенд для приложения «Логика»: PostgreSQL, вход по SMS через [SMS Aero](https://smsaero.ru/integration/documentation/api/) (отправка SMS **в фоне** после быстрого ответа API — пользователь не ждёт HTTP к шлюзу) или **код на почту по SMTP**, уточняющие вопросы и отчёт через **Claude Opus 4.7** (настраивается через `ANTHROPIC_MODEL_*`), выдача PDF (ReportLab). Время доставки SMS до абонента зависит от оператора и сети; это не ускорить на стороне API.
 
 ## Архитектура LLM (юнит-экономика)
 
@@ -24,12 +24,13 @@ uvicorn app.main:app --reload --port 8000
 ```
 
 - `GET /health` — проверка
-- `POST /v1/auth/request-code` — тело `{ "phone": "+79991234567" }`
-- `POST /v1/auth/verify` — `{ "phone", "code" }` → JWT
+- `POST /v1/auth/request-code` — `{ "phone": "+79991234567" }` → `{"ok":true}` (SMS уходит в фоне)
+- `POST /v1/auth/request-email-code` — `{ "email": "you@example.com" }` → `{"ok":true}` (письмо в фоне)
+- `POST /v1/auth/verify` — `{ "phone", "code" }` **или** `{ "email", "code" }` → JWT
 - `POST /v1/sessions/start` — заголовок `Authorization: Bearer …`, тело `{ "dilemma": "…" }`
 - `POST /v1/sessions/{id}/reply` — `{ "text": "…" }`
 - `GET /v1/sessions/{id}/pdf` — скачивание PDF
-- `GET /v1/me` — профиль (телефон, имя) по JWT
+- `GET /v1/me` — профиль (телефон, почта, имя) по JWT
 - `GET /v1/cabinet` — история сессий и агрегированная статистика для личного кабинета
 
 ## Railway
@@ -47,6 +48,9 @@ uvicorn app.main:app --reload --port 8000
 | `SMSAERO_SIGN` | Подпись отправителя из кабинета |
 | `SMSAERO_ALLOW_LOG_ONLY` | На проде **не задавай** или `false`. Если `true` при пустых ключах — код только в логах Railway, SMS не уйдёт. |
 | `SMSAERO_TEST_MODE` | `true` → метод API `sms/testsend` (тестовая ветка в [доке SMS Aero](https://smsaero.ru/integration/documentation/api/)). На проде обычно `false`. |
+| `SMSAERO_HTTP_TIMEOUT_SECONDS` | Таймаут HTTP к шлюзу (по умолчанию `12`). |
+| `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASSWORD`, `SMTP_FROM`, `SMTP_USE_TLS` | Для `POST /v1/auth/request-email-code`. |
+| `EMAIL_ALLOW_LOG_ONLY` | Локалка: `true` — код в логах без SMTP. На проде задайте SMTP. |
 | `ANTHROPIC_API_KEY` | Ключ [Anthropic Console](https://console.anthropic.com/) — **обязателен** для Sonnet/Opus; без него раньше включался демо-режим в чате. |
 | `ANTHROPIC_ALLOW_DEMO_WITHOUT_KEY` | Только локалка: `true` = шаблон без Claude. На **production не задавай** (по умолчанию `false`). |
 | `ANTHROPIC_MODEL` | По умолчанию `claude-opus-4-7` |

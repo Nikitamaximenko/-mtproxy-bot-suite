@@ -18,7 +18,8 @@ class LogikaUser(Base):
     __tablename__ = "logika_users"
 
     id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
-    phone_e164: Mapped[str] = mapped_column(String(20), unique=True, index=True)
+    phone_e164: Mapped[str | None] = mapped_column(String(20), unique=True, nullable=True, index=True)
+    email_norm: Mapped[str | None] = mapped_column(String(320), unique=True, nullable=True, index=True)
     name: Mapped[str | None] = mapped_column(String(128), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
 
@@ -29,7 +30,8 @@ class LogikaOtpCode(Base):
     __tablename__ = "logika_otp_codes"
 
     id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
-    phone_e164: Mapped[str] = mapped_column(String(20), index=True)
+    phone_e164: Mapped[str | None] = mapped_column(String(20), nullable=True, index=True)
+    email_norm: Mapped[str | None] = mapped_column(String(320), nullable=True, index=True)
     code_hash: Mapped[str] = mapped_column(String(128))
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     used: Mapped[bool] = mapped_column(Boolean, default=False)

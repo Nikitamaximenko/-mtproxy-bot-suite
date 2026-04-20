@@ -19,6 +19,18 @@ class Settings(BaseSettings):
     smsaero_allow_log_only: bool = False
     # true = метод sms/testsend (без реальной отправки по правилам SMS Aero; см. документацию).
     smsaero_test_mode: bool = False
+    # Таймаут HTTP к шлюзу SMS Aero (сек.): меньше — быстрее отказ при проблемной сети.
+    smsaero_http_timeout_seconds: float = 12.0
+
+    # SMTP для OTP по email (классическая регистрация по почте)
+    smtp_host: str = ""
+    smtp_port: int = 587
+    smtp_user: str = ""
+    smtp_password: str = ""
+    smtp_from: str = ""
+    smtp_use_tls: bool = True
+    # Локально без SMTP: true — код в логах uvicorn
+    email_allow_log_only: bool = False
 
     anthropic_api_key: str = ""
     # Локально true — шаблонные ответы без Claude. На Railway prod держи false и задай ANTHROPIC_API_KEY.
@@ -46,7 +58,7 @@ class Settings(BaseSettings):
             return v.strip()
         return v
 
-    @field_validator("smsaero_sign", mode="before")
+    @field_validator("smsaero_sign", "smtp_user", "smtp_password", "smtp_from", mode="before")
     @classmethod
     def _strip_sign(cls, v: object) -> object:
         if isinstance(v, str):

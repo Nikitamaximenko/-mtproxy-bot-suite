@@ -12,7 +12,7 @@ from urllib.parse import quote_plus
 
 import httpx
 
-from app.config import Settings
+from app.config import Settings, get_settings
 
 logger = logging.getLogger(__name__)
 
@@ -25,8 +25,9 @@ GATE_HOSTS = (
 
 USER_AGENT = "LogikaServer/1.0 (+https://smsaero.ru/integration/documentation/api/)"
 
-# Таймаут как в типичных примерах клиента (сек.)
-HTTP_TIMEOUT = 30.0
+# Таймаут HTTP: слишком большой — пользователь дольше ждёт ответ API (см. request-code + фоновая отправка).
+def _http_timeout() -> float:
+    return max(5.0, float(get_settings().smsaero_http_timeout_seconds))
 
 
 def _build_v2_url(email: str, api_key: str, host: str, selector: str) -> str:
@@ -78,7 +79,7 @@ async def send_otp_sms(settings: Settings, phone_digits: str, code: str) -> None
     headers = {"User-Agent": USER_AGENT, "Accept": "application/json"}
 
     last_err: Exception | None = None
-    async with httpx.AsyncClient(timeout=HTTP_TIMEOUT, headers=headers) as client:
+    async with httpx.AsyncClient(timeout=_http_timeout(), headers=headers) as client:
         for host in GATE_HOSTS:
             url = _build_v2_url(settings.smsaero_email, settings.smsaero_api_key, host, selector)
             try:

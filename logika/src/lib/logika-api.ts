@@ -80,10 +80,20 @@ export async function requestCode(phone: string) {
   return req<{ ok: boolean }>('/v1/auth/request-code', { method: 'POST', json: { phone } })
 }
 
-export async function verifyCode(phone: string, code: string) {
+export async function requestEmailCode(email: string) {
+  return req<{ ok: boolean }>('/v1/auth/request-email-code', { method: 'POST', json: { email } })
+}
+
+export async function verifyCode(
+  opts: { phone: string; code: string } | { email: string; code: string },
+) {
+  const json =
+    'phone' in opts
+      ? { phone: opts.phone, code: opts.code }
+      : { email: opts.email, code: opts.code }
   const data = await req<{ access_token: string; token_type: string }>('/v1/auth/verify', {
     method: 'POST',
-    json: { phone, code },
+    json,
   })
   setToken(data.access_token)
   return data
@@ -138,7 +148,11 @@ export async function fetchCabinet(): Promise<CabinetResponse> {
   return req<CabinetResponse>('/v1/cabinet')
 }
 
-export async function fetchMe(): Promise<{ phone_e164: string; name: string | null }> {
+export async function fetchMe(): Promise<{
+  phone_e164: string | null
+  email_norm: string | null
+  name: string | null
+}> {
   return req('/v1/me')
 }
 

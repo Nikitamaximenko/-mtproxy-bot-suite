@@ -23,6 +23,7 @@ import {
   hasApi,
   replySession,
   requestCode,
+  requestEmailCode,
   startSession,
   verifyCode,
 } from '../lib/logika-api'
@@ -74,10 +75,22 @@ function maskPhoneE164(p: string) {
   return `${p.slice(0, 4)} ··· ${p.slice(-2)}`
 }
 
+function maskEmailNorm(s: string) {
+  const at = s.indexOf('@')
+  if (at < 1) return s
+  const local = s.slice(0, at)
+  const domain = s.slice(at + 1)
+  const lm =
+    local.length <= 2 ? `${local[0] ?? ''}···` : `${local[0]}···${local.slice(-1)}`
+  return `${lm}@${domain}`
+}
+
 function FlowPage() {
   const apiMode = hasApi()
   const [phase, setPhase] = useState<Phase>('phone')
+  const [authChannel, setAuthChannel] = useState<'phone' | 'email'>('phone')
   const [phone, setPhone] = useState('')
+  const [email, setEmail] = useState('')
   const [code, setCode] = useState('')
   const [firstQ, setFirstQ] = useState('')
   const [answers, setAnswers] = useState<string[]>([])
@@ -89,7 +102,11 @@ function FlowPage() {
   const [cabinetData, setCabinetData] = useState<CabinetResponse | null>(null)
   const [cabinetLoading, setCabinetLoading] = useState(false)
   const [cabinetErr, setCabinetErr] = useState<string | null>(null)
-  const [meProfile, setMeProfile] = useState<{ phone_e164: string; name: string | null } | null>(null)
+  const [meProfile, setMeProfile] = useState<{
+    phone_e164: string | null
+    email_norm: string | null
+    name: string | null
+  } | null>(null)
   const [flowError, setFlowError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const [apiSessionId, setApiSessionId] = useState<string | null>(null)
@@ -200,7 +217,11 @@ function FlowPage() {
     if (apiMode) {
       setBusy(true)
       try {
-        await requestCode(phone)
+        if (authChannel === 'phone') {
+          await requestCode(phone)
+        } else {
+          await requestEmailCode(email.trim())
+        }
         setPhase('code')
       } catch (e) {
         setFlowError(e instanceof Error ? e.message : 'Не удалось отправить код')
@@ -217,7 +238,11 @@ function FlowPage() {
     if (apiMode) {
       setBusy(true)
       try {
-        await verifyCode(phone, code)
+        if (authChannel === 'phone') {
+          await verifyCode({ phone, code })
+        } else {
+          await verifyCode({ email: email.trim(), code })
+        }
         setPhase('onb1')
       } catch (e) {
         setFlowError(e instanceof Error ? e.message : 'Неверный код')
@@ -289,21 +314,72 @@ function FlowPage() {
               {phase === 'phone' && (
                 <>
                   <h1 className="mt-6 text-3xl font-medium tracking-[-0.02em] md:text-4xl">
-                    Твой номер телефона
+                    {authChannel === 'phone' ? 'Твой номер телефона' : 'Твоя почта'}
                   </h1>
-                  <label className="mt-10 block">
-                    <span className="text-dim font-mono text-xs uppercase tracking-[0.08em]">+7</span>
-                    <input
-                      value={phone}
-                      onChange={(e) => setPhone(e.target.value)}
-                      placeholder="___ ___ __ __"
-                      className="border-border bg-elevated focus:border-accent focus:ring-accent/30 mt-2 w-full rounded-[4px] border px-4 py-3 text-lg outline-none transition-all duration-300 focus:ring-2"
-                    />
-                  </label>
+                  <div className="mt-8 flex gap-2">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setAuthChannel('phone')
+                        setFlowError(null)
+                      }}
+                      className={clsx(
+                        'rounded-[4px] px-4 py-2 font-mono text-xs uppercase tracking-[0.08em] transition-colors',
+                        authChannel === 'phone'
+                          ? 'bg-accent text-background'
+                          : 'text-muted hover:text-foreground border-border border',
+                      )}
+                    >
+                      Телефон
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setAuthChannel('email')
+                        setFlowError(null)
+                      }}
+                      className={clsx(
+                        'rounded-[4px] px-4 py-2 font-mono text-xs uppercase tracking-[0.08em] transition-colors',
+                        authChannel === 'email'
+                          ? 'bg-accent text-background'
+                          : 'text-muted hover:text-foreground border-border border',
+                      )}
+                    >
+                      Почта
+                    </button>
+                  </div>
+                  {authChannel === 'phone' ? (
+                    <label className="mt-8 block">
+                      <span className="text-dim font-mono text-xs uppercase tracking-[0.08em]">+7</span>
+                      <input
+                        value={phone}
+                        onChange={(e) => setPhone(e.target.value)}
+                        placeholder="___ ___ __ __"
+                        className="border-border bg-elevated focus:border-accent focus:ring-accent/30 mt-2 w-full rounded-[4px] border px-4 py-3 text-lg outline-none transition-all duration-300 focus:ring-2"
+                      />
+                    </label>
+                  ) : (
+                    <label className="mt-8 block">
+                      <span className="text-dim font-mono text-xs uppercase tracking-[0.08em]">Email</span>
+                      <input
+                        type="email"
+                        autoComplete="email"
+                        value={email}
+                        onChange={(e) => setEmail(e.target.value)}
+                        placeholder="you@example.com"
+                        className="border-border bg-elevated focus:border-accent focus:ring-accent/30 mt-2 w-full rounded-[4px] border px-4 py-3 text-lg outline-none transition-all duration-300 focus:ring-2"
+                      />
+                    </label>
+                  )}
                   <button
                     type="button"
                     onClick={() => void sendPhone()}
-                    disabled={busy || phone.replace(/\D/g, '').length < 10}
+                    disabled={
+                      busy ||
+                      (authChannel === 'phone'
+                        ? phone.replace(/\D/g, '').length < 10
+                        : !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim()))
+                    }
                     className="ease-brand bg-accent text-background hover:bg-accent-hover mt-8 w-full rounded-[4px] py-3 font-medium transition-all duration-300 disabled:opacity-40"
                   >
                     Получить код
@@ -316,12 +392,19 @@ function FlowPage() {
               )}
               {phase === 'code' && (
                 <>
-                  <h1 className="mt-6 text-3xl font-medium tracking-[-0.02em] md:text-4xl">Код из SMS</h1>
+                  <h1 className="mt-6 text-3xl font-medium tracking-[-0.02em] md:text-4xl">
+                    {authChannel === 'phone' ? 'Код из SMS' : 'Код из письма'}
+                  </h1>
+                  <p className="text-muted mt-3 text-sm leading-relaxed">
+                    {authChannel === 'phone'
+                      ? 'Сервер отвечает сразу; доставка SMS зависит от оператора и может занять до нескольких минут.'
+                      : 'Проверьте папку «Спам», если письма нет во входящих.'}
+                  </p>
                   <input
                     value={code}
                     onChange={(e) => setCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
                     autoFocus
-                    className="border-border bg-elevated focus:border-accent focus:ring-accent/30 mt-10 w-full rounded-[4px] border px-4 py-4 font-mono text-2xl tracking-[0.4em] outline-none transition-all duration-300 focus:ring-2"
+                    className="border-border bg-elevated focus:border-accent focus:ring-accent/30 mt-8 w-full rounded-[4px] border px-4 py-4 font-mono text-2xl tracking-[0.4em] outline-none transition-all duration-300 focus:ring-2"
                     placeholder="••••••"
                   />
                   <button
@@ -899,7 +982,21 @@ function FlowPage() {
                     Телефон
                     <input
                       readOnly
-                      value={meProfile ? maskPhoneE164(meProfile.phone_e164) : '—'}
+                      value={
+                        meProfile?.phone_e164
+                          ? maskPhoneE164(meProfile.phone_e164)
+                          : '—'
+                      }
+                      className="border-border bg-elevated mt-2 w-full cursor-not-allowed rounded-[4px] border px-3 py-2 text-foreground"
+                    />
+                  </label>
+                  <label className="mt-6 block text-sm text-muted">
+                    Почта
+                    <input
+                      readOnly
+                      value={
+                        meProfile?.email_norm ? maskEmailNorm(meProfile.email_norm) : '—'
+                      }
                       className="border-border bg-elevated mt-2 w-full cursor-not-allowed rounded-[4px] border px-3 py-2 text-foreground"
                     />
                   </label>

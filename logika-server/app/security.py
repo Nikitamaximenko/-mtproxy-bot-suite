@@ -11,8 +11,9 @@ import jwt
 from app.config import Settings
 
 
-def hash_otp(settings: Settings, phone_digits: str, code: str) -> str:
-    msg = f"{phone_digits}:{code}".encode()
+def hash_otp(settings: Settings, subject: str, code: str) -> str:
+    """subject: стабильная строка канала, напр. «p:7999…» или «e:user@domain.ru»."""
+    msg = f"{subject}:{code}".encode()
     return hmac.new(settings.jwt_secret.encode(), msg, hashlib.sha256).hexdigest()
 
 
