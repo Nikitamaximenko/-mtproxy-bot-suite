@@ -49,6 +49,7 @@ const botQuestions = [
 ]
 
 const analyzeLines = [
+  'Строим полный отчёт (это может занять 1–3 минуты)…',
   'Проверяю закон тождества…',
   'Ищу когнитивные искажения…',
   'Собираю альтернативы…',
@@ -249,8 +250,15 @@ function FlowPage() {
     if (!t) return
     if (apiMode && apiSessionId) {
       if (apiThread.filter((m) => m.role === 'user').length >= 6) return
+      const userMsgCount = apiThread.filter((m) => m.role === 'user').length
+      // На сервере в messages нет первого текста дилеммы — 5-й ответ пользователя в чате = дилемма + 4 реплики → это финальный ответ перед отчётом.
+      const isFinalClarifyingReply = userMsgCount === 5
       setBusy(true)
       setFlowError(null)
+      if (isFinalClarifyingReply) {
+        setPhase('analyze')
+        setAnalyzeLine(0)
+      }
       try {
         const nextThread = [...apiThread, { role: 'user' as const, content: t }]
         setApiThread(nextThread)
@@ -259,7 +267,9 @@ function FlowPage() {
         if ('done' in res && res.done && res.report) {
           persistActiveSessionId(null)
           setApiReport(res.report as Record<string, unknown>)
-          setPhase('analyze')
+          if (!isFinalClarifyingReply) {
+            setPhase('analyze')
+          }
           window.setTimeout(() => setPhase('report'), 2200)
         } else if ('bot_message' in res && res.bot_message) {
           setApiThread([...nextThread, { role: 'assistant', content: res.bot_message }])
@@ -267,6 +277,9 @@ function FlowPage() {
       } catch (e) {
         setFlowError(e instanceof Error ? e.message : 'Ошибка запроса')
         setApiThread((th) => th.slice(0, -1))
+        if (isFinalClarifyingReply) {
+          setPhase('chat')
+        }
       } finally {
         setBusy(false)
       }
@@ -690,6 +703,12 @@ function FlowPage() {
               )}
             </div>
             <div className="border-border bg-background/90 fixed bottom-0 left-0 right-0 border-t p-4 backdrop-blur-md">
+              {apiMode && apiThread.filter((m) => m.role === 'user').length === 5 && (
+                <p className="text-accent mx-auto mb-3 max-w-[720px] text-center text-sm leading-snug">
+                  Это последний ответ перед отчётом. После отправки начнётся сбор полного анализа (обычно 1–3
+                  минуты).
+                </p>
+              )}
               <div className="mx-auto flex max-w-[720px] gap-3">
                 <input
                   value={draft}
@@ -734,9 +753,14 @@ function FlowPage() {
                 />
               ))}
             </div>
-            <p className="text-muted mt-8 font-mono text-sm uppercase tracking-[0.08em]">
+            <p className="text-muted mt-8 max-w-md text-center font-mono text-sm uppercase tracking-[0.08em]">
               {analyzeLines[analyzeLine]}
             </p>
+            {apiMode && busy && (
+              <p className="text-muted mt-6 max-w-md text-center text-[15px] leading-relaxed">
+                Идёт запрос к серверу: модель собирает отчёт по законам и искажениям. Не закрывайте вкладку.
+              </p>
+            )}
           </motion.section>
         )}
 

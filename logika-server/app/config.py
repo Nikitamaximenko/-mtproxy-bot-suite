@@ -53,8 +53,8 @@ class Settings(BaseSettings):
 
     enable_router: bool = True
     enable_self_critique: bool = True
-    # Один флаг: Sonnet-вопросы берутся из env; router/critique/thinking выключаются; effort ниже.
-    fast_analysis: bool = False
+    # Один флаг: Sonnet-вопросы из env; router/critique/thinking выключаются; effort ниже. На проде по умолчанию true — быстрее финальный отчёт.
+    fast_analysis: bool = True
 
     questions_count: int = 5
 
