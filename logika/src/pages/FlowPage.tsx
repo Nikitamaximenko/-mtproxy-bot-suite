@@ -488,28 +488,30 @@ function FlowPage() {
             key="report"
             initial={{ opacity: 0, y: 16 }}
             animate={{ opacity: 1, y: 0 }}
-            className="mx-auto max-w-[840px] px-4 py-12"
+            className="mx-auto w-full max-w-3xl px-4 py-10 sm:px-6 md:py-14"
           >
-            <div className="flex min-h-[55dvh] flex-col items-center justify-center text-center">
-              <p className="text-dim font-mono text-[13px] uppercase tracking-[0.08em]">Overall Score</p>
-              <motion.div
-                className="text-accent mt-4 text-[clamp(5rem,18vw,9rem)] font-medium leading-none tracking-[-0.04em]"
-                style={{ color: score < 40 ? '#ff4d4d' : score < 70 ? '#ffb23d' : '#c4f542' }}
-              >
-                {scoreView}
-                <span className="text-muted text-[0.35em] align-super">/100</span>
-              </motion.div>
-              <p className="mt-6 text-2xl font-medium tracking-[-0.02em]">
+            <div className="border-border bg-card/40 rounded-2xl border px-5 py-8 sm:px-8 md:px-10">
+              <p className="text-dim font-mono text-[12px] uppercase tracking-[0.1em]">Overall Score</p>
+              <div className="mt-3 flex flex-wrap items-baseline gap-2">
+                <motion.span
+                  className="text-[clamp(3rem,14vw,5.5rem)] font-medium leading-none tracking-[-0.04em]"
+                  style={{ color: score < 40 ? '#ff4d4d' : score < 70 ? '#ffb23d' : '#c4f542' }}
+                >
+                  {scoreView}
+                </motion.span>
+                <span className="text-muted text-2xl font-medium md:text-3xl">/100</span>
+              </div>
+              <p className="mt-6 text-left text-xl font-medium leading-snug tracking-[-0.02em] md:text-2xl">
                 {String(apiReport?.verdict_short ?? 'Решение частично логично')}
               </p>
-              <p className="text-muted mt-4 max-w-lg text-lg">
+              <p className="text-muted mt-5 max-w-prose text-left text-base leading-relaxed">
                 {apiMode && apiReport?.summary
                   ? String(apiReport.summary)
                   : 'Твои аргументы проверены по четырём законам логики и типичным искажениям.'}
               </p>
             </div>
 
-            <div className="mt-16 grid gap-4 md:grid-cols-2">
+            <div className="mt-12 grid gap-4 sm:grid-cols-2">
               {(Array.isArray(apiReport?.laws) && apiReport!.laws!.length > 0
                 ? (apiReport!.laws as { name?: string; status?: string; comment?: string }[])
                 : [
@@ -521,11 +523,11 @@ function FlowPage() {
               ).map((row, idx) => (
                 <div
                   key={`${row.name ?? idx}-${idx}`}
-                  className="border-border bg-card rounded-[12px] border p-6"
+                  className="border-border bg-card flex h-full flex-col rounded-xl border p-5 text-left"
                 >
-                  <div className="flex items-center justify-between gap-3">
-                    <h3 className="font-medium capitalize">{row.name}</h3>
-                    <span className="text-dim font-mono text-xs uppercase tracking-[0.08em]">
+                  <div className="flex flex-wrap items-start justify-between gap-2">
+                    <h3 className="text-[15px] font-medium leading-snug">{row.name}</h3>
+                    <span className="text-dim shrink-0 font-mono text-[11px] uppercase tracking-[0.08em]">
                       {row.status}
                     </span>
                   </div>
@@ -535,7 +537,7 @@ function FlowPage() {
             </div>
 
             <div className="mt-12">
-              <h3 className="text-lg font-medium">Искажения</h3>
+              <h3 className="text-dim font-mono text-[12px] uppercase tracking-[0.1em]">Искажения</h3>
               <ul className="mt-4 space-y-3">
                 {(Array.isArray(apiReport?.biases) && apiReport!.biases!.length > 0
                   ? (apiReport!.biases as { name?: string; hint?: string }[])
@@ -553,8 +555,8 @@ function FlowPage() {
             </div>
 
             <div className="mt-12">
-              <h3 className="text-lg font-medium">Альтернативы</h3>
-              <ol className="mt-4 list-decimal space-y-4 pl-5 text-muted">
+              <h3 className="text-dim font-mono text-[12px] uppercase tracking-[0.1em]">Альтернативы</h3>
+              <ol className="mt-4 list-decimal space-y-3 pl-5 text-[15px] leading-relaxed text-muted">
                 {(Array.isArray(apiReport?.alternatives) && apiReport!.alternatives!.length > 0
                   ? (apiReport!.alternatives as string[])
                   : [
@@ -568,11 +570,11 @@ function FlowPage() {
               </ol>
             </div>
 
-            <blockquote className="border-border bg-card mt-16 rounded-[20px] border p-10 text-center text-2xl font-medium leading-snug tracking-[-0.02em] md:text-3xl">
+            <blockquote className="border-border bg-card mt-14 rounded-2xl border p-6 text-left text-xl font-medium leading-snug tracking-[-0.02em] sm:p-8 md:text-2xl">
               {apiReport?.quote && typeof apiReport.quote === 'object' && apiReport.quote !== null
                 ? String((apiReport.quote as { text?: string }).text ?? '—')
                 : 'Когда факты меняются, я меняю мнение.'}
-              <footer className="text-dim mt-8 font-mono text-[13px] uppercase tracking-[0.08em]">
+              <footer className="text-dim mt-6 font-mono text-[12px] uppercase tracking-[0.1em]">
                 {apiReport?.quote && typeof apiReport.quote === 'object' && apiReport.quote !== null
                   ? String((apiReport.quote as { author?: string }).author ?? '')
                   : 'Кейнс'}
