@@ -9,19 +9,20 @@ export function useCountUp(
 
   useEffect(() => {
     if (!active) {
-      setV(0)
-      return
+      const id = requestAnimationFrame(() => setV(0))
+      return () => cancelAnimationFrame(id)
     }
     let start: number | null = null
+    let raf = 0
     const step = (t: number) => {
       if (start === null) start = t
       const p = Math.min((t - start) / durationMs, 1)
       const eased = 1 - (1 - p) ** 3
       setV(Math.round(end * eased))
-      if (p < 1) requestAnimationFrame(step)
+      if (p < 1) raf = requestAnimationFrame(step)
     }
-    const id = requestAnimationFrame(step)
-    return () => cancelAnimationFrame(id)
+    raf = requestAnimationFrame(step)
+    return () => cancelAnimationFrame(raf)
   }, [active, end, durationMs])
 
   return v
