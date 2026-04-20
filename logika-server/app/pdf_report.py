@@ -85,14 +85,24 @@ def build_pdf_bytes(report: dict[str, Any], dilemma: str) -> bytes:
     card_bg = colors.HexColor("#f3f1eb")
     border_c = colors.HexColor("#222226")
 
+    title_doc = ParagraphStyle(
+        name="PdfTitleDoc",
+        parent=styles["Normal"],
+        fontName=fn,
+        fontSize=18,
+        leading=24,
+        textColor=ink,
+        spaceAfter=4,
+        spaceBefore=0,
+    )
     intro_brand = ParagraphStyle(
         name="PdfIntroBrand",
         parent=styles["Normal"],
         fontName=fn,
-        fontSize=13,
-        leading=15,
+        fontSize=12,
+        leading=16,
         textColor=ink,
-        spaceAfter=0,
+        spaceAfter=2,
     )
     intro_date = ParagraphStyle(
         name="PdfIntroDate",
@@ -103,13 +113,33 @@ def build_pdf_bytes(report: dict[str, Any], dilemma: str) -> bytes:
         textColor=muted,
         alignment=TA_RIGHT,
     )
+    section_label = ParagraphStyle(
+        name="PdfSectionLabel",
+        parent=styles["Normal"],
+        fontName=fn,
+        fontSize=8,
+        leading=11,
+        textColor=colors.HexColor("#8a8a94"),
+        spaceAfter=6,
+        spaceBefore=0,
+    )
     intro_dilemma = ParagraphStyle(
         name="PdfIntroDilemma",
         parent=styles["Normal"],
         fontName=fn,
-        fontSize=9,
-        leading=13,
+        fontSize=10,
+        leading=15,
         textColor=body_color,
+        spaceBefore=4,
+    )
+    body_loose = ParagraphStyle(
+        name="PdfBodyLoose",
+        parent=styles["Normal"],
+        fontName=fn,
+        fontSize=10,
+        leading=16,
+        textColor=body_color,
+        spaceAfter=10,
     )
     h2 = ParagraphStyle(
         name="PdfH2",
@@ -133,11 +163,11 @@ def build_pdf_bytes(report: dict[str, Any], dilemma: str) -> bytes:
         name="PdfVerdict",
         parent=styles["Normal"],
         fontName=fn,
-        fontSize=13,
-        leading=18,
+        fontSize=14,
+        leading=20,
         textColor=ink,
-        spaceBefore=8,
-        spaceAfter=6,
+        spaceBefore=4,
+        spaceAfter=14,
     )
     meta = ParagraphStyle(
         name="PdfMeta",
@@ -167,93 +197,111 @@ def build_pdf_bytes(report: dict[str, Any], dilemma: str) -> bytes:
 
     gen_iso = datetime.now(timezone.utc).strftime("%d.%m.%Y")
 
-    # Введение: одна карточка — бренд | дата, разделитель, короткий запрос (~½ текста)
+    # Шапка: бренд + дата (воздух), затем заголовок; запрос и оценка — отдельные блоки
     intro_left = _p(
         f'<font color="#0a0a0b"><b>ЛОГИКА.</b></font> <font color="#c4f542">·</font><br/>'
-        f'<font color="#5a5a62" size="8">Отчёт · разбор решения</font>',
+        f'<font color="#5a5a62" size="8">Аналитический отчёт</font>',
         intro_brand,
     )
     intro_right = _p(
-        f'<font color="#8a8a94" size="7">ДАТА</font><br/>'
-        f'<font color="#0a0a0b" size="9">{_esc(gen_iso)}</font>',
+        f'<font color="#8a8a94" size="7">ДАТА ДОКУМЕНТА</font><br/>'
+        f'<font color="#0a0a0b" size="10">{_esc(gen_iso)}</font>',
         intro_date,
     )
-    intro_rows: list[list[Any]] = [[intro_left, intro_right]]
+    intro_tbl = Table([[intro_left, intro_right]], colWidths=[w * 0.62, w * 0.38])
+    intro_tbl.setStyle(
+        TableStyle(
+            [
+                ("VALIGN", (0, 0), (-1, -1), "TOP"),
+                ("ALIGN", (1, 0), (1, 0), "RIGHT"),
+                ("LEFTPADDING", (0, 0), (-1, -1), 0),
+                ("RIGHTPADDING", (0, 0), (-1, -1), 0),
+                ("TOPPADDING", (0, 0), (-1, -1), 0),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 14),
+                ("LINEBELOW", (0, 0), (-1, 0), 0.5, colors.HexColor("#e0ddd6")),
+            ]
+        )
+    )
+    story.append(intro_tbl)
+    story.append(Spacer(1, 0.45 * cm))
+    story.append(_p('<font color="#0a0a0b"><b>Разбор решения</b></font>', title_doc))
+    story.append(Spacer(1, 0.5 * cm))
+
     dilemma_raw = (dilemma or "").strip()
     if dilemma_raw:
-        dilemma_short = _truncate_intro(dilemma_raw, max_chars=160)
-        intro_rows.append(
+        dilemma_short = _truncate_intro(dilemma_raw, max_chars=200)
+        dilemma_box = Table(
             [
-                _p(
-                    f'<font color="#8a8a94" size="7">ЗАПРОС</font><br/>'
-                    f'<font color="#2d2d33" size="9">«{_esc(dilemma_short)}»</font>',
-                    intro_dilemma,
-                ),
-                "",
-            ]
+                [
+                    _p(
+                        f'<font color="#8a8a94" size="7">ИСХОДНЫЙ ЗАПРОС</font><br/><br/>'
+                        f'<font color="#2d2d33">«{_esc(dilemma_short)}»</font>',
+                        intro_dilemma,
+                    )
+                ]
+            ],
+            colWidths=[w],
         )
-
-    intro_tbl = Table(intro_rows, colWidths=[w * 0.68, w * 0.32])
-    intro_ts = [
-        ("BACKGROUND", (0, 0), (-1, -1), card_bg),
-        ("BOX", (0, 0), (-1, -1), 0.5, border_c),
-        ("LINEABOVE", (0, 0), (-1, 0), 3, accent),
-        ("VALIGN", (0, 0), (-1, -1), "TOP"),
-        ("ALIGN", (1, 0), (1, 0), "RIGHT"),
-        ("LEFTPADDING", (0, 0), (-1, -1), 12),
-        ("RIGHTPADDING", (0, 0), (-1, -1), 12),
-        ("TOPPADDING", (0, 0), (-1, 0), 10),
-        ("BOTTOMPADDING", (0, 0), (-1, 0), 10),
-    ]
-    if dilemma_raw:
-        intro_ts.extend(
-            [
-                ("SPAN", (0, 1), (1, 1)),
-                ("LINEBELOW", (0, 0), (-1, 0), 0.25, colors.HexColor("#e8e6e0")),
-                ("TOPPADDING", (0, 1), (-1, 1), 8),
-                ("BOTTOMPADDING", (0, 1), (-1, 1), 10),
-            ]
+        dilemma_box.setStyle(
+            TableStyle(
+                [
+                    ("BACKGROUND", (0, 0), (-1, -1), colors.white),
+                    ("BOX", (0, 0), (-1, -1), 0.5, border_c),
+                    ("LEFTPADDING", (0, 0), (-1, -1), 16),
+                    ("RIGHTPADDING", (0, 0), (-1, -1), 16),
+                    ("TOPPADDING", (0, 0), (-1, -1), 14),
+                    ("BOTTOMPADDING", (0, 0), (-1, -1), 16),
+                ]
+            )
         )
-    intro_tbl.setStyle(TableStyle(intro_ts))
-    story.append(intro_tbl)
-    story.append(Spacer(1, 0.35 * cm))
+        story.append(dilemma_box)
+        story.append(Spacer(1, 0.55 * cm))
 
-    # Карточка оценки
     score_para = _p(
-        f'<font name="{fn}" color="#5a5a62">OVERALL SCORE</font><br/>'
-        f'<font name="{fn}" color="{sc_hex}"><b><font size="36">{score}</font></b></font>'
+        f'<font name="{fn}" color="#8a8a94" size="8">ОЦЕНКА</font><br/><br/>'
+        f'<font name="{fn}" color="{sc_hex}"><b><font size="38">{score}</font></b></font>'
         f'<font name="{fn}" color="#9a9aa4">  / 100</font>',
         body,
     )
     verdict_txt = _esc(str(report.get("verdict_short") or "Решение частично логично"))
     verdict_block = _p(f"<b>{verdict_txt}</b>", verdict_style)
     summary_raw = str(report.get("summary") or "").strip()
-    summary_short = _truncate_intro(summary_raw, 280) if summary_raw else ""
-    summary_block = (
-        _p(_esc(summary_short), body)
-        if summary_short
-        else _p(_esc("Проверка по законам логики и типичным искажениям."), body)
-    )
+    summary_short = _truncate_intro(summary_raw, 320) if summary_raw else ""
+    summary_parts: list[str] = []
+    if summary_short:
+        summary_parts = [p.strip() for p in summary_short.replace("\r\n", "\n").split("\n\n") if p.strip()]
+    if not summary_parts:
+        summary_parts = ["Проверка по законам логики и типичным искажениям."]
 
-    score_card = Table(
-        [[score_para], [verdict_block], [summary_block]],
-        colWidths=[w],
-    )
+    score_inner: list[Any] = [
+        [score_para],
+        [_p('<font color="#8a8a94" size="8">ВЕРДИКТ</font>', section_label)],
+        [verdict_block],
+        [_p('<font color="#8a8a94" size="8">РАЗБОР</font>', section_label)],
+    ]
+    for para in summary_parts:
+        score_inner.append([_p(_esc(para), body_loose)])
+
+    score_card = Table(score_inner, colWidths=[w])
+    div_line = colors.HexColor("#e8e6e0")
     score_card.setStyle(
         TableStyle(
             [
                 ("BACKGROUND", (0, 0), (-1, -1), card_bg),
                 ("BOX", (0, 0), (-1, -1), 0.5, border_c),
                 ("LINEABOVE", (0, 0), (0, 0), 3, accent),
-                ("LEFTPADDING", (0, 0), (-1, -1), 14),
-                ("RIGHTPADDING", (0, 0), (-1, -1), 14),
-                ("TOPPADDING", (0, 0), (-1, -1), 14),
-                ("BOTTOMPADDING", (0, 0), (-1, -1), 14),
+                ("LEFTPADDING", (0, 0), (-1, -1), 18),
+                ("RIGHTPADDING", (0, 0), (-1, -1), 18),
+                ("TOPPADDING", (0, 0), (0, 0), 20),
+                ("BOTTOMPADDING", (0, -1), (-1, -1), 20),
+                ("VALIGN", (0, 0), (-1, -1), "TOP"),
+                ("LINEBELOW", (0, 0), (-1, 0), 0.5, div_line),
+                ("LINEBELOW", (0, 2), (-1, 2), 0.5, div_line),
             ]
         )
     )
     story.append(score_card)
-    story.append(Spacer(1, 0.45 * cm))
+    story.append(Spacer(1, 0.55 * cm))
 
     law_dicts = [x for x in (report.get("laws") or []) if isinstance(x, dict)]
     if law_dicts:
