@@ -7,6 +7,7 @@ from typing import Any
 from xml.sax.saxutils import escape
 
 from reportlab.lib import colors
+from reportlab.lib.enums import TA_RIGHT
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
 from reportlab.lib.units import cm
@@ -55,6 +56,14 @@ def _score_hex(score: int) -> str:
     return "#c4f542"
 
 
+def _truncate_intro(text: str, max_chars: int = 160) -> str:
+    """Сокращает вводный текст в PDF (~половина длинного запроса)."""
+    t = (text or "").strip()
+    if len(t) <= max_chars:
+        return t
+    return t[: max_chars - 1].rstrip() + "…"
+
+
 def build_pdf_bytes(report: dict[str, Any], dilemma: str) -> bytes:
     """PDF A4: структура как в экранном отчёте Логика (светлый крем, акцент #c4f542)."""
     fn = _register_cyrillic_fonts()
@@ -70,30 +79,37 @@ def build_pdf_bytes(report: dict[str, Any], dilemma: str) -> bytes:
     styles = getSampleStyleSheet()
     cream = colors.HexColor("#FAF7F0")
     accent = colors.HexColor("#c4f542")
-    accent_muted = colors.HexColor("#6B7F2A")
     ink = colors.HexColor("#0a0a0b")
     body_color = colors.HexColor("#2d2d33")
     muted = colors.HexColor("#5a5a62")
     card_bg = colors.HexColor("#f3f1eb")
     border_c = colors.HexColor("#222226")
 
-    brand_mono = ParagraphStyle(
-        name="PdfBrandMono",
+    intro_brand = ParagraphStyle(
+        name="PdfIntroBrand",
         parent=styles["Normal"],
         fontName=fn,
-        fontSize=8,
-        leading=11,
-        textColor=muted,
-        spaceAfter=4,
-    )
-    title = ParagraphStyle(
-        name="PdfTitle",
-        parent=styles["Normal"],
-        fontName=fn,
-        fontSize=22,
-        leading=28,
+        fontSize=13,
+        leading=15,
         textColor=ink,
-        spaceAfter=6,
+        spaceAfter=0,
+    )
+    intro_date = ParagraphStyle(
+        name="PdfIntroDate",
+        parent=styles["Normal"],
+        fontName=fn,
+        fontSize=9,
+        leading=12,
+        textColor=muted,
+        alignment=TA_RIGHT,
+    )
+    intro_dilemma = ParagraphStyle(
+        name="PdfIntroDilemma",
+        parent=styles["Normal"],
+        fontName=fn,
+        fontSize=9,
+        leading=13,
+        textColor=body_color,
     )
     h2 = ParagraphStyle(
         name="PdfH2",
@@ -149,54 +165,74 @@ def build_pdf_bytes(report: dict[str, Any], dilemma: str) -> bytes:
     score = int(report.get("overall_score") or 0)
     sc_hex = _score_hex(score)
 
-    # Шапка: бренд + дата (как в UI)
     gen_iso = datetime.now(timezone.utc).strftime("%d.%m.%Y")
-    header_tbl = Table(
-        [
+
+    # Введение: одна карточка — бренд | дата, разделитель, короткий запрос (~½ текста)
+    intro_left = _p(
+        f'<font color="#0a0a0b"><b>ЛОГИКА.</b></font> <font color="#c4f542">·</font><br/>'
+        f'<font color="#5a5a62" size="8">Отчёт · разбор решения</font>',
+        intro_brand,
+    )
+    intro_right = _p(
+        f'<font color="#8a8a94" size="7">ДАТА</font><br/>'
+        f'<font color="#0a0a0b" size="9">{_esc(gen_iso)}</font>',
+        intro_date,
+    )
+    intro_rows: list[list[Any]] = [[intro_left, intro_right]]
+    dilemma_raw = (dilemma or "").strip()
+    if dilemma_raw:
+        dilemma_short = _truncate_intro(dilemma_raw, max_chars=160)
+        intro_rows.append(
             [
                 _p(
-                    f'<font name="{fn}" color="#0a0a0b"><b>ЛОГИКА.</b></font> '
-                    f'<font name="{fn}" color="#c4f542"><b>·</b></font> '
-                    f'<font name="{fn}" color="#5a5a62">Аналитический отчёт</font>',
-                    body,
+                    f'<font color="#8a8a94" size="7">ЗАПРОС</font><br/>'
+                    f'<font color="#2d2d33" size="9">«{_esc(dilemma_short)}»</font>',
+                    intro_dilemma,
                 ),
-                _p(f'<font name="{fn}" color="#5a5a62">Документ<br/></font>'
-                    f'<font name="{fn}" color="#0a0a0b">{_esc(gen_iso)}</font>', meta),
-            ]
-        ],
-        colWidths=[w * 0.68, w * 0.32],
-    )
-    header_tbl.setStyle(
-        TableStyle(
-            [
-                ("VALIGN", (0, 0), (-1, -1), "TOP"),
-                ("ALIGN", (1, 0), (1, 0), "RIGHT"),
-                ("LEFTPADDING", (0, 0), (-1, -1), 0),
-                ("RIGHTPADDING", (0, 0), (-1, -1), 0),
+                "",
             ]
         )
-    )
-    story.append(header_tbl)
-    story.append(_p('<font name="%s" color="#0a0a0b"><b>Разбор решения</b></font>' % fn, title))
-    story.append(Spacer(1, 0.25 * cm))
 
-    if (dilemma or "").strip():
-        story.append(_p(f'<font name="{fn}" color="#5a5a62">Исходный запрос</font>', brand_mono))
-        story.append(_p(f'«{_esc(dilemma.strip())}»', body))
-        story.append(Spacer(1, 0.4 * cm))
+    intro_tbl = Table(intro_rows, colWidths=[w * 0.68, w * 0.32])
+    intro_ts = [
+        ("BACKGROUND", (0, 0), (-1, -1), card_bg),
+        ("BOX", (0, 0), (-1, -1), 0.5, border_c),
+        ("LINEABOVE", (0, 0), (-1, 0), 3, accent),
+        ("VALIGN", (0, 0), (-1, -1), "TOP"),
+        ("ALIGN", (1, 0), (1, 0), "RIGHT"),
+        ("LEFTPADDING", (0, 0), (-1, -1), 12),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 12),
+        ("TOPPADDING", (0, 0), (-1, 0), 10),
+        ("BOTTOMPADDING", (0, 0), (-1, 0), 10),
+    ]
+    if dilemma_raw:
+        intro_ts.extend(
+            [
+                ("SPAN", (0, 1), (1, 1)),
+                ("LINEBELOW", (0, 0), (-1, 0), 0.25, colors.HexColor("#e8e6e0")),
+                ("TOPPADDING", (0, 1), (-1, 1), 8),
+                ("BOTTOMPADDING", (0, 1), (-1, 1), 10),
+            ]
+        )
+    intro_tbl.setStyle(TableStyle(intro_ts))
+    story.append(intro_tbl)
+    story.append(Spacer(1, 0.35 * cm))
 
-    # Карточка оценки (таблица с фоном)
+    # Карточка оценки
     score_para = _p(
-        f'<font name="{fn}" color="#5a5a62">OVERALL SCORE</font><br/><br/>'
-        f'<font name="{fn}" color="{sc_hex}"><b><font size="42">{score}</font></b></font>'
+        f'<font name="{fn}" color="#5a5a62">OVERALL SCORE</font><br/>'
+        f'<font name="{fn}" color="{sc_hex}"><b><font size="36">{score}</font></b></font>'
         f'<font name="{fn}" color="#9a9aa4">  / 100</font>',
         body,
     )
     verdict_txt = _esc(str(report.get("verdict_short") or "Решение частично логично"))
     verdict_block = _p(f"<b>{verdict_txt}</b>", verdict_style)
-    summary = str(report.get("summary") or "").strip()
+    summary_raw = str(report.get("summary") or "").strip()
+    summary_short = _truncate_intro(summary_raw, 280) if summary_raw else ""
     summary_block = (
-        _p(_esc(summary), body) if summary else _p(_esc("Твои аргументы проверены по законам логики."), body)
+        _p(_esc(summary_short), body)
+        if summary_short
+        else _p(_esc("Проверка по законам логики и типичным искажениям."), body)
     )
 
     score_card = Table(
@@ -332,9 +368,6 @@ def build_pdf_bytes(report: dict[str, Any], dilemma: str) -> bytes:
         canvas.rect(0, 0, A4[0], A4[1], stroke=0, fill=1)
         canvas.setFillColor(accent)
         canvas.rect(0, A4[1] - 6, A4[0], 6, stroke=0, fill=1)
-        canvas.setStrokeColor(accent_muted)
-        canvas.setLineWidth(0.3)
-        canvas.line(1.8 * cm, A4[1] - 1.6 * cm, A4[0] - 1.8 * cm, A4[1] - 1.6 * cm)
         canvas.restoreState()
 
     doc.build(story, onFirstPage=_draw_bg, onLaterPages=_draw_bg)
