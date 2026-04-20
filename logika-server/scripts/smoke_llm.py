@@ -29,8 +29,6 @@ def _bootstrap() -> None:
         os.environ["ENABLE_ROUTER"] = "false"
     from app.config import get_settings
 
-    get_settings.cache_clear()
-
 
 async def main() -> int:
     _bootstrap()

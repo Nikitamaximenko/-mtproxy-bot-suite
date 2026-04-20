@@ -68,6 +68,14 @@ def create_app() -> FastAPI:
     def _startup() -> None:
         Base.metadata.create_all(bind=engine)
         logger.info("Logika DB ready")
+        s = get_settings()
+        sms_ok = bool(s.smsaero_email and s.smsaero_api_key)
+        logger.info(
+            "SMS Aero: configured=%s test_mode=%s allow_log_only=%s",
+            sms_ok,
+            s.smsaero_test_mode,
+            s.smsaero_allow_log_only,
+        )
 
     @app.get("/health")
     def health() -> dict[str, str]:

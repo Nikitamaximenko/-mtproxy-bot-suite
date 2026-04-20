@@ -1,7 +1,6 @@
 from __future__ import annotations
 
-from functools import lru_cache
-
+from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -37,7 +36,21 @@ class Settings(BaseSettings):
 
     questions_count: int = 5
 
+    @field_validator("smsaero_email", "smsaero_api_key", mode="before")
+    @classmethod
+    def _strip_sms_secrets(cls, v: object) -> object:
+        if isinstance(v, str):
+            return v.strip()
+        return v
 
-@lru_cache
+    @field_validator("smsaero_sign", mode="before")
+    @classmethod
+    def _strip_sign(cls, v: object) -> object:
+        if isinstance(v, str):
+            return v.strip()
+        return v
+
+
 def get_settings() -> Settings:
+    """Без lru_cache: на Railway переменные должны подхватываться после redeploy без залипания старых значений."""
     return Settings()
