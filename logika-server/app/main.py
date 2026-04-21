@@ -508,7 +508,11 @@ def create_app() -> FastAPI:
             raise HTTPException(404, "Сессия не найдена")
         if not sess.report:
             raise HTTPException(400, "Отчёт ещё не готов")
-        pdf = build_pdf_bytes(sess.report, sess.dilemma)
+        pdf = build_pdf_bytes(
+            sess.report,
+            sess.dilemma,
+            document_date=sess.updated_at or sess.created_at,
+        )
         return Response(
             content=pdf,
             media_type="application/pdf",

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import Literal
+
 from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -57,6 +59,10 @@ class Settings(BaseSettings):
     fast_analysis: bool = True
 
     questions_count: int = 5
+
+    # PDF: «playwright» = тот же HTML, что экран отчёта (Chromium); «reportlab» = запасной вариант без браузера.
+    pdf_engine: Literal["playwright", "reportlab"] = "playwright"
+    pdf_fallback_reportlab: bool = True
 
     @field_validator("smsaero_email", "smsaero_api_key", "anthropic_api_key", mode="before")
     @classmethod

@@ -1,6 +1,6 @@
 # Logika API
 
-Бэкенд для приложения «Логика»: PostgreSQL, вход по SMS через [SMS Aero](https://smsaero.ru/integration/documentation/api/) (отправка SMS **в фоне** после быстрого ответа API — пользователь не ждёт HTTP к шлюзу) или **код на почту по SMTP**, уточняющие вопросы и отчёт через **Claude Opus 4.7** (настраивается через `ANTHROPIC_MODEL_*`), выдача PDF (ReportLab). Время доставки SMS до абонента зависит от оператора и сети; это не ускорить на стороне API.
+Бэкенд для приложения «Логика»: PostgreSQL, вход по SMS через [SMS Aero](https://smsaero.ru/integration/documentation/api/) (отправка SMS **в фоне** после быстрого ответа API — пользователь не ждёт HTTP к шлюзу) или **код на почту по SMTP**, уточняющие вопросы и отчёт через **Claude Opus 4.7** (настраивается через `ANTHROPIC_MODEL_*`), выдача PDF **через Chromium + HTML** (тот же разметочный вид, что экран отчёта в приложении; запасной вариант — ReportLab). Время доставки SMS до абонента зависит от оператора и сети; это не ускорить на стороне API.
 
 ## Архитектура LLM (юнит-экономика)
 
@@ -26,6 +26,7 @@
 cd logika-server
 python3 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
+python -m playwright install chromium
 cp .env.example .env
 # Заполни .env: DATABASE_URL (или оставь sqlite), JWT_SECRET, ANTHROPIC_API_KEY, SMSAERO_*
 uvicorn app.main:app --reload --port 8000
@@ -71,8 +72,13 @@ uvicorn app.main:app --reload --port 8000
 | `ENABLE_ROUTER` | `false` — не вызывать Haiku до анализа. |
 | `ENABLE_SELF_CRITIQUE` | `false` — один проход Opus без второго «ревизора». |
 | `PUBLIC_API_URL` | Публичный URL этого сервиса (опционально для ссылок) |
+| `PDF_ENGINE` | `playwright` (по умолчанию) — PDF как на сайте; `reportlab` — только текст, без Chromium. |
+| `PDF_FALLBACK_REPORTLAB` | `true` — при ошибке Playwright отдать PDF через ReportLab. |
 
 4. Deploy: Nixpacks подхватит `requirements.txt` и `Procfile`.
+5. **PDF:** задай **Custom Build Command** (или эквивалент):  
+   `pip install -r requirements.txt && python -m playwright install chromium`  
+   и оставь `PDF_ENGINE=playwright` (по умолчанию). Без установленного Chromium PDF уйдёт в ReportLab, если `PDF_FALLBACK_REPORTLAB=true`.
 
 ## Vercel (фронт `logika/`)
 

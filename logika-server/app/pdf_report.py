@@ -1,10 +1,15 @@
 from __future__ import annotations
 
 import io
+import logging
 import os
 from datetime import datetime, timezone
 from typing import Any
 from xml.sax.saxutils import escape
+
+from app.config import get_settings
+
+logger = logging.getLogger(__name__)
 
 from reportlab.lib import colors
 from reportlab.lib.enums import TA_RIGHT
@@ -64,8 +69,8 @@ def _truncate_intro(text: str, max_chars: int = 160) -> str:
     return t[: max_chars - 1].rstrip() + "…"
 
 
-def build_pdf_bytes(report: dict[str, Any], dilemma: str) -> bytes:
-    """PDF A4: структура как в экранном отчёте Логика (светлый крем, акцент #c4f542)."""
+def build_pdf_bytes_reportlab(report: dict[str, Any], dilemma: str) -> bytes:
+    """Запасной PDF через ReportLab (без Chromium). Визуально хуже совпадает с сайтом."""
     fn = _register_cyrillic_fonts()
     buf = io.BytesIO()
     doc = SimpleDocTemplate(
@@ -77,13 +82,17 @@ def build_pdf_bytes(report: dict[str, Any], dilemma: str) -> bytes:
         bottomMargin=1.8 * cm,
     )
     styles = getSampleStyleSheet()
-    cream = colors.HexColor("#FAF7F0")
+    # Дизайн-токены сайта
+    page_bg = colors.HexColor("#0a0a0b")
     accent = colors.HexColor("#c4f542")
-    ink = colors.HexColor("#0a0a0b")
-    body_color = colors.HexColor("#2d2d33")
-    muted = colors.HexColor("#5a5a62")
-    card_bg = colors.HexColor("#f3f1eb")
+    fg = colors.HexColor("#f5f5f7")
+    body_muted = colors.HexColor("#9a9aa4")
+    dim = colors.HexColor("#5a5a62")
+    label_gray = colors.HexColor("#8a8a94")
+    card_bg = colors.HexColor("#121214")
+    elevated = colors.HexColor("#1a1a1d")
     border_c = colors.HexColor("#222226")
+    divider = colors.HexColor("#2e2e34")
 
     title_doc = ParagraphStyle(
         name="PdfTitleDoc",
@@ -91,7 +100,7 @@ def build_pdf_bytes(report: dict[str, Any], dilemma: str) -> bytes:
         fontName=fn,
         fontSize=18,
         leading=24,
-        textColor=ink,
+        textColor=fg,
         spaceAfter=4,
         spaceBefore=0,
     )
@@ -101,7 +110,7 @@ def build_pdf_bytes(report: dict[str, Any], dilemma: str) -> bytes:
         fontName=fn,
         fontSize=12,
         leading=16,
-        textColor=ink,
+        textColor=fg,
         spaceAfter=2,
     )
     intro_date = ParagraphStyle(
@@ -110,7 +119,7 @@ def build_pdf_bytes(report: dict[str, Any], dilemma: str) -> bytes:
         fontName=fn,
         fontSize=9,
         leading=12,
-        textColor=muted,
+        textColor=dim,
         alignment=TA_RIGHT,
     )
     section_label = ParagraphStyle(
@@ -119,7 +128,7 @@ def build_pdf_bytes(report: dict[str, Any], dilemma: str) -> bytes:
         fontName=fn,
         fontSize=8,
         leading=11,
-        textColor=colors.HexColor("#8a8a94"),
+        textColor=label_gray,
         spaceAfter=6,
         spaceBefore=0,
     )
@@ -129,7 +138,7 @@ def build_pdf_bytes(report: dict[str, Any], dilemma: str) -> bytes:
         fontName=fn,
         fontSize=10,
         leading=15,
-        textColor=body_color,
+        textColor=fg,
         spaceBefore=4,
     )
     body_loose = ParagraphStyle(
@@ -138,7 +147,7 @@ def build_pdf_bytes(report: dict[str, Any], dilemma: str) -> bytes:
         fontName=fn,
         fontSize=10,
         leading=16,
-        textColor=body_color,
+        textColor=body_muted,
         spaceAfter=10,
     )
     h2 = ParagraphStyle(
@@ -147,7 +156,7 @@ def build_pdf_bytes(report: dict[str, Any], dilemma: str) -> bytes:
         fontName=fn,
         fontSize=11,
         leading=15,
-        textColor=muted,
+        textColor=dim,
         spaceAfter=6,
         spaceBefore=10,
     )
@@ -157,7 +166,7 @@ def build_pdf_bytes(report: dict[str, Any], dilemma: str) -> bytes:
         fontName=fn,
         fontSize=10,
         leading=14,
-        textColor=body_color,
+        textColor=body_muted,
     )
     verdict_style = ParagraphStyle(
         name="PdfVerdict",
@@ -165,7 +174,7 @@ def build_pdf_bytes(report: dict[str, Any], dilemma: str) -> bytes:
         fontName=fn,
         fontSize=14,
         leading=20,
-        textColor=ink,
+        textColor=fg,
         spaceBefore=4,
         spaceAfter=14,
     )
@@ -175,7 +184,7 @@ def build_pdf_bytes(report: dict[str, Any], dilemma: str) -> bytes:
         fontName=fn,
         fontSize=8,
         leading=11,
-        textColor=muted,
+        textColor=dim,
     )
     quote_style = ParagraphStyle(
         name="PdfQuote",
@@ -183,7 +192,7 @@ def build_pdf_bytes(report: dict[str, Any], dilemma: str) -> bytes:
         fontName=fn,
         fontSize=12,
         leading=17,
-        textColor=ink,
+        textColor=fg,
         leftIndent=0,
         spaceBefore=6,
         spaceAfter=4,
@@ -199,13 +208,13 @@ def build_pdf_bytes(report: dict[str, Any], dilemma: str) -> bytes:
 
     # Шапка: бренд + дата (воздух), затем заголовок; запрос и оценка — отдельные блоки
     intro_left = _p(
-        f'<font color="#0a0a0b"><b>ЛОГИКА.</b></font> <font color="#c4f542">·</font><br/>'
+        f'<font color="#f5f5f7"><b>ЛОГИКА.</b></font> <font color="#c4f542">·</font><br/>'
         f'<font color="#5a5a62" size="8">Аналитический отчёт</font>',
         intro_brand,
     )
     intro_right = _p(
         f'<font color="#8a8a94" size="7">ДАТА ДОКУМЕНТА</font><br/>'
-        f'<font color="#0a0a0b" size="10">{_esc(gen_iso)}</font>',
+        f'<font color="#f5f5f7" size="10">{_esc(gen_iso)}</font>',
         intro_date,
     )
     intro_tbl = Table([[intro_left, intro_right]], colWidths=[w * 0.62, w * 0.38])
@@ -218,13 +227,13 @@ def build_pdf_bytes(report: dict[str, Any], dilemma: str) -> bytes:
                 ("RIGHTPADDING", (0, 0), (-1, -1), 0),
                 ("TOPPADDING", (0, 0), (-1, -1), 0),
                 ("BOTTOMPADDING", (0, 0), (-1, -1), 14),
-                ("LINEBELOW", (0, 0), (-1, 0), 0.5, colors.HexColor("#e0ddd6")),
+                ("LINEBELOW", (0, 0), (-1, 0), 0.5, border_c),
             ]
         )
     )
     story.append(intro_tbl)
     story.append(Spacer(1, 0.45 * cm))
-    story.append(_p('<font color="#0a0a0b"><b>Разбор решения</b></font>', title_doc))
+    story.append(_p('<font color="#f5f5f7"><b>Разбор решения</b></font>', title_doc))
     story.append(Spacer(1, 0.5 * cm))
 
     dilemma_raw = (dilemma or "").strip()
@@ -235,7 +244,7 @@ def build_pdf_bytes(report: dict[str, Any], dilemma: str) -> bytes:
                 [
                     _p(
                         f'<font color="#8a8a94" size="7">ИСХОДНЫЙ ЗАПРОС</font><br/><br/>'
-                        f'<font color="#2d2d33">«{_esc(dilemma_short)}»</font>',
+                        f'<font color="#f5f5f7">«{_esc(dilemma_short)}»</font>',
                         intro_dilemma,
                     )
                 ]
@@ -245,7 +254,7 @@ def build_pdf_bytes(report: dict[str, Any], dilemma: str) -> bytes:
         dilemma_box.setStyle(
             TableStyle(
                 [
-                    ("BACKGROUND", (0, 0), (-1, -1), colors.white),
+                    ("BACKGROUND", (0, 0), (-1, -1), card_bg),
                     ("BOX", (0, 0), (-1, -1), 0.5, border_c),
                     ("LEFTPADDING", (0, 0), (-1, -1), 16),
                     ("RIGHTPADDING", (0, 0), (-1, -1), 16),
@@ -283,7 +292,7 @@ def build_pdf_bytes(report: dict[str, Any], dilemma: str) -> bytes:
         score_inner.append([_p(_esc(para), body_loose)])
 
     score_card = Table(score_inner, colWidths=[w])
-    div_line = colors.HexColor("#e8e6e0")
+    div_line = divider
     score_card.setStyle(
         TableStyle(
             [
@@ -305,7 +314,6 @@ def build_pdf_bytes(report: dict[str, Any], dilemma: str) -> bytes:
 
     law_dicts = [x for x in (report.get("laws") or []) if isinstance(x, dict)]
     if law_dicts:
-        story.append(_p('<font name="%s" color="#5a5a62"><b>Законы логики</b></font>' % fn, h2))
         col_w = (w - 8) / 2
 
         def _law_cell(ld: dict[str, Any]) -> Paragraph:
@@ -322,7 +330,7 @@ def build_pdf_bytes(report: dict[str, Any], dilemma: str) -> bytes:
             t.setStyle(
                 TableStyle(
                     [
-                        ("BACKGROUND", (0, 0), (-1, -1), colors.white),
+                        ("BACKGROUND", (0, 0), (-1, -1), card_bg),
                         ("BOX", (0, 0), (-1, -1), 0.5, border_c),
                         ("VALIGN", (0, 0), (-1, -1), "TOP"),
                         ("LEFTPADDING", (0, 0), (-1, -1), 10),
@@ -412,11 +420,35 @@ def build_pdf_bytes(report: dict[str, Any], dilemma: str) -> bytes:
 
     def _draw_bg(canvas: Any, _doc: Any) -> None:
         canvas.saveState()
-        canvas.setFillColor(cream)
+        canvas.setFillColor(page_bg)
         canvas.rect(0, 0, A4[0], A4[1], stroke=0, fill=1)
-        canvas.setFillColor(accent)
-        canvas.rect(0, A4[1] - 6, A4[0], 6, stroke=0, fill=1)
         canvas.restoreState()
 
     doc.build(story, onFirstPage=_draw_bg, onLaterPages=_draw_bg)
     return buf.getvalue()
+
+
+def build_pdf_bytes(
+    report: dict[str, Any],
+    dilemma: str,
+    *,
+    document_date: datetime | None = None,
+) -> bytes:
+    """
+    PDF как на сайте: Chromium + HTML (как ReportView). Иначе при ошибке — ReportLab,
+    если `pdf_fallback_reportlab` (см. .env / Settings).
+    """
+    s = get_settings()
+    if s.pdf_engine == "playwright":
+        try:
+            from app.report_html import build_report_html
+            from app.pdf_playwright import html_to_pdf_bytes
+
+            html = build_report_html(report, dilemma, document_date=document_date)
+            return html_to_pdf_bytes(html)
+        except Exception as e:
+            logger.warning("PDF playwright: %s", e, exc_info=True)
+            if s.pdf_fallback_reportlab:
+                return build_pdf_bytes_reportlab(report, dilemma)
+            raise
+    return build_pdf_bytes_reportlab(report, dilemma)
