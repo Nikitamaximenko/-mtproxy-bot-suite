@@ -57,12 +57,20 @@ export class LogikaHttpError extends Error {
 
 function mapNetworkError(e: unknown): Error {
   const msg = e instanceof Error ? e.message : String(e)
-  if (
-    e instanceof TypeError &&
-    (msg === 'Failed to fetch' || msg.toLowerCase().includes('network'))
-  ) {
+  const lower = msg.toLowerCase()
+  /** Safari/WebKit часто кидает TypeError с текстом «Load failed» при сбое fetch (CORS, сеть, таймаут). */
+  const looksLikeFetchFailure =
+    (e instanceof TypeError &&
+      (msg === 'Failed to fetch' ||
+        lower.includes('network') ||
+        lower.includes('fetch'))) ||
+    lower === 'load failed' ||
+    lower.includes('failed to load') ||
+    lower.includes('the network connection was lost')
+
+  if (looksLikeFetchFailure) {
     return new Error(
-      'Нет ответа от API: проверьте адрес VITE_LOGIKA_API_URL на Vercel и что бэкенд запущен (CORS для этого домена).',
+      'Нет ответа от сервера (сеть, CORS или долгий запрос). Сбор отчёта может занять 1–3 минуты — попробуйте ещё раз; проверьте VITE_LOGIKA_API_URL и что бэкенд на Railway доступен.',
     )
   }
   return e instanceof Error ? e : new Error(msg)
@@ -91,13 +99,19 @@ async function req<T>(
     throw mapNetworkError(e)
   }
   if (!r.ok) {
-    let msg = r.statusText
+    let msg = (r.statusText || '').trim()
     try {
       const j = await r.json()
       if (typeof j.detail === 'string') msg = j.detail
       else if (Array.isArray(j.detail)) msg = j.detail.map((x: { msg?: string }) => x.msg).join(', ')
     } catch {
       /* ignore */
+    }
+    if (!msg) {
+      msg =
+        r.status === 502
+          ? 'Сервер временно не смог обработать запрос (502). Сбор отчёта тяжёлый — повторите через минуту; если снова ошибка, посмотрите логи бэкенда.'
+          : `Ошибка сервера (${r.status}).`
     }
     throw new LogikaHttpError(msg, r.status)
   }
