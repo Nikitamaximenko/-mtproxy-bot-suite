@@ -612,6 +612,96 @@ def bot_grant_trial(payload: GrantTrialRequest, req: Request, db: Session = Depe
     return GrantTrialResponse(ok=True, expires_at=sub.expires_at, already_active=False)
 
 
+class CancelRecurringRequest(BaseModel):
+    telegram_id: int = Field(..., ge=1)
+
+
+class CancelRecurringResponse(BaseModel):
+    ok: bool
+    message: str | None = None
+    error: str | None = None
+
+
+@app.post("/bot/cancel-recurring", response_model=CancelRecurringResponse)
+def bot_cancel_recurring(
+    payload: CancelRecurringRequest, req: Request, db: Session = Depends(get_db)
+) -> CancelRecurringResponse:
+    """Отмена автопродления: Lava (DELETE contract) и/или ЮKassa (DELETE payment_method). Только X-Internal-Token."""
+    _require_internal_token(req)
+    tg_id = int(payload.telegram_id)
+    user = db.execute(select(User).where(User.telegram_id == tg_id)).scalar_one_or_none()
+    email = (user.email or "").strip().lower() if user else ""
+
+    sub = _subscription_with_recurring_to_cancel(db, tg_id)
+    if sub is None:
+        return CancelRecurringResponse(
+            ok=False,
+            error="no_recurring",
+            message=(
+                "Не найдена активная платная подписка с автопродлением (Lava или ЮKassa). "
+                "Если оплачивали другим способом — напишите в этот чат."
+            ),
+        )
+
+    had_lava = bool((sub.lava_contract_id or "").strip())
+    had_yk = bool((sub.yookassa_payment_method_id or "").strip())
+    errors: list[str] = []
+    any_cleared = False
+
+    if had_lava:
+        cid = sub.lava_contract_id or ""
+        if not email:
+            return CancelRecurringResponse(
+                ok=False,
+                error="email_required",
+                message=(
+                    "Чтобы отменить автопродление Lava, нужен email из оплаты. "
+                    "Откройте мини-приложение, укажите email при следующей оплате или напишите его сюда одним сообщением — мы подскажем дальше."
+                ),
+            )
+        try:
+            _lava_cancel_subscription_api(cid, email)
+            sub.lava_contract_id = None
+            any_cleared = True
+            logger.info("Lava recurring cancelled tg_id=%s", tg_id)
+        except Exception as e:
+            errors.append(f"Lava: {e}")
+
+    if had_yk and (sub.yookassa_payment_method_id or "").strip():
+        try:
+            _yookassa_delete_payment_method(sub.yookassa_payment_method_id or "")
+            sub.yookassa_payment_method_id = None
+            any_cleared = True
+            logger.info("YooKassa payment_method removed tg_id=%s", tg_id)
+        except Exception as e:
+            errors.append(f"ЮKassa: {e}")
+
+    if any_cleared:
+        db.commit()
+
+    if errors and not any_cleared:
+        return CancelRecurringResponse(
+            ok=False,
+            error="provider_failed",
+            message="Не удалось отменить автопродление: " + " ".join(errors),
+        )
+    if errors and any_cleared:
+        return CancelRecurringResponse(
+            ok=True,
+            message=(
+                "Автопродление частично отключено. Доступ к сервису до конца оплаченного периода сохраняется. "
+                "Детали: " + " ".join(errors) + " Напишите в поддержку, если списания повторятся."
+            ),
+        )
+    return CancelRecurringResponse(
+        ok=True,
+        message=(
+            "Автопродление отменено. Текущий оплаченный период действует до даты окончания в мини-приложении; "
+            "повторных списаний не будет."
+        ),
+    )
+
+
 class MarketingOptOutRequest(BaseModel):
     telegram_id: int = Field(..., ge=1)
 
@@ -734,6 +824,85 @@ def _create_lava_top_invoice(
     if not payment_url:
         raise RuntimeError(f"lava.top did not return paymentUrl, response keys: {list(data.keys())}")
     return payment_url, contract_id
+
+
+def _lava_cancel_subscription_api(contract_id: str, email: str) -> None:
+    """Отмена рекуррента в lava.top: DELETE /api/v1/subscriptions (как lava-top-sdk)."""
+    from urllib.parse import urlencode
+
+    if not LAVA_TOP_API_KEY:
+        raise RuntimeError("LAVA_TOP_API_KEY не настроен")
+    cid = (contract_id or "").strip()
+    em = (email or "").strip().lower()
+    if not cid or not em:
+        raise RuntimeError("contract_id и email обязательны для отмены Lava")
+    q = urlencode({"contractId": cid, "email": em})
+    url = f"{LAVA_TOP_API_BASE_URL}/api/v1/subscriptions?{q}"
+    req = urllib.request.Request(
+        url,
+        method="DELETE",
+        headers={"X-Api-Key": LAVA_TOP_API_KEY, "Accept": "application/json"},
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=25) as resp:
+            resp.read()
+    except urllib.error.HTTPError as e:
+        if e.code in (404, 410):
+            logger.info("Lava cancel subscription: HTTP %s (уже отменена?)", e.code)
+            return
+        body = e.read().decode("utf-8", errors="replace")[:1500]
+        raise RuntimeError(f"Lava HTTP {e.code}: {body}") from e
+
+
+def _yookassa_delete_payment_method(payment_method_id: str) -> None:
+    """Удалить сохранённый способ оплаты — рекуррентные списания ЮKassa прекратятся."""
+    if not _yookassa_configured():
+        raise RuntimeError("ЮKassa не настроена")
+    pmid = (payment_method_id or "").strip()
+    if not pmid:
+        raise RuntimeError("Пустой payment_method_id")
+    idem = str(uuid4())
+    req = urllib.request.Request(
+        f"{YOOKASSA_API_BASE}/payment_methods/{pmid}",
+        method="DELETE",
+        headers={
+            "Authorization": f"Basic {_yookassa_auth_b64()}",
+            "Idempotence-Key": idem,
+        },
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=25) as resp:
+            resp.read()
+    except urllib.error.HTTPError as e:
+        if e.code == 404:
+            logger.info("YooKassa delete payment_method: 404 (уже удалён)")
+            return
+        body = e.read().decode("utf-8", errors="replace")[:1500]
+        raise RuntimeError(f"ЮKassa HTTP {e.code}: {body}") from e
+
+
+def _subscription_with_recurring_to_cancel(db: Session, tg_id: int) -> Subscription | None:
+    """Активная paid-подписка с привязкой к автопродлению (Lava contract или сохранённый метод ЮKassa)."""
+    now = utcnow()
+    return (
+        db.execute(
+            select(Subscription)
+            .where(
+                Subscription.telegram_id == tg_id,
+                Subscription.payment_status == "paid",
+                Subscription.expires_at.is_not(None),
+                Subscription.expires_at > now,
+                or_(
+                    Subscription.lava_contract_id.is_not(None),
+                    Subscription.yookassa_payment_method_id.is_not(None),
+                ),
+            )
+            .order_by(Subscription.expires_at.desc())
+            .limit(1)
+        )
+        .scalars()
+        .first()
+    )
 
 
 def _yookassa_configured() -> bool:

@@ -160,6 +160,12 @@ def support_kb() -> InlineKeyboardMarkup | None:
 def support_chat_kb() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text="🚫 Отменить автопродление",
+                    callback_data="menu:cancel_recurring",
+                )
+            ],
             [InlineKeyboardButton(text="✖️ Закрыть чат", callback_data="menu:exit_support")],
         ]
     )
@@ -281,6 +287,29 @@ async def backend_post_json(session: aiohttp.ClientSession, path: str, payload: 
         if not isinstance(data, dict):
             raise RuntimeError("Unexpected backend response")
         return data
+
+
+async def backend_cancel_recurring(
+    session: aiohttp.ClientSession,
+    telegram_id: int,
+) -> tuple[int, dict[str, Any]]:
+    """POST /bot/cancel-recurring — отмена автопродления (Lava +/− ЮKassa)."""
+    url = f"{BACKEND_BASE_URL}/bot/cancel-recurring"
+    headers = {**_internal_headers(), "Content-Type": "application/json"}
+    async with session.post(
+        url,
+        json={"telegram_id": telegram_id},
+        headers=headers,
+        timeout=aiohttp.ClientTimeout(total=30),
+    ) as resp:
+        raw = await resp.text()
+        try:
+            data = json.loads(raw) if raw else {}
+        except json.JSONDecodeError:
+            data = {"error": "bad_response", "raw": raw[:240]}
+        if not isinstance(data, dict):
+            data = {}
+        return resp.status, data
 
 
 async def backend_grant_trial(
@@ -845,6 +874,25 @@ async def main() -> None:
             await state.update_data(support_history=[])
             await query.answer()
             await msg.answer(support_invite_html(), parse_mode="HTML", reply_markup=support_chat_kb())
+            return
+
+        if action == "cancel_recurring":
+            await query.answer()
+            session = _get_session(dp)
+            tg_uid = query.from_user.id
+            status, data = await backend_cancel_recurring(session, tg_uid)
+            text: str
+            if status == 200 and data.get("ok"):
+                text = str(data.get("message") or "Автопродление отменено.")
+            elif status == 403:
+                text = "Сервис временно не может выполнить запрос. Напишите текстом «отменить подписку» — администратор поможет."
+            else:
+                text = str(
+                    data.get("message")
+                    or data.get("error")
+                    or "Не удалось отменить автопродление. Напишите в чат, мы разберёмся."
+                )
+            await msg.answer(text, reply_markup=support_chat_kb())
             return
 
         if action == "exit_support":
