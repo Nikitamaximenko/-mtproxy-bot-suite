@@ -945,6 +945,7 @@ def _yookassa_request(
     *,
     body: dict[str, Any] | None = None,
     idempotence_key: str | None = None,
+    strict: bool = False,
 ) -> dict[str, Any] | None:
     if not _yookassa_configured():
         return None
@@ -967,9 +968,24 @@ def _yookassa_request(
     except urllib.error.HTTPError as e:
         err_body = e.read().decode("utf-8", errors="replace")[:3000]
         logger.warning("YooKassa HTTP %s %s: %s", method, path, err_body)
+        if strict:
+            msg = err_body
+            try:
+                parsed = json.loads(err_body)
+                if isinstance(parsed, dict):
+                    code = str(parsed.get("code") or "").strip()
+                    desc = str(parsed.get("description") or "").strip()
+                    param = str(parsed.get("parameter") or "").strip()
+                    parts = [p for p in [f"code={code}" if code else "", desc, f"parameter={param}" if param else ""] if p]
+                    msg = "; ".join(parts) if parts else err_body
+            except json.JSONDecodeError:
+                pass
+            raise RuntimeError(f"YooKassa {method} {path} HTTP {e.code}: {msg}") from e
         return None
     except urllib.error.URLError as e:
         logger.warning("YooKassa network %s %s: %s", method, path, e)
+        if strict:
+            raise RuntimeError(f"YooKassa network {method} {path}: {e.reason}") from e
         return None
     try:
         parsed = json.loads(raw)
@@ -1018,7 +1034,7 @@ def _yookassa_create_initial_payment(
     if email.strip():
         body["receipt"] = _yookassa_receipt(email)
     pid = str(uuid4())
-    data = _yookassa_request("POST", "/payments", body=body, idempotence_key=pid)
+    data = _yookassa_request("POST", "/payments", body=body, idempotence_key=pid, strict=True)
     if not data:
         raise RuntimeError("YooKassa: не удалось создать платёж")
     pay_id = str(data.get("id") or "").strip()
@@ -1057,7 +1073,7 @@ def _yookassa_create_recurring_payment(sub: Subscription, db: Session, *, idempo
     }
     if email:
         body["receipt"] = _yookassa_receipt(email)
-    data = _yookassa_request("POST", "/payments", body=body, idempotence_key=idempotence_key)
+    data = _yookassa_request("POST", "/payments", body=body, idempotence_key=idempotence_key, strict=True)
     if not data:
         return False
     status = str(data.get("status") or "")
@@ -1082,6 +1098,15 @@ def _yookassa_payment_amount_ok(payment: dict[str, Any]) -> bool:
         return int(rub) == int(PAYMENT_AMOUNT_RUB)
     except ValueError:
         return False
+
+
+def _yookassa_method_supports_recurring(payment_method: dict[str, Any] | None) -> bool:
+    """Для автосписаний используем только методы, которые стабильно дают payment_method_id для повторов."""
+    if not isinstance(payment_method, dict):
+        return False
+    pm_type = str(payment_method.get("type") or "").strip().lower()
+    # Для нашей подписки поддерживаем только карту и ЮMoney-кошелёк.
+    return pm_type in {"bank_card", "yoo_money"}
 
 
 def _apply_yookassa_payment_object(db: Session, payment: dict[str, Any]) -> None:
@@ -1109,12 +1134,27 @@ def _apply_yookassa_payment_object(db: Session, payment: dict[str, Any]) -> None
         return
     pm = payment.get("payment_method")
     pm_id: str | None = None
+    pm_type = ""
     if isinstance(pm, dict):
         pm_id = str(pm.get("id") or "").strip() or None
+        pm_type = str(pm.get("type") or "").strip().lower()
     is_renewal = str(meta.get("renewal") or "").strip() == "1"
-    if pm_id and not is_renewal:
+    recurring_supported = _yookassa_method_supports_recurring(pm if isinstance(pm, dict) else None)
+    recurring_ready_initial = False
+    if not is_renewal and pm_id and recurring_supported:
         sub.yookassa_payment_method_id = pm_id
         sub.billing_provider = "yookassa"
+        recurring_ready_initial = True
+    elif not is_renewal:
+        # Первый платёж успешен, но метод не пригоден для повторных списаний.
+        sub.yookassa_payment_method_id = None
+        sub.billing_provider = "yookassa"
+        logger.warning(
+            "YooKassa initial payment without recurring-ready method: tg_id=%s pm_type=%s pm_id_present=%s",
+            sub.telegram_id,
+            pm_type or "(empty)",
+            bool(pm_id),
+        )
     if sub.payment_status == "pending":
         activate_subscription(sub, recurring=False)
     elif sub.payment_status == "paid" and is_renewal:
@@ -1135,6 +1175,16 @@ def _apply_yookassa_payment_object(db: Session, payment: dict[str, Any]) -> None
     if sub.proxy_server and sub.proxy_port and sub.proxy_secret:
         proxy_link = f"tg://proxy?server={sub.proxy_server}&port={sub.proxy_port}&secret={sub.proxy_secret}"
         _notify_payment_success(sub.telegram_id, proxy_link)
+    if not is_renewal and not recurring_ready_initial:
+        _send_tg(
+            int(sub.telegram_id),
+            (
+                "✅ Платёж прошёл, доступ активирован.\n\n"
+                "⚠️ Автопродление для ЮKassa не подключилось: выбранный способ оплаты "
+                "не подходит для повторных списаний.\n"
+                "Для автопродления используйте карту или кошелёк ЮMoney при следующей оплате."
+            ),
+        )
     _notify_admin_payment(sub.telegram_id)
 
 

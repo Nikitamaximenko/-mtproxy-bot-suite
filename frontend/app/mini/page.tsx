@@ -1114,7 +1114,7 @@ export default function MiniAppPage() {
                   color: "#111827",
                 }}
               >
-                СБП · SberPay
+                Карта · ЮMoney
                 <span className="block font-normal mt-0.5" style={{ color: "#6B7280", fontSize: 10 }}>ЮKassa</span>
               </button>
             </div>
@@ -1194,7 +1194,7 @@ export default function MiniAppPage() {
           <p className="text-center text-xs mt-3" style={{ color: "#6B7280" }}>
             {payChannel === "lava"
               ? "Карта через lava.top · прокси сразу после оплаты · VPN — после установки Happ"
-              : "ЮKassa: СБП, SberPay, карты · прокси сразу после оплаты · VPN — после Happ"}
+              : "ЮKassa: карта/ЮMoney · автопродление после привязки · прокси сразу после оплаты · VPN — после Happ"}
           </p>
           <p className="text-center text-xs mt-1" style={{ color: "#9CA3AF" }}>
             Отмена в любой момент — напишите в поддержку
