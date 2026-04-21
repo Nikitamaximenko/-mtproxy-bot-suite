@@ -4885,6 +4885,10 @@ class VpnClientInfo(BaseModel):
     uuid_prefix: str
     uuid: str
     active: bool
+    user_exists: bool
+    subscription_status: str | None = None
+    subscription_expires_at: datetime | None = None
+    subscription_access_suspended: bool = False
     traffic_used_gb: float
     traffic_limit_gb: int
     max_devices: int
@@ -4905,6 +4909,23 @@ def admin_vpn_clients(req: Request, db: Session = Depends(get_db)) -> VpnClients
     clients = db.execute(
         select(VpnClient).order_by(VpnClient.created_at.desc())
     ).scalars().all()
+    tg_ids = [int(c.telegram_id) for c in clients]
+    users_set: set[int] = set()
+    latest_sub_by_tg: dict[int, Subscription] = {}
+    if tg_ids:
+        users_rows = db.execute(
+            select(User.telegram_id).where(User.telegram_id.in_(tg_ids))
+        ).all()
+        users_set = {int(tg) for (tg,) in users_rows}
+        latest_sub_rows = db.execute(
+            select(Subscription)
+            .where(Subscription.telegram_id.in_(tg_ids))
+            .order_by(Subscription.telegram_id.asc(), Subscription.created_at.desc())
+        ).scalars().all()
+        for s in latest_sub_rows:
+            t = int(s.telegram_id)
+            if t not in latest_sub_by_tg:
+                latest_sub_by_tg[t] = s
     items = [
         VpnClientInfo(
             id=c.id,
@@ -4912,6 +4933,22 @@ def admin_vpn_clients(req: Request, db: Session = Depends(get_db)) -> VpnClients
             uuid_prefix=c.uuid[:8],
             uuid=c.uuid,
             active=c.active,
+            user_exists=int(c.telegram_id) in users_set,
+            subscription_status=(
+                latest_sub_by_tg[int(c.telegram_id)].payment_status
+                if int(c.telegram_id) in latest_sub_by_tg
+                else None
+            ),
+            subscription_expires_at=(
+                latest_sub_by_tg[int(c.telegram_id)].expires_at
+                if int(c.telegram_id) in latest_sub_by_tg
+                else None
+            ),
+            subscription_access_suspended=(
+                bool(latest_sub_by_tg[int(c.telegram_id)].access_suspended)
+                if int(c.telegram_id) in latest_sub_by_tg
+                else False
+            ),
             traffic_used_gb=round(c.traffic_used_bytes / (1024 ** 3), 3),
             traffic_limit_gb=c.traffic_limit_gb,
             max_devices=c.max_devices,

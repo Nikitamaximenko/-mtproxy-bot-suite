@@ -41,6 +41,10 @@ type VpnClientInfo = {
   uuid_prefix: string
   uuid: string
   active: boolean
+  user_exists: boolean
+  subscription_status?: string | null
+  subscription_expires_at?: string | null
+  subscription_access_suspended?: boolean
   traffic_used_gb: number
   traffic_limit_gb: number
   max_devices: number
@@ -1724,6 +1728,8 @@ export default function AdminPage() {
                       <th className="px-4 py-3 font-medium">Telegram ID</th>
                       <th className="px-4 py-3 font-medium">UUID</th>
                       <th className="px-4 py-3 font-medium">Статус</th>
+                      <th className="px-4 py-3 font-medium">Подписка</th>
+                      <th className="px-4 py-3 font-medium">Истекает</th>
                       <th className="px-4 py-3 font-medium">Трафик</th>
                       <th className="px-4 py-3 font-medium">Создан</th>
                       <th className="px-4 py-3 font-medium">Синхронизирован</th>
@@ -1741,6 +1747,21 @@ export default function AdminPage() {
                           <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${c.active ? "bg-emerald-100 text-emerald-800" : "bg-gray-700 text-gray-400"}`}>
                             {c.active ? "Активен" : "Отключён"}
                           </span>
+                        </td>
+                        <td className="px-4 py-3 text-xs">
+                          {!c.user_exists ? (
+                            <span className="text-rose-300">нет user</span>
+                          ) : !c.subscription_status ? (
+                            <span className="text-rose-300">нет подписки</span>
+                          ) : (
+                            <span className={c.subscription_access_suspended ? "text-orange-300" : "text-gray-300"}>
+                              {c.subscription_status}
+                              {c.subscription_access_suspended ? " (suspended)" : ""}
+                            </span>
+                          )}
+                        </td>
+                        <td className="px-4 py-3 text-gray-400 text-xs">
+                          {c.subscription_expires_at ? formatDate(c.subscription_expires_at) : "—"}
                         </td>
                         <td className="px-4 py-3 text-gray-300 font-mono text-xs">
                           {c.traffic_used_gb.toFixed(3)} GB
@@ -1779,7 +1800,7 @@ export default function AdminPage() {
                     ))}
                     {vpnClients.clients.length === 0 && (
                       <tr>
-                        <td colSpan={7} className="px-4 py-8 text-center text-gray-500">
+                        <td colSpan={9} className="px-4 py-8 text-center text-gray-500">
                           VPN клиентов нет
                         </td>
                       </tr>
