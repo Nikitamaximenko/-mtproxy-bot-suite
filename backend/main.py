@@ -851,6 +851,20 @@ def _lava_cancel_subscription_api(contract_id: str, email: str) -> None:
             logger.info("Lava cancel subscription: HTTP %s (уже отменена?)", e.code)
             return
         body = e.read().decode("utf-8", errors="replace")[:1500]
+        # Lava отдаёт 400 с текстом вида «already cancelled or not a subscription» — для нас это успех (идемпотентность).
+        if e.code == 400:
+            try:
+                err_json = json.loads(body)
+                err_msg = str(err_json.get("error") or "").lower()
+            except json.JSONDecodeError:
+                err_msg = body.lower()
+            if (
+                "already cancelled" in err_msg
+                or "not a subscription" in err_msg
+                or "subscription cancelling error" in err_msg
+            ):
+                logger.info("Lava cancel subscription: HTTP 400 idempotent (%s)", err_msg[:120])
+                return
         raise RuntimeError(f"Lava HTTP {e.code}: {body}") from e
 
 
