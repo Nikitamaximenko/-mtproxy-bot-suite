@@ -32,6 +32,7 @@ from sqlalchemy import (
     and_,
     create_engine,
     delete,
+    exists,
     false as sa_false,
     func,
     or_,
@@ -3446,6 +3447,9 @@ class AdminStatsResponse(BaseModel):
     expired_subscriptions: int
     pending_payments: int
     revenue_estimate: int
+    # Пробный день из бота: users.trial_consumed_at; конверсия — есть хотя бы одна оплаченная/истёкшая оплата
+    trial_offers_claimed: int
+    trial_converted_to_paid: int
     referrals: list[RefStat]
     analytics_scoped: bool = False  # True when ANALYTICS_PRODUCTION_TG_IDS limits metrics
 
@@ -3546,6 +3550,25 @@ def admin_stats(req: Request, db: Session = Depends(get_db)) -> AdminStatsRespon
     ref_rows = db.execute(ref_q).all()
     referrals = [RefStat(source=r[0], count=r[1]) for r in ref_rows]
 
+    trial_user_conds = [User.trial_consumed_at.is_not(None), User.telegram_id > 0]
+    if scope is not None:
+        trial_user_conds.append(User.telegram_id.in_(scope))
+    trial_claimed = (
+        db.execute(select(func.count()).select_from(User).where(and_(*trial_user_conds))).scalar() or 0
+    )
+    _paid_row_for_user = exists(
+        select(Subscription.id).where(
+            Subscription.telegram_id == User.telegram_id,
+            Subscription.payment_status.in_(["paid", "expired"]),
+        )
+    )
+    trial_converted = (
+        db.execute(
+            select(func.count()).select_from(User).where(and_(*trial_user_conds, _paid_row_for_user))
+        ).scalar()
+        or 0
+    )
+
     return AdminStatsResponse(
         total_users=total_users,
         tg_users=tg_users,
@@ -3554,6 +3577,8 @@ def admin_stats(req: Request, db: Session = Depends(get_db)) -> AdminStatsRespon
         expired_subscriptions=expired,
         pending_payments=pending,
         revenue_estimate=total_paid * PAYMENT_AMOUNT_RUB,
+        trial_offers_claimed=int(trial_claimed),
+        trial_converted_to_paid=int(trial_converted),
         referrals=referrals,
         analytics_scoped=scoped,
     )

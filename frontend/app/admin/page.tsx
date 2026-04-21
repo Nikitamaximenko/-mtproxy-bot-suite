@@ -16,6 +16,8 @@ type Stats = {
   expired_subscriptions: number
   pending_payments: number
   revenue_estimate: number
+  trial_offers_claimed?: number
+  trial_converted_to_paid?: number
   referrals: RefStat[]
   analytics_scoped?: boolean
 }
@@ -997,9 +999,11 @@ export default function AdminPage() {
           <h2 className="text-lg font-semibold mb-1 text-gray-300">Сводка</h2>
           <p className="text-xs text-gray-500 mb-4">
             Подписки — уникальные пользователи Telegram (tg_id &gt; 0); веб-оформления не входят в эти числа. «Истекших» — без текущего доступа.
-            Выручка ≈ число завершённых оплат в БД × цена (продления — отдельные строки).
+            Выручка ≈ число завершённых оплат в БД × цена (продления — отдельные строки). Пробный день — по факту нажатия оффера в боте (
+            <code className="text-gray-400">trial_consumed_at</code>
+            ); продлившие — из них с хотя бы одной оплатой (paid/expired) в истории.
           </p>
-          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4">
+          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-7 gap-4">
             {[
               {
                 label: "Пользователей бота",
@@ -1024,6 +1028,24 @@ export default function AdminPage() {
                 value: stats?.pending_payments ?? "—",
                 sub: "уник., нет активной подписки",
                 color: "text-yellow-400",
+              },
+              {
+                label: "Бесплатный доступ",
+                value: stats?.trial_offers_claimed ?? "—",
+                sub: "воспользовались оффером",
+                color: "text-cyan-400",
+              },
+              {
+                label: "Продлили после триала",
+                value: stats?.trial_converted_to_paid ?? "—",
+                sub: (() => {
+                  const claimed = stats?.trial_offers_claimed
+                  const conv = stats?.trial_converted_to_paid
+                  if (claimed == null || conv == null) return undefined
+                  if (claimed > 0) return `${Math.round((conv / claimed) * 100)}% от оффера`
+                  return "пока без активаций оффера"
+                })(),
+                color: "text-teal-400",
               },
               {
                 label: "Выручка (≈)",
