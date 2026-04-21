@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import hashlib
 import threading
 import hmac
@@ -69,6 +70,13 @@ LAVA_TOP_PAYMENT_METHOD = (os.getenv("LAVA_TOP_PAYMENT_METHOD") or "").strip()  
 
 # Webhooks are authenticated by lava.top sending your service API key in X-Api-Key header
 LAVA_TOP_WEBHOOK_API_KEY = (os.getenv("LAVA_TOP_WEBHOOK_API_KEY") or "").strip()
+
+# ЮKassa (YooMoney): СБП, SberPay, карты и др. через единую форму; автоплатежи после save_payment_method.
+# В личном кабинете укажите URL уведомлений: {PUBLIC_BASE_URL}/webhooks/yookassa
+# Реальные автосписания в проде включаются в кабинете ЮKassa (см. их доку «Автоплатежи»).
+YOOKASSA_SHOP_ID = (os.getenv("YOOKASSA_SHOP_ID") or "").strip()
+YOOKASSA_SECRET_KEY = (os.getenv("YOOKASSA_SECRET_KEY") or "").strip()
+YOOKASSA_API_BASE = (os.getenv("YOOKASSA_API_BASE") or "https://api.yookassa.ru/v3").rstrip("/")
 
 PUBLIC_BASE_URL = (os.getenv("PUBLIC_BASE_URL") or "http://localhost:8000").rstrip("/")
 
@@ -222,6 +230,10 @@ class Subscription(Base):
     payment_token: Mapped[str] = mapped_column(String(36), unique=True, index=True, nullable=False)
     payment_status: Mapped[str] = mapped_column(String(16), default="pending", index=True, nullable=False)
     lava_contract_id: Mapped[str | None] = mapped_column(String(36), unique=True, index=True, nullable=True)
+    # ЮKassa: id сохранённого способа оплаты для рекуррентных списаний; billing_provider = lava | yookassa
+    yookassa_payment_method_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    yookassa_last_applied_payment_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    billing_provider: Mapped[str | None] = mapped_column(String(16), nullable=True)
 
     notified_expiring: Mapped[bool] = mapped_column(Boolean, default=False, server_default=sa_false(), nullable=False)
     notified_expired: Mapped[bool] = mapped_column(Boolean, default=False, server_default=sa_false(), nullable=False)
@@ -346,6 +358,12 @@ def _migrate() -> None:
                     conn.execute(
                         text("ALTER TABLE subscriptions ADD COLUMN last_subscription_reminder_at TIMESTAMP")
                     )
+            if "yookassa_payment_method_id" not in existing:
+                conn.execute(text("ALTER TABLE subscriptions ADD COLUMN yookassa_payment_method_id VARCHAR(64)"))
+            if "billing_provider" not in existing:
+                conn.execute(text("ALTER TABLE subscriptions ADD COLUMN billing_provider VARCHAR(16)"))
+            if "yookassa_last_applied_payment_id" not in existing:
+                conn.execute(text("ALTER TABLE subscriptions ADD COLUMN yookassa_last_applied_payment_id VARCHAR(64)"))
     if "users" in tables:
         existing = {c["name"] for c in inspector.get_columns("users")}
         with engine.begin() as conn:
@@ -612,6 +630,10 @@ class CheckoutCreateRequest(BaseModel):
     username: str | None = Field(default=None, max_length=64)
     email: str | None = Field(default=None, max_length=255)
     customer_email: str | None = Field(default=None)
+    payment_provider: Literal["lava", "yookassa"] = Field(
+        default="lava",
+        description="lava — карта (lava.top); yookassa — СБП / SberPay / карты (ЮKassa).",
+    )
 
     @field_validator("telegram_id", mode="before")
     @classmethod
@@ -714,6 +736,251 @@ def _create_lava_top_invoice(
     return payment_url, contract_id
 
 
+def _yookassa_configured() -> bool:
+    return bool(YOOKASSA_SHOP_ID and YOOKASSA_SECRET_KEY)
+
+
+def _yookassa_auth_b64() -> str:
+    return base64.b64encode(f"{YOOKASSA_SHOP_ID}:{YOOKASSA_SECRET_KEY}".encode()).decode()
+
+
+def _yookassa_request(
+    method: str,
+    path: str,
+    *,
+    body: dict[str, Any] | None = None,
+    idempotence_key: str | None = None,
+) -> dict[str, Any] | None:
+    if not _yookassa_configured():
+        return None
+    headers: dict[str, str] = {
+        "Authorization": f"Basic {_yookassa_auth_b64()}",
+        "Content-Type": "application/json",
+    }
+    if idempotence_key:
+        headers["Idempotence-Key"] = idempotence_key
+    data = json.dumps(body, ensure_ascii=False).encode("utf-8") if body is not None else None
+    req = urllib.request.Request(
+        f"{YOOKASSA_API_BASE}{path}",
+        data=data,
+        headers=headers,
+        method=method,
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            raw = resp.read().decode("utf-8")
+    except urllib.error.HTTPError as e:
+        err_body = e.read().decode("utf-8", errors="replace")[:3000]
+        logger.warning("YooKassa HTTP %s %s: %s", method, path, err_body)
+        return None
+    except urllib.error.URLError as e:
+        logger.warning("YooKassa network %s %s: %s", method, path, e)
+        return None
+    try:
+        parsed = json.loads(raw)
+    except json.JSONDecodeError:
+        logger.warning("YooKassa invalid JSON for %s %s", method, path)
+        return None
+    return parsed if isinstance(parsed, dict) else None
+
+
+def _yookassa_receipt(email: str) -> dict[str, Any]:
+    amt = f"{PAYMENT_AMOUNT_RUB}.00"
+    return {
+        "customer": {"email": email.strip().lower()},
+        "items": [
+            {
+                "description": "Frosty — подписка 2 в 1 (1 мес.)",
+                "quantity": "1.00",
+                "amount": {"value": amt, "currency": "RUB"},
+                "vat_code": 1,
+                "payment_subject": "service",
+                "payment_mode": "full_payment",
+            }
+        ],
+    }
+
+
+def _yookassa_create_initial_payment(
+    *,
+    payment_token: str,
+    email: str,
+    return_url: str,
+) -> tuple[str, str]:
+    """Первый платёж: redirect на форму ЮKassa (СБП / SberPay / карты и т.д.), save_payment_method=true."""
+    amt = f"{PAYMENT_AMOUNT_RUB}.00"
+    body: dict[str, Any] = {
+        "amount": {"value": amt, "currency": "RUB"},
+        "capture": True,
+        "confirmation": {"type": "redirect", "return_url": return_url},
+        "save_payment_method": True,
+        "description": "Frosty — подписка 2 в 1 (1 мес.)",
+        "metadata": {
+            "payment_token": payment_token,
+            "renewal": "0",
+        },
+    }
+    if email.strip():
+        body["receipt"] = _yookassa_receipt(email)
+    pid = str(uuid4())
+    data = _yookassa_request("POST", "/payments", body=body, idempotence_key=pid)
+    if not data:
+        raise RuntimeError("YooKassa: не удалось создать платёж")
+    pay_id = str(data.get("id") or "").strip()
+    conf = data.get("confirmation")
+    url = ""
+    if isinstance(conf, dict):
+        url = str(conf.get("confirmation_url") or conf.get("confirmationUrl") or "").strip()
+    if not url or not pay_id:
+        raise RuntimeError(f"YooKassa: нет confirmation_url в ответе, keys={list(data.keys())}")
+    return url, pay_id
+
+
+def _yookassa_get_payment(payment_id: str) -> dict[str, Any] | None:
+    if not payment_id.strip():
+        return None
+    return _yookassa_request("GET", f"/payments/{payment_id.strip()}")
+
+
+def _yookassa_create_recurring_payment(sub: Subscription, db: Session, *, idempotence_key: str) -> bool:
+    """Списание с сохранённого способа оплаты. Успех приходит в webhook payment.succeeded."""
+    pm_id = (sub.yookassa_payment_method_id or "").strip()
+    if not pm_id:
+        return False
+    user = db.execute(select(User).where(User.telegram_id == sub.telegram_id)).scalar_one_or_none()
+    email = (user.email or "").strip().lower() if user else ""
+    amt = f"{PAYMENT_AMOUNT_RUB}.00"
+    body: dict[str, Any] = {
+        "amount": {"value": amt, "currency": "RUB"},
+        "capture": True,
+        "payment_method_id": pm_id,
+        "description": "Frosty — продление подписки (1 мес.)",
+        "metadata": {
+            "payment_token": sub.payment_token,
+            "renewal": "1",
+        },
+    }
+    if email:
+        body["receipt"] = _yookassa_receipt(email)
+    data = _yookassa_request("POST", "/payments", body=body, idempotence_key=idempotence_key)
+    if not data:
+        return False
+    status = str(data.get("status") or "")
+    logger.info(
+        "YooKassa recurring payment created tg_id=%s payment_id=%s status=%s",
+        sub.telegram_id,
+        data.get("id"),
+        status,
+    )
+    return True
+
+
+def _yookassa_payment_amount_ok(payment: dict[str, Any]) -> bool:
+    amt = payment.get("amount")
+    if not isinstance(amt, dict):
+        return False
+    val = str(amt.get("value") or "").strip()
+    if not val:
+        return False
+    try:
+        rub = val.split(".", 1)[0]
+        return int(rub) == int(PAYMENT_AMOUNT_RUB)
+    except ValueError:
+        return False
+
+
+def _apply_yookassa_payment_object(db: Session, payment: dict[str, Any]) -> None:
+    """Идемпотентно применить успешный платёж ЮKassa (первичный или продление)."""
+    meta = payment.get("metadata")
+    if not isinstance(meta, dict):
+        logger.warning("YooKassa webhook: no metadata")
+        return
+    token = str(meta.get("payment_token") or "").strip()
+    if not token:
+        logger.warning("YooKassa webhook: empty payment_token in metadata")
+        return
+    if not _yookassa_payment_amount_ok(payment):
+        # перепроверка суммы (защита от подмены в уведомлении — ниже ещё GET /payments)
+        amt = payment.get("amount")
+        logger.warning("YooKassa webhook: amount mismatch payment_token=%s amount=%s", token, amt)
+        return
+    sub = db.execute(select(Subscription).where(Subscription.payment_token == token)).scalar_one_or_none()
+    if sub is None:
+        logger.warning("YooKassa webhook: subscription not found token=%s", token)
+        return
+    pay_id = str(payment.get("id") or "").strip()
+    if pay_id and (sub.yookassa_last_applied_payment_id or "") == pay_id:
+        logger.info("YooKassa webhook: duplicate payment id=%s", pay_id)
+        return
+    pm = payment.get("payment_method")
+    pm_id: str | None = None
+    if isinstance(pm, dict):
+        pm_id = str(pm.get("id") or "").strip() or None
+    is_renewal = str(meta.get("renewal") or "").strip() == "1"
+    if pm_id and not is_renewal:
+        sub.yookassa_payment_method_id = pm_id
+        sub.billing_provider = "yookassa"
+    if sub.payment_status == "pending":
+        activate_subscription(sub, recurring=False)
+    elif sub.payment_status == "paid" and is_renewal:
+        activate_subscription(sub, recurring=True)
+    else:
+        logger.info(
+            "YooKassa webhook: skip activate tg_id=%s status=%s renewal=%s",
+            sub.telegram_id,
+            sub.payment_status,
+            is_renewal,
+        )
+        return
+    if pay_id:
+        sub.yookassa_last_applied_payment_id = pay_id
+    db.commit()
+    logger.info("YooKassa payment applied tg_id=%s renewal=%s", sub.telegram_id, is_renewal)
+    _provision_vpn_after_payment(int(sub.telegram_id), db)
+    if sub.proxy_server and sub.proxy_port and sub.proxy_secret:
+        proxy_link = f"tg://proxy?server={sub.proxy_server}&port={sub.proxy_port}&secret={sub.proxy_secret}"
+        _notify_payment_success(sub.telegram_id, proxy_link)
+    _notify_admin_payment(sub.telegram_id)
+
+
+def _process_yookassa_renewals() -> None:
+    """За 24–72 ч до окончания оплаченного периода — одно автосписание (идемпотентность по ключу)."""
+    if not _yookassa_configured():
+        return
+    db = SessionLocal()
+    try:
+        now = utcnow()
+        win_lo = now + timedelta(hours=24)
+        win_hi = now + timedelta(hours=72)
+        rows = db.execute(
+            select(Subscription).where(
+                Subscription.payment_status == "paid",
+                Subscription.yookassa_payment_method_id.is_not(None),
+                Subscription.expires_at.is_not(None),
+                Subscription.expires_at > now,
+                Subscription.expires_at >= win_lo,
+                Subscription.expires_at <= win_hi,
+                Subscription.access_suspended == False,  # noqa: E712
+                Subscription.access_blocked_reason.is_(None),
+            )
+        ).scalars().all()
+        for sub in rows:
+            exp = sub.expires_at
+            if exp is None:
+                continue
+            idem = f"frosty-renew-{sub.payment_token}-{int(exp.timestamp())}"
+            try:
+                _yookassa_create_recurring_payment(sub, db, idempotence_key=idem)
+            except Exception:
+                logger.exception("YooKassa renewal request failed tg_id=%s", sub.telegram_id)
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()
+
+
 def _checkout_fallback_payment_url(payment_token: str) -> str:
     """Всегда вернуть ссылку, даже если API Lava упал (чтобы пользователь не видел 502)."""
     token = payment_token
@@ -782,6 +1049,39 @@ def checkout_create(payload: CheckoutCreateRequest, db: Session = Depends(get_db
                 web_username = username or customer_email
                 db.add(User(telegram_id=tg_id, username=web_username, email=effective_email))
         db.commit()
+
+    prov = (payload.payment_provider or "lava").strip().lower()
+    if prov not in ("lava", "yookassa"):
+        prov = "lava"
+
+    if prov == "yookassa":
+        if not _yookassa_configured():
+            raise HTTPException(
+                status_code=503,
+                detail="Оплата ЮKassa не настроена. Задайте YOOKASSA_SHOP_ID и YOOKASSA_SECRET_KEY.",
+            )
+        if not effective_email:
+            raise HTTPException(
+                status_code=400,
+                detail="Для оплаты через СБП / ЮKassa укажите email (нужен для чека).",
+            )
+        if not FRONTEND_URL:
+            raise HTTPException(
+                status_code=503,
+                detail="Задайте FRONTEND_URL — после оплаты пользователь вернётся в мини-кабинет.",
+            )
+        return_url = f"{FRONTEND_URL.rstrip('/')}/success?token={token}"
+        try:
+            payment_url_yk, _ = _yookassa_create_initial_payment(
+                payment_token=str(token),
+                email=effective_email,
+                return_url=return_url,
+            )
+        except RuntimeError as e:
+            raise HTTPException(status_code=503, detail=str(e)) from e
+        payment_url = _normalize_payment_url(payment_url_yk)
+        logger.info("Checkout YooKassa: tg_id=%s token=%s", tg_id, token)
+        return CheckoutCreateResponse(payment_url=payment_url, payment_token=token)
 
     lava_contract_id: str | None = None
     lava_top_configured = bool(LAVA_TOP_API_KEY and LAVA_TOP_OFFER_ID)
@@ -1347,6 +1647,10 @@ async def _expiration_loop() -> None:
         except Exception:
             logger.exception("Expiration check failed")
         try:
+            await loop.run_in_executor(None, _process_yookassa_renewals)
+        except Exception:
+            logger.exception("YooKassa renewals failed")
+        try:
             await loop.run_in_executor(None, _process_renewal_failure_daily_reminders)
         except Exception:
             logger.exception("Renewal failure reminders failed")
@@ -1466,6 +1770,71 @@ async def lava_webhook(req: Request, db: Session = Depends(get_db)) -> OkRespons
     _notify_admin_payment(sub.telegram_id)
 
     return OkResponse(ok=True)
+
+
+@app.post("/webhooks/yookassa")
+async def yookassa_webhook(req: Request, db: Session = Depends(get_db)) -> PlainTextResponse:
+    """HTTP-уведомления ЮKassa: payment.succeeded / payment.canceled (в т.ч. неуспешное продление)."""
+    if not _yookassa_configured():
+        logger.warning("YooKassa webhook called but API keys not set")
+        raise HTTPException(status_code=503, detail="YooKassa not configured")
+
+    raw_body = await req.body()
+    try:
+        payload = json.loads(raw_body.decode("utf-8")) if raw_body else {}
+    except json.JSONDecodeError:
+        logger.warning("YooKassa webhook: invalid JSON")
+        return PlainTextResponse("OK", status_code=200)
+    if not isinstance(payload, dict):
+        return PlainTextResponse("OK", status_code=200)
+
+    event = str(payload.get("event") or "").strip()
+    obj = payload.get("object")
+    if not isinstance(obj, dict):
+        return PlainTextResponse("OK", status_code=200)
+    pay_id = str(obj.get("id") or "").strip()
+    if not pay_id:
+        return PlainTextResponse("OK", status_code=200)
+
+    verified = _yookassa_get_payment(pay_id)
+    if not verified:
+        logger.warning("YooKassa webhook: GET /payments/%s failed — ignoring", pay_id)
+        return PlainTextResponse("OK", status_code=200)
+
+    if event == "payment.succeeded":
+        if str(verified.get("status") or "") != "succeeded":
+            return PlainTextResponse("OK", status_code=200)
+        try:
+            _apply_yookassa_payment_object(db, verified)
+        except Exception:
+            logger.exception("YooKassa apply payment failed id=%s", pay_id)
+        return PlainTextResponse("OK", status_code=200)
+
+    if event == "payment.canceled":
+        meta = verified.get("metadata")
+        if not isinstance(meta, dict):
+            return PlainTextResponse("OK", status_code=200)
+        if str(meta.get("renewal") or "").strip() != "1":
+            return PlainTextResponse("OK", status_code=200)
+        token = str(meta.get("payment_token") or "").strip()
+        if not token:
+            return PlainTextResponse("OK", status_code=200)
+        sub = db.execute(select(Subscription).where(Subscription.payment_token == token)).scalar_one_or_none()
+        if sub is None or sub.payment_status != "paid":
+            return PlainTextResponse("OK", status_code=200)
+        st = str(verified.get("status") or "")
+        if st and st != "canceled":
+            return PlainTextResponse("OK", status_code=200)
+        try:
+            _apply_renewal_payment_failure(db, sub)
+            db.commit()
+            logger.info("YooKassa renewal payment canceled tg_id=%s payment=%s", sub.telegram_id, pay_id)
+        except Exception:
+            logger.exception("YooKassa renewal failure handling id=%s", pay_id)
+            db.rollback()
+        return PlainTextResponse("OK", status_code=200)
+
+    return PlainTextResponse("OK", status_code=200)
 
 
 async def _parse_prodamus_webhook_payload(req: Request) -> dict[str, Any]:

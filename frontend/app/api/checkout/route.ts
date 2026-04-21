@@ -26,7 +26,14 @@ function badBackendConfig(): string | null {
 }
 
 export async function POST(req: NextRequest) {
-  const { telegram_id, username, email, customer_email } = await req.json()
+  const body = await req.json()
+  const { telegram_id, username, email, customer_email, payment_provider } = body as {
+    telegram_id?: unknown
+    username?: unknown
+    email?: unknown
+    customer_email?: unknown
+    payment_provider?: unknown
+  }
 
   const configErr = badBackendConfig()
   if (configErr) {
@@ -58,6 +65,8 @@ export async function POST(req: NextRequest) {
         username: typeof username === "string" && username.trim() ? username.trim() : null,
         email: typeof email === "string" && email.trim() ? email.trim() : null,
         customer_email: typeof customer_email === "string" && customer_email.trim() ? customer_email.trim() : null,
+        payment_provider:
+          payment_provider === "yookassa" || payment_provider === "lava" ? payment_provider : "lava",
       }),
       signal: controller.signal,
     })

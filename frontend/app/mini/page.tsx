@@ -283,6 +283,7 @@ export default function MiniAppPage() {
   const [paymentUrl, setPaymentUrl] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [errorDetail, setErrorDetail] = useState<string | null>(null)
+  const [payChannel, setPayChannel] = useState<"lava" | "yookassa">("lava")
   const [copied, setCopied] = useState(false)
   const [justPaid, setJustPaid] = useState(false)
   const [isWeb, setIsWeb] = useState<boolean | null>(null)
@@ -537,6 +538,7 @@ export default function MiniAppPage() {
           telegram_id: tgId ? String(tgId) : "0",
           username: tgUser?.username || null,
           customer_email: email,
+          payment_provider: payChannel,
         }),
       })
       const data = (await res.json()) as { error?: string; payment_url?: string; details?: string }
@@ -1083,6 +1085,41 @@ export default function MiniAppPage() {
             <p className="text-sm mt-1" style={{ color: "#6B7280" }}>= 10 ₽ в день · Прокси + VPN · Отмена в любой момент</p>
           </div>
 
+          {/* Способ оплаты */}
+          <div className="mb-3">
+            <span className="block text-xs font-medium mb-1.5" style={{ color: "#6B7280" }}>Способ оплаты</span>
+            <div className="grid grid-cols-2 gap-2">
+              <button
+                type="button"
+                onClick={() => setPayChannel("lava")}
+                className="text-left px-3 py-2.5 text-xs font-semibold touch-manipulation transition-all"
+                style={{
+                  borderRadius: 12,
+                  border: payChannel === "lava" ? "2px solid #2AABEE" : "1px solid #E5E7EB",
+                  background: payChannel === "lava" ? "#EFF6FF" : "#F7F8FA",
+                  color: "#111827",
+                }}
+              >
+                Карта
+                <span className="block font-normal mt-0.5" style={{ color: "#6B7280", fontSize: 10 }}>lava.top</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setPayChannel("yookassa")}
+                className="text-left px-3 py-2.5 text-xs font-semibold touch-manipulation transition-all"
+                style={{
+                  borderRadius: 12,
+                  border: payChannel === "yookassa" ? "2px solid #2AABEE" : "1px solid #E5E7EB",
+                  background: payChannel === "yookassa" ? "#EFF6FF" : "#F7F8FA",
+                  color: "#111827",
+                }}
+              >
+                СБП · SberPay
+                <span className="block font-normal mt-0.5" style={{ color: "#6B7280", fontSize: 10 }}>ЮKassa</span>
+              </button>
+            </div>
+          </div>
+
           {/* Email */}
           <div className="mb-3">
             <label className="block text-xs font-medium mb-1.5" style={{ color: "#6B7280" }}>Email для чека</label>
@@ -1155,7 +1192,9 @@ export default function MiniAppPage() {
 
           {/* Payment note */}
           <p className="text-center text-xs mt-3" style={{ color: "#6B7280" }}>
-            Оплата банковской картой · Прокси включается сразу · VPN — после установки приложения
+            {payChannel === "lava"
+              ? "Карта через lava.top · прокси сразу после оплаты · VPN — после установки Happ"
+              : "ЮKassa: СБП, SberPay, карты · прокси сразу после оплаты · VPN — после Happ"}
           </p>
           <p className="text-center text-xs mt-1" style={{ color: "#9CA3AF" }}>
             Отмена в любой момент — напишите в поддержку
