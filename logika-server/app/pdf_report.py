@@ -69,7 +69,12 @@ def _truncate_intro(text: str, max_chars: int = 160) -> str:
     return t[: max_chars - 1].rstrip() + "…"
 
 
-def build_pdf_bytes_reportlab(report: dict[str, Any], dilemma: str) -> bytes:
+def build_pdf_bytes_reportlab(
+    report: dict[str, Any],
+    dilemma: str,
+    *,
+    document_date: datetime | None = None,
+) -> bytes:
     """Запасной PDF через ReportLab (без Chromium). Визуально хуже совпадает с сайтом."""
     fn = _register_cyrillic_fonts()
     buf = io.BytesIO()
@@ -204,16 +209,25 @@ def build_pdf_bytes_reportlab(report: dict[str, Any], dilemma: str) -> bytes:
     score = int(report.get("overall_score") or 0)
     sc_hex = _score_hex(score)
 
-    gen_iso = datetime.now(timezone.utc).strftime("%d.%m.%Y")
+    if document_date is not None:
+        try:
+            dt = document_date
+            if dt.tzinfo:
+                dt = dt.astimezone(timezone.utc)
+            gen_iso = dt.strftime("%d.%m.%Y")
+        except Exception:
+            gen_iso = datetime.now(timezone.utc).strftime("%d.%m.%Y")
+    else:
+        gen_iso = datetime.now(timezone.utc).strftime("%d.%m.%Y")
 
-    # Шапка: бренд + дата (воздух), затем заголовок; запрос и оценка — отдельные блоки
+    # Шапка: как на сайте — ЛОГИКА + зелёная точка, без лишнего «·»
     intro_left = _p(
-        f'<font color="#f5f5f7"><b>ЛОГИКА.</b></font> <font color="#c4f542">·</font><br/>'
+        f'<font color="#f5f5f7"><b>ЛОГИКА</b></font><font color="#c4f542"><b>.</b></font><br/>'
         f'<font color="#5a5a62" size="8">Аналитический отчёт</font>',
         intro_brand,
     )
     intro_right = _p(
-        f'<font color="#8a8a94" size="7">ДАТА ДОКУМЕНТА</font><br/>'
+        f'<font color="#8a8a94" size="7">Дата документа</font><br/>'
         f'<font color="#f5f5f7" size="10">{_esc(gen_iso)}</font>',
         intro_date,
     )
@@ -238,12 +252,12 @@ def build_pdf_bytes_reportlab(report: dict[str, Any], dilemma: str) -> bytes:
 
     dilemma_raw = (dilemma or "").strip()
     if dilemma_raw:
-        dilemma_short = _truncate_intro(dilemma_raw, max_chars=200)
+        dilemma_short = _truncate_intro(dilemma_raw, max_chars=420)
         dilemma_box = Table(
             [
                 [
                     _p(
-                        f'<font color="#8a8a94" size="7">ИСХОДНЫЙ ЗАПРОС</font><br/><br/>'
+                        f'<font color="#8a8a94" size="7">Исходный запрос</font><br/><br/>'
                         f'<font color="#f5f5f7">«{_esc(dilemma_short)}»</font>',
                         intro_dilemma,
                     )
@@ -267,7 +281,7 @@ def build_pdf_bytes_reportlab(report: dict[str, Any], dilemma: str) -> bytes:
         story.append(Spacer(1, 0.55 * cm))
 
     score_para = _p(
-        f'<font name="{fn}" color="#8a8a94" size="8">ОЦЕНКА</font><br/><br/>'
+        f'<font name="{fn}" color="#8a8a94" size="8">Оценка</font><br/><br/>'
         f'<font name="{fn}" color="{sc_hex}"><b><font size="38">{score}</font></b></font>'
         f'<font name="{fn}" color="#9a9aa4">  / 100</font>',
         body,
@@ -275,18 +289,17 @@ def build_pdf_bytes_reportlab(report: dict[str, Any], dilemma: str) -> bytes:
     verdict_txt = _esc(str(report.get("verdict_short") or "Решение частично логично"))
     verdict_block = _p(f"<b>{verdict_txt}</b>", verdict_style)
     summary_raw = str(report.get("summary") or "").strip()
-    summary_short = _truncate_intro(summary_raw, 320) if summary_raw else ""
     summary_parts: list[str] = []
-    if summary_short:
-        summary_parts = [p.strip() for p in summary_short.replace("\r\n", "\n").split("\n\n") if p.strip()]
+    if summary_raw:
+        summary_parts = [p.strip() for p in summary_raw.replace("\r\n", "\n").split("\n\n") if p.strip()]
     if not summary_parts:
         summary_parts = ["Проверка по законам логики и типичным искажениям."]
 
     score_inner: list[Any] = [
         [score_para],
-        [_p('<font color="#8a8a94" size="8">ВЕРДИКТ</font>', section_label)],
+        [_p('<font color="#8a8a94" size="8">Вердикт</font>', section_label)],
         [verdict_block],
-        [_p('<font color="#8a8a94" size="8">РАЗБОР</font>', section_label)],
+        [_p('<font color="#8a8a94" size="8">Разбор</font>', section_label)],
     ]
     for para in summary_parts:
         score_inner.append([_p(_esc(para), body_loose)])
@@ -333,16 +346,17 @@ def build_pdf_bytes_reportlab(report: dict[str, Any], dilemma: str) -> bytes:
                         ("BACKGROUND", (0, 0), (-1, -1), card_bg),
                         ("BOX", (0, 0), (-1, -1), 0.5, border_c),
                         ("VALIGN", (0, 0), (-1, -1), "TOP"),
-                        ("LEFTPADDING", (0, 0), (-1, -1), 10),
-                        ("RIGHTPADDING", (0, 0), (-1, -1), 10),
-                        ("TOPPADDING", (0, 0), (-1, -1), 10),
-                        ("BOTTOMPADDING", (0, 0), (-1, -1), 10),
+                        ("LEFTPADDING", (0, 0), (-1, -1), 12),
+                        ("RIGHTPADDING", (0, 0), (-1, -1), 12),
+                        ("TOPPADDING", (0, 0), (-1, -1), 12),
+                        ("BOTTOMPADDING", (0, 0), (-1, -1), 12),
                     ]
                 )
             )
             story.append(t)
-            story.append(Spacer(1, 0.2 * cm))
+            story.append(Spacer(1, 0.25 * cm))
 
+    story.append(Spacer(1, 0.15 * cm))
     story.append(_p('<font name="%s" color="#5a5a62"><b>Искажения</b></font>' % fn, h2))
     for b in report.get("biases") or []:
         if isinstance(b, dict):
@@ -449,6 +463,6 @@ def build_pdf_bytes(
         except Exception as e:
             logger.warning("PDF playwright: %s", e, exc_info=True)
             if s.pdf_fallback_reportlab:
-                return build_pdf_bytes_reportlab(report, dilemma)
+                return build_pdf_bytes_reportlab(report, dilemma, document_date=document_date)
             raise
-    return build_pdf_bytes_reportlab(report, dilemma)
+    return build_pdf_bytes_reportlab(report, dilemma, document_date=document_date)

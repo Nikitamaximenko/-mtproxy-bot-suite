@@ -147,7 +147,7 @@ def build_report_html(
         bias_items.append(
             f'<li class="bias-li"><span class="bias-name">{nm}</span>{hint_part}</li>'
         )
-    biases_html = "<ul>" + "".join(bias_items) + "</ul>"
+    biases_html = '<ul class="bias-ul">' + "".join(bias_items) + "</ul>"
 
     alt_items = "".join(f'<li class="alt-li">{_esc(line)}</li>' for line in alternatives)
     summary_body = "".join(f'<p class="sum-p">{_esc(block)}</p>' for block in summary_parts)
@@ -174,7 +174,8 @@ def build_report_html(
     * {{ box-sizing: border-box; }}
     @page {{
       size: A4 portrait;
-      margin: 14mm 16mm;
+      /* Единственные поля страницы: в pdf_playwright margin отключён, чтобы не дублировать отступы */
+      margin: 14mm 14mm 16mm 14mm;
     }}
     html {{
       -webkit-print-color-adjust: exact;
@@ -189,6 +190,8 @@ def build_report_html(
       font-size: 15px;
       line-height: 1.6;
       -webkit-font-smoothing: antialiased;
+      overflow-wrap: break-word;
+      word-wrap: break-word;
     }}
     .report {{
       max-width: 48rem;
@@ -373,7 +376,22 @@ def build_report_html(
       margin-top: 48px;
     }}
     @media print {{
-      .laws-grid {{ break-inside: avoid; }}
+      .law-card {{
+        break-inside: avoid;
+        page-break-inside: avoid;
+      }}
+      .score-section {{
+        break-inside: avoid;
+        page-break-inside: avoid;
+      }}
+      blockquote {{
+        break-inside: avoid;
+        page-break-inside: avoid;
+      }}
+      .conclusion {{
+        break-inside: avoid;
+        page-break-inside: avoid;
+      }}
     }}
     .law-card {{
       border: 1px solid #222226;
@@ -487,6 +505,17 @@ def build_report_html(
       color: #f5f5f7;
       white-space: pre-wrap;
     }}
+    .pdf-footer {{
+      margin-top: 48px;
+      padding-top: 20px;
+      border-top: 1px solid rgba(34, 34, 38, 0.8);
+      font-family: "JetBrains Mono", ui-monospace, monospace;
+      font-size: 10px;
+      line-height: 1.5;
+      letter-spacing: 0.02em;
+      color: #5a5a62;
+      max-width: 48rem;
+    }}
   </style>
 </head>
 <body>
@@ -548,6 +577,8 @@ def build_report_html(
       <p class="label">Финальный вывод</p>
       <p class="conclusion-text">{_esc(conclusion_text)}</p>
     </div>
+
+    <p class="pdf-footer">Логика — ассистент для размышлений, не финансовый и не юридический советник.</p>
   </div>
 </body>
 </html>"""

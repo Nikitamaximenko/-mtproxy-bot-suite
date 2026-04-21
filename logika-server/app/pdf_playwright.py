@@ -26,10 +26,11 @@ def html_to_pdf_bytes(html: str) -> bytes:
                 page.wait_for_load_state("networkidle", timeout=15_000)
             except Exception:
                 pass
+            # Поля задаются в HTML (@page); иначе Chromium дублирует отступы и сужает колонки.
             pdf = page.pdf(
                 format="A4",
                 print_background=True,
-                margin={"top": "12mm", "right": "14mm", "bottom": "14mm", "left": "14mm"},
+                margin={"top": "0", "right": "0", "bottom": "0", "left": "0"},
                 prefer_css_page_size=True,
             )
             return bytes(pdf)
