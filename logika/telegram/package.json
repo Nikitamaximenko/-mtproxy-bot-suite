@@ -1,0 +1,26 @@
+{
+  "name": "logika-telegram",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Telegram bot port of Логика — внешний рациональный контур.",
+  "scripts": {
+    "dev": "tsx watch src/bot.ts",
+    "build": "tsc -p .",
+    "start": "node dist/bot.js",
+    "lint": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.36.0",
+    "@grammyjs/conversations": "^2.0.0",
+    "dotenv": "^16.4.5",
+    "grammy": "^1.30.0",
+    "pino": "^9.5.0",
+    "puppeteer": "^23.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.6.0"
+  }
+}

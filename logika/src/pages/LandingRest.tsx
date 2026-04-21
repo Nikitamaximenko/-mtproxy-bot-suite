@@ -2,12 +2,12 @@ import { motion } from 'framer-motion'
 import { Link } from 'react-router-dom'
 import {
   FaqSection,
-  HowItWorksSection,
   LawsSection,
   ReviewsSection,
   StatsSection,
   TariffsSection,
 } from '../components/landing/sections'
+import { ArgumentMap } from '../components/landing/ArgumentMap'
 
 const ease = [0.32, 0.72, 0, 1] as const
 
@@ -25,7 +25,7 @@ export default function LandingRest() {
 
       <LawsSection />
 
-      <HowItWorksSection />
+      <ArgumentMap />
 
       <section id="tariffs">
         <TariffsSection />

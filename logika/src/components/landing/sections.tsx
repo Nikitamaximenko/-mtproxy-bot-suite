@@ -1,6 +1,6 @@
 import { motion, useInView } from 'framer-motion'
 import { useRef, useState } from 'react'
-import { ChevronDown } from 'lucide-react'
+import { ChevronDown, Mic } from 'lucide-react'
 import { clsx } from 'clsx'
 import { useCountUp } from '../../hooks/useCountUp'
 
@@ -156,33 +156,6 @@ export function LawsSection() {
   )
 }
 
-export function HowItWorksSection() {
-  return (
-    <section className="border-border bg-background border-y py-[120px] md:py-[200px]">
-      <div className="mx-auto max-w-[1280px] px-4 md:px-6">
-        <p className="text-muted font-mono text-[13px] uppercase tracking-[0.08em]">Как это работает</p>
-        <h2 className="mt-4 text-[clamp(2rem,4vw,3rem)] font-medium tracking-[-0.02em]">
-          Четыре шага. Без утешений.
-        </h2>
-        <ol className="mt-10 max-w-2xl space-y-6 text-lg text-muted">
-          <li>
-            <span className="text-foreground font-medium">Шаг 01.</span> Ты описываешь ситуацию.
-          </li>
-          <li>
-            <span className="text-foreground font-medium">Шаг 02.</span> Бот задаёт пять уточнений.
-          </li>
-          <li>
-            <span className="text-foreground font-medium">Шаг 03.</span> Анализ по законам и искажениям.
-          </li>
-          <li>
-            <span className="text-foreground font-medium">Шаг 04.</span> Ты получаешь отчёт. В цифрах.
-          </li>
-        </ol>
-      </div>
-    </section>
-  )
-}
-
 export function TariffsSection() {
   const [yearly, setYearly] = useState(false)
   const pro = yearly ? Math.round(790 * 12 * 0.7) : 790
@@ -235,20 +208,21 @@ export function TariffsSection() {
                 '30 вопросов в месяц',
                 'Отчёты в PDF',
                 'История 30 дней',
-                'Голосовой ввод',
+                'Экспорт выводов',
               ],
               cta: 'Выбрать PRO',
               highlight: true,
             },
             {
-              name: 'UNLIMITED',
+              name: 'ULTRA',
+              badge: 'голос',
               price: yearly ? `${unlim.toLocaleString('ru-RU')} ₽/год` : '1 490 ₽/мес',
               sub: yearly ? 'для тех, кто не считает вопросы' : 'без потолка',
               feats: [
                 'Вопросы без лимита',
-                'PDF и приоритет',
+                'Голосовой ввод (только ULTRA)',
                 'История без срока',
-                'Голос и экспорт',
+                'Приоритетный анализ',
               ],
               cta: 'Всё включено',
               highlight: false,
@@ -264,7 +238,15 @@ export function TariffsSection() {
               <div className="flex items-center gap-2">
                 <h3 className="text-lg font-medium">{p.name}</h3>
                 {'badge' in p && p.badge && (
-                  <span className="bg-accent/15 text-accent rounded-[4px] px-2 py-0.5 font-mono text-[10px] uppercase tracking-[0.08em]">
+                  <span
+                    className={clsx(
+                      'inline-flex items-center gap-1 rounded-[4px] px-2 py-0.5 font-mono text-[10px] uppercase tracking-[0.08em]',
+                      p.name === 'ULTRA'
+                        ? 'bg-[#ffb23d]/15 text-[#ffb23d]'
+                        : 'bg-accent/15 text-accent',
+                    )}
+                  >
+                    {p.name === 'ULTRA' && <Mic className="h-3 w-3" aria-hidden />}
                     {p.badge}
                   </span>
                 )}
