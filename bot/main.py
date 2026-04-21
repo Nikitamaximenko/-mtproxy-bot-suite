@@ -128,11 +128,18 @@ def main_menu_kb(tg_id: int) -> InlineKeyboardMarkup:
         # Всегда чат в боте — не открываем личку по url (t.me)
         InlineKeyboardButton(text="🆘 Поддержка", callback_data="menu:support"),
     ]
+    row_cancel = [
+        InlineKeyboardButton(
+            text="🚫 Отменить автопродление",
+            callback_data="menu:cancel_recurring",
+        ),
+    ]
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="🧊 2 в 1 — Прокси + VPN", web_app=WebAppInfo(url=_miniapp_url(tg_id)))],
         [InlineKeyboardButton(text="🎁 Бесплатный день", callback_data="menu:trial")],
         [InlineKeyboardButton(text="ℹ️ Инструкция", callback_data="menu:help")],
         row3,
+        row_cancel,
     ])
 
 
@@ -144,6 +151,12 @@ def status_active_kb(tg_id: int) -> InlineKeyboardMarkup:
                 InlineKeyboardButton(
                     text="🧊 Личный кабинет — 2 в 1",
                     web_app=WebAppInfo(url=_miniapp_url(tg_id)),
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    text="🚫 Отменить автопродление",
+                    callback_data="menu:cancel_recurring",
                 )
             ],
             [InlineKeyboardButton(text="🏠 Главное меню", callback_data="menu:main")],
@@ -892,7 +905,9 @@ async def main() -> None:
                     or data.get("error")
                     or "Не удалось отменить автопродление. Напишите в чат, мы разберёмся."
                 )
-            await msg.answer(text, reply_markup=support_chat_kb())
+            in_support = (await state.get_state()) == SupportStates.chatting.state
+            reply_kb = support_chat_kb() if in_support else main_menu_kb(tg_uid)
+            await msg.answer(text, reply_markup=reply_kb)
             return
 
         if action == "exit_support":
