@@ -40,7 +40,6 @@ function ServiceChip({ label, color }: { label: string; color: string }) {
 function PaymentCard({ ping }: { ping: VpnPing | null }) {
   const [email, setEmail] = useState("")
   const [touched, setTouched] = useState(false)
-  const [payChannel, setPayChannel] = useState<"lava" | "yookassa">("lava")
   const [paying, setPaying] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [detail, setDetail] = useState<string | null>(null)
@@ -66,7 +65,7 @@ function PaymentCard({ ping }: { ping: VpnPing | null }) {
           telegram_id: "0",
           username: null,
           customer_email: email.trim(),
-          payment_provider: payChannel,
+          payment_provider: "lava",
         }),
       })
       const data = (await res.json().catch(() => ({}))) as {
@@ -85,7 +84,7 @@ function PaymentCard({ ping }: { ping: VpnPing | null }) {
     } finally {
       setPaying(false)
     }
-  }, [email, valid, payChannel])
+  }, [email, valid])
 
   return (
     <div
@@ -121,39 +120,19 @@ function PaymentCard({ ping }: { ping: VpnPing | null }) {
         <span className="block text-xs font-medium mb-1.5" style={{ color: "#6B7280" }}>
           Способ оплаты
         </span>
-        <div className="grid grid-cols-2 gap-2">
-          <button
-            type="button"
-            onClick={() => setPayChannel("lava")}
-            className="text-left px-3 py-2.5 text-xs font-semibold transition-all"
-            style={{
-              borderRadius: 12,
-              border: payChannel === "lava" ? "2px solid #2AABEE" : "1px solid #E5E7EB",
-              background: payChannel === "lava" ? "#EFF6FF" : "#F7F8FA",
-              color: "#111827",
-            }}
-          >
-            Банковская карта
-            <span className="block font-normal mt-0.5" style={{ color: "#6B7280", fontSize: 10 }}>
-              lava.top
-            </span>
-          </button>
-          <button
-            type="button"
-            onClick={() => setPayChannel("yookassa")}
-            className="text-left px-3 py-2.5 text-xs font-semibold transition-all"
-            style={{
-              borderRadius: 12,
-              border: payChannel === "yookassa" ? "2px solid #2AABEE" : "1px solid #E5E7EB",
-              background: payChannel === "yookassa" ? "#EFF6FF" : "#F7F8FA",
-              color: "#111827",
-            }}
-          >
-            СБП · SberPay
-            <span className="block font-normal mt-0.5" style={{ color: "#6B7280", fontSize: 10 }}>
-              ЮKassa (ЮMoney)
-            </span>
-          </button>
+        <div
+          className="text-left px-3 py-2.5 text-xs font-semibold"
+          style={{
+            borderRadius: 12,
+            border: "2px solid #2AABEE",
+            background: "#EFF6FF",
+            color: "#111827",
+          }}
+        >
+          Банковская карта
+          <span className="block font-normal mt-0.5" style={{ color: "#6B7280", fontSize: 10 }}>
+            lava.top
+          </span>
         </div>
       </div>
 
@@ -210,9 +189,7 @@ function PaymentCard({ ping }: { ping: VpnPing | null }) {
           <path d="M12 2L4 6v6c0 5 3.5 9.5 8 10 4.5-.5 8-5 8-10V6l-8-4z" stroke="currentColor" strokeWidth="1.7" strokeLinejoin="round" />
           <path d="M9 12l2 2 4-4" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" />
         </svg>
-        {payChannel === "lava"
-          ? "Карта через lava.top · подписка с автопродлением"
-          : "ЮKassa: СБП, SberPay, карты · автопродление после привязки"}
+        {"Карта через lava.top · подписка с автопродлением"}
       </div>
 
       {error && (
@@ -697,7 +674,7 @@ export function Landing() {
             />
             <Faq
               q="Какие способы оплаты?"
-              a="На сайте можно выбрать: банковская карта (lava.top) или СБП / SberPay и другие способы через ЮKassa (ЮMoney). В Telegram-мини-приложении те же варианты. Подписка — 299 ₽/мес, автопродление настроено у выбранного провайдера."
+              a="Сейчас оплата доступна банковской картой через lava.top и в мини-приложении, и на сайте. Подписка — 299 ₽/мес с автопродлением; отключить можно в боте."
             />
             <Faq
               q="Вы пишете логи моего трафика?"
