@@ -7,6 +7,25 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
+# Имена четырёх законов — для дополнения, если модель вернула меньше элементов
+_CANONICAL_LAW_NAMES: tuple[str, ...] = (
+    "Закон тождества",
+    "Закон непротиворечия",
+    "Закон исключённого третьего",
+    "Закон достаточного основания",
+)
+
+_LAW_PAD_COMMENT = (
+    "В переданном материале недостаточно явных опор для отдельной оценки по этому закону — "
+    "см. общий вывод; при необходимости уточни контекст в новом диалоге."
+)
+
+_ALT_PAD = (
+    "Собрать недостающие факты и сроки, затем пересмотреть решение.",
+    "Сравнить сценарии по измеримым критериям вместо «ощущения».",
+    "Зафиксировать, что считать успехом решения, и проверить это на данных.",
+)
+
 
 def _anthropic_strict_object_schema(schema: dict[str, Any]) -> dict[str, Any]:
     """Anthropic structured output: objects need additionalProperties: false; integers cannot use min/max."""
@@ -54,6 +73,49 @@ class QuoteItem(BaseModel):
     )
 
 
+def normalize_analysis_report_dict(d: dict[str, Any]) -> dict[str, Any]:
+    """
+    Дополняет/обрезает поля до требований схемы: Anthropic JSON schema без minItems,
+    модель иногда возвращает слишком короткие массивы.
+    """
+    out = dict(d)
+    laws: list[Any] = list(out.get("laws") or [])
+    if len(laws) > 4:
+        laws = laws[:4]
+    while len(laws) < 4:
+        laws.append(
+            {
+                "name": _CANONICAL_LAW_NAMES[len(laws)],
+                "status": "частично",
+                "comment": _LAW_PAD_COMMENT,
+            }
+        )
+    out["laws"] = laws
+
+    biases: list[Any] = list(out.get("biases") or [])
+    if len(biases) < 1:
+        biases = [
+            {
+                "name": "Недостаточно явных маркеров",
+                "hint": "В тексте мало привязки к типичным искажениям — обобщённая осторожная оценка.",
+            }
+        ]
+    elif len(biases) > 8:
+        biases = biases[:8]
+    out["biases"] = biases
+
+    alts: list[Any] = list(out.get("alternatives") or [])
+    i = 0
+    while len(alts) < 3:
+        alts.append(_ALT_PAD[i % len(_ALT_PAD)])
+        i += 1
+    if len(alts) > 5:
+        alts = alts[:5]
+    out["alternatives"] = alts
+
+    return out
+
+
 class AnalysisReport(BaseModel):
     overall_score: int = Field(ge=0, le=100)
     verdict_short: str = Field(max_length=400)
@@ -91,3 +153,12 @@ def analysis_json_schema() -> dict:
 
 def critique_json_schema() -> dict:
     return _anthropic_strict_object_schema(SelfCritiqueResult.model_json_schema())
+
+
+def normalize_self_critique_dict(d: dict[str, Any]) -> dict[str, Any]:
+    """Нормализует final_report внутри ответа self-critique."""
+    out = dict(d)
+    fr = out.get("final_report")
+    if isinstance(fr, dict):
+        out["final_report"] = normalize_analysis_report_dict(fr)
+    return out

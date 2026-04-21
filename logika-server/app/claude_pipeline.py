@@ -22,7 +22,14 @@ from app.prompts.master import (
     user_payload_critique,
 )
 from app.prompts.master import SAFETY_AND_SCOPE as _SAFE
-from app.schemas.report import AnalysisReport, SelfCritiqueResult, analysis_json_schema, critique_json_schema
+from app.schemas.report import (
+    AnalysisReport,
+    SelfCritiqueResult,
+    analysis_json_schema,
+    critique_json_schema,
+    normalize_analysis_report_dict,
+    normalize_self_critique_dict,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -222,9 +229,13 @@ async def analyze_session(
     )
     raw1 = _text_blocks(resp1)
     try:
-        draft = AnalysisReport.model_validate_json(raw1)
+        d1: dict[str, Any] = json.loads(raw1.strip())
     except Exception:
-        draft = AnalysisReport.model_validate(_parse_json_loose(raw1))
+        d1 = _parse_json_loose(raw1)
+    if not isinstance(d1, dict):
+        raise ValueError("Ответ анализа: ожидался JSON-объект")
+    d1 = normalize_analysis_report_dict(d1)
+    draft = AnalysisReport.model_validate(d1)
     draft_dict = draft.model_dump()
 
     if not _use_self_critique(settings):
@@ -262,9 +273,13 @@ async def analyze_session(
     )
     raw2 = _text_blocks(resp2)
     try:
-        crit = SelfCritiqueResult.model_validate_json(raw2)
+        d2: dict[str, Any] = json.loads(raw2.strip())
     except Exception:
-        crit = SelfCritiqueResult.model_validate(_parse_json_loose(raw2))
+        d2 = _parse_json_loose(raw2)
+    if not isinstance(d2, dict):
+        raise ValueError("Ответ self-critique: ожидался JSON-объект")
+    d2 = normalize_self_critique_dict(d2)
+    crit = SelfCritiqueResult.model_validate(d2)
 
     final = crit.final_report.model_dump()
     final["prompt_version"] = PROMPT_VERSION
