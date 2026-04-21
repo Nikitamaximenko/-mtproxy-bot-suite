@@ -73,10 +73,10 @@ uvicorn app.main:app --reload --port 8000
 | `ENABLE_SELF_CRITIQUE` | `false` — один проход Opus без второго «ревизора». |
 | `PUBLIC_API_URL` | Публичный URL этого сервиса (опционально для ссылок) |
 | `PDF_ENGINE` | `playwright` (по умолчанию) — PDF как на сайте; `reportlab` — только текст, без Chromium (не рекомендуется для прод). |
-| `PDF_FALLBACK_REPORTLAB` | По умолчанию **не задавай** (`false` в коде): PDF только через Playwright. `true` — запасной ReportLab при сбое Chromium (хуже совпадает с сайтом); удобно локально без `playwright install`. |
+| `PDF_FALLBACK_REPORTLAB` | По умолчанию `true`: при сбое Playwright отдаётся ReportLab, скачивание не ломается. `false` — только Chromium (задавай вместе с рабочей установкой Playwright в образе). |
 
-4. Deploy: Nixpacks подхватит `requirements.txt`, `nixpacks.toml` (установка Chromium для PDF) и `Procfile`.
-5. **PDF «как на сайте»:** в репозитории есть `nixpacks.toml` — после `pip install` выполняется `python -m playwright install chromium`. При ручной сборке задай **Build Command**: `pip install -r requirements.txt && python -m playwright install chromium`. Без Chromium и при `PDF_FALLBACK_REPORTLAB=false` эндпоинт PDF вернёт ошибку — так и задумано.
+4. Deploy: Nixpacks подхватит `requirements.txt`, `nixpacks.toml` (`pip install` и `playwright install chromium` в одной фазе) и `Procfile`.
+5. **PDF «как на сайте»:** `PDF_ENGINE=playwright` и команда из `nixpacks.toml`; при падении Chromium — ReportLab (если не выключил fallback). Ручная сборка: `pip install -r requirements.txt && python -m playwright install chromium`.
 
 ## Vercel (фронт `logika/`)
 

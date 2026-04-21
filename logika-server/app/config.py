@@ -62,9 +62,9 @@ class Settings(BaseSettings):
 
     # PDF: «playwright» = тот же HTML, что экран отчёта (Chromium); «reportlab» = запасной без браузера.
     pdf_engine: Literal["playwright", "reportlab"] = "playwright"
-    # По умолчанию false: PDF обязан совпадать с сайтом; без Chromium эндпоинт PDF вернёт ошибку (см. README).
-    # Локально без playwright install: задай PDF_FALLBACK_REPORTLAB=true в .env.
-    pdf_fallback_reportlab: bool = False
+    # true: при сбое Playwright отдать ReportLab — скачивание не ломается (типичный прод без Chromium).
+    # false: только Playwright (как на сайте); задавай вместе с рабочим `playwright install chromium` в образе.
+    pdf_fallback_reportlab: bool = True
 
     @field_validator("smsaero_email", "smsaero_api_key", "anthropic_api_key", mode="before")
     @classmethod

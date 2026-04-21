@@ -878,7 +878,16 @@ function FlowPage() {
               {apiMode && apiSessionId ? (
                 <button
                   type="button"
-                  onClick={() => void downloadPdf(apiSessionId)}
+                  onClick={() => {
+                    void (async () => {
+                      setFlowError(null)
+                      try {
+                        await downloadPdf(apiSessionId)
+                      } catch (e) {
+                        setFlowError(e instanceof Error ? e.message : 'Не удалось скачать PDF')
+                      }
+                    })()
+                  }}
                   className="ease-brand border-border hover:border-border-hover rounded-[4px] border px-5 py-3 font-medium transition-colors duration-300"
                 >
                   Скачать PDF
@@ -1071,7 +1080,21 @@ function FlowPage() {
                               </button>
                               <button
                                 type="button"
-                                onClick={() => void downloadPdf(s.session_id)}
+                                onClick={() => {
+                                  void (async () => {
+                                    setFlowError(null)
+                                    setBusy(true)
+                                    try {
+                                      await downloadPdf(s.session_id)
+                                    } catch (e) {
+                                      setFlowError(
+                                        e instanceof Error ? e.message : 'Не удалось скачать PDF',
+                                      )
+                                    } finally {
+                                      setBusy(false)
+                                    }
+                                  })()
+                                }}
                                 disabled={busy}
                                 className="text-accent hover:text-accent-hover text-sm font-medium underline-offset-4 transition-colors hover:underline disabled:opacity-50"
                               >

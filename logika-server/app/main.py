@@ -508,11 +508,18 @@ def create_app() -> FastAPI:
             raise HTTPException(404, "Сессия не найдена")
         if not sess.report:
             raise HTTPException(400, "Отчёт ещё не готов")
-        pdf = build_pdf_bytes(
-            sess.report,
-            sess.dilemma,
-            document_date=sess.updated_at or sess.created_at,
-        )
+        try:
+            pdf = build_pdf_bytes(
+                sess.report,
+                sess.dilemma,
+                document_date=sess.updated_at or sess.created_at,
+            )
+        except Exception as e:
+            logger.exception("PDF generation failed")
+            raise HTTPException(
+                status_code=502,
+                detail=f"Не удалось сгенерировать PDF: {e!s}"[:1200],
+            ) from e
         return Response(
             content=pdf,
             media_type="application/pdf",

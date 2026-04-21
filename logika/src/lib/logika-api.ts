@@ -225,7 +225,19 @@ export async function downloadPdf(sessionId: string) {
   } catch (e) {
     throw mapNetworkError(e)
   }
-  if (!r.ok) throw new Error('Не удалось скачать PDF')
+  if (!r.ok) {
+    let msg = (r.statusText || '').trim()
+    try {
+      const j = (await r.json()) as { detail?: unknown }
+      if (typeof j.detail === 'string') msg = j.detail
+      else if (Array.isArray(j.detail))
+        msg = j.detail.map((x: { msg?: string }) => x.msg).filter(Boolean).join(', ')
+    } catch {
+      /* ignore */
+    }
+    if (!msg) msg = `Не удалось скачать PDF (${r.status})`
+    throw new LogikaHttpError(msg, r.status)
+  }
   const blob = await r.blob()
   const url = URL.createObjectURL(blob)
   const a = document.createElement('a')
