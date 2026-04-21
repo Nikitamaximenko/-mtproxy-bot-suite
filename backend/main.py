@@ -627,55 +627,51 @@ class CancelRecurringResponse(BaseModel):
 def bot_cancel_recurring(
     payload: CancelRecurringRequest, req: Request, db: Session = Depends(get_db)
 ) -> CancelRecurringResponse:
-    """Отмена автопродления: Lava (DELETE contract) и/или ЮKassa (DELETE payment_method). Только X-Internal-Token."""
+    """Отмена автопродления только Lava.top (DELETE contract). ЮKassa/ЮMoney через бота пока не отключаем."""
     _require_internal_token(req)
     tg_id = int(payload.telegram_id)
+    now = utcnow()
     user = db.execute(select(User).where(User.telegram_id == tg_id)).scalar_one_or_none()
     email = (user.email or "").strip().lower() if user else ""
 
     sub = _subscription_with_recurring_to_cancel(db, tg_id)
     if sub is None:
+        if _has_active_paid_subscription(db, tg_id, now):
+            return CancelRecurringResponse(
+                ok=True,
+                message=(
+                    "Автопродление Lava.top к аккаунту не привязано в базе — отменять нечего "
+                    "(уже отключали или оплата была не через Lava). Доступ активен до конца оплаченного срока."
+                ),
+            )
         return CancelRecurringResponse(
             ok=False,
             error="no_recurring",
             message=(
-                "Не найдена активная платная подписка с автопродлением (Lava или ЮKassa). "
-                "Если оплачивали другим способом — напишите в этот чат."
+                "Нет активной платной подписки. Если нужна помощь с оплатой — напишите в поддержку."
             ),
         )
 
-    had_lava = bool((sub.lava_contract_id or "").strip())
-    had_yk = bool((sub.yookassa_payment_method_id or "").strip())
+    cid = sub.lava_contract_id or ""
     errors: list[str] = []
     any_cleared = False
 
-    if had_lava:
-        cid = sub.lava_contract_id or ""
-        if not email:
-            return CancelRecurringResponse(
-                ok=False,
-                error="email_required",
-                message=(
-                    "Чтобы отменить автопродление Lava, нужен email из оплаты. "
-                    "Откройте мини-приложение, укажите email при следующей оплате или напишите его сюда одним сообщением — мы подскажем дальше."
-                ),
-            )
-        try:
-            _lava_cancel_subscription_api(cid, email)
-            sub.lava_contract_id = None
-            any_cleared = True
-            logger.info("Lava recurring cancelled tg_id=%s", tg_id)
-        except Exception as e:
-            errors.append(f"Lava: {e}")
-
-    if had_yk and (sub.yookassa_payment_method_id or "").strip():
-        try:
-            _yookassa_delete_payment_method(sub.yookassa_payment_method_id or "")
-            sub.yookassa_payment_method_id = None
-            any_cleared = True
-            logger.info("YooKassa payment_method removed tg_id=%s", tg_id)
-        except Exception as e:
-            errors.append(f"ЮKassa: {e}")
+    if not email:
+        return CancelRecurringResponse(
+            ok=False,
+            error="email_required",
+            message=(
+                "Чтобы отменить автопродление Lava, нужен email из оплаты. "
+                "Откройте мини-приложение, укажите email при следующей оплате или напишите его сюда одним сообщением — мы подскажем дальше."
+            ),
+        )
+    try:
+        _lava_cancel_subscription_api(cid, email)
+        sub.lava_contract_id = None
+        any_cleared = True
+        logger.info("Lava recurring cancelled tg_id=%s", tg_id)
+    except Exception as e:
+        errors.append(f"Lava: {e}")
 
     if any_cleared:
         db.commit()
@@ -684,21 +680,13 @@ def bot_cancel_recurring(
         return CancelRecurringResponse(
             ok=False,
             error="provider_failed",
-            message="Не удалось отменить автопродление: " + " ".join(errors),
-        )
-    if errors and any_cleared:
-        return CancelRecurringResponse(
-            ok=True,
-            message=(
-                "Автопродление частично отключено. Доступ к сервису до конца оплаченного периода сохраняется. "
-                "Детали: " + " ".join(errors) + " Напишите в поддержку, если списания повторятся."
-            ),
+            message="Не удалось отменить автопродление Lava: " + " ".join(errors),
         )
     return CancelRecurringResponse(
         ok=True,
         message=(
-            "Автопродление отменено. Текущий оплаченный период действует до даты окончания в мини-приложении; "
-            "повторных списаний не будет."
+            "Автопродление Lava.top отменено. Текущий оплаченный период действует до даты окончания в мини-приложении; "
+            "повторных списаний Lava не будет."
         ),
     )
 
@@ -897,7 +885,7 @@ def _yookassa_delete_payment_method(payment_method_id: str) -> None:
 
 
 def _subscription_with_recurring_to_cancel(db: Session, tg_id: int) -> Subscription | None:
-    """Активная paid-подписка с привязкой к автопродлению (Lava contract или сохранённый метод ЮKassa)."""
+    """Активная paid-подписка с контрактом Lava.top (отмена рекуррента только для Lava)."""
     now = utcnow()
     return (
         db.execute(
@@ -907,15 +895,10 @@ def _subscription_with_recurring_to_cancel(db: Session, tg_id: int) -> Subscript
                 Subscription.payment_status == "paid",
                 Subscription.expires_at.is_not(None),
                 Subscription.expires_at > now,
-                or_(
-                    Subscription.lava_contract_id.is_not(None),
-                    Subscription.yookassa_payment_method_id.is_not(None),
-                ),
+                Subscription.lava_contract_id.is_not(None),
+                Subscription.lava_contract_id != "",
             )
-            .order_by(
-                case((Subscription.lava_contract_id.is_not(None), 1), else_=0).desc(),
-                Subscription.expires_at.desc(),
-            )
+            .order_by(Subscription.expires_at.desc())
             .limit(1)
         )
         .scalars()
@@ -2501,8 +2484,10 @@ class SubscriptionResponse(BaseModel):
     proxy_link: str | None = None
     suspended: bool = False
     is_trial: bool = False
-    # Автопродление (Lava contract / сохранённый метод ЮKassa) по текущей активной строке подписки.
+    # Автопродление (Lava contract / сохранённый метод ЮKassa) по всем активным paid-строкам.
     autopay_enabled: bool = False
+    # Только Lava.top (контракт в БД) — отмена через бота сейчас только для этого.
+    lava_autopay_enabled: bool = False
 
 
 def _subscription_autopay_enabled(sub: Subscription) -> bool:
@@ -2530,6 +2515,43 @@ def _autopay_enabled_for_user(db: Session, telegram_id: int, now: datetime) -> b
         if (s.lava_contract_id or "").strip() or (s.yookassa_payment_method_id or "").strip():
             return True
     return False
+
+
+def _lava_autopay_for_user(db: Session, telegram_id: int, now: datetime) -> bool:
+    """Активная paid-подписка с непустым lava_contract_id (автопродление Lava.top)."""
+    rows = (
+        db.execute(
+            select(Subscription).where(
+                Subscription.telegram_id == int(telegram_id),
+                Subscription.payment_status == "paid",
+                Subscription.expires_at.is_not(None),
+                Subscription.expires_at > now,
+            )
+        )
+        .scalars()
+        .all()
+    )
+    for s in rows:
+        if (s.lava_contract_id or "").strip():
+            return True
+    return False
+
+
+def _has_active_paid_subscription(db: Session, telegram_id: int, now: datetime) -> bool:
+    n = (
+        db.execute(
+            select(func.count())
+            .select_from(Subscription)
+            .where(
+                Subscription.telegram_id == int(telegram_id),
+                Subscription.payment_status == "paid",
+                Subscription.expires_at.is_not(None),
+                Subscription.expires_at > now,
+            )
+        ).scalar()
+        or 0
+    )
+    return int(n) > 0
 
 
 @app.get("/subscription/{telegram_id}", response_model=SubscriptionResponse)
@@ -2565,10 +2587,17 @@ def get_subscription(telegram_id: int, req: Request, db: Session = Depends(get_d
 
     if not sub:
         return SubscriptionResponse(
-            active=False, expires_at=None, proxy_link=None, suspended=False, is_trial=False, autopay_enabled=False
+            active=False,
+            expires_at=None,
+            proxy_link=None,
+            suspended=False,
+            is_trial=False,
+            autopay_enabled=False,
+            lava_autopay_enabled=False,
         )
 
     ap_user = _autopay_enabled_for_user(db, int(telegram_id), now)
+    lava_ap = _lava_autopay_for_user(db, int(telegram_id), now)
 
     if sub.access_suspended or sub.access_blocked_reason:
         return SubscriptionResponse(
@@ -2578,6 +2607,7 @@ def get_subscription(telegram_id: int, req: Request, db: Session = Depends(get_d
             suspended=True,
             is_trial=False,
             autopay_enabled=ap_user,
+            lava_autopay_enabled=lava_ap,
         )
 
     is_trial = sub.payment_status == "trial"
@@ -2590,6 +2620,7 @@ def get_subscription(telegram_id: int, req: Request, db: Session = Depends(get_d
             suspended=False,
             is_trial=is_trial,
             autopay_enabled=ap,
+            lava_autopay_enabled=lava_ap,
         )
 
     proxy_link: str | None = None
@@ -2602,6 +2633,7 @@ def get_subscription(telegram_id: int, req: Request, db: Session = Depends(get_d
         suspended=False,
         is_trial=is_trial,
         autopay_enabled=ap,
+        lava_autopay_enabled=lava_ap,
     )
 
 

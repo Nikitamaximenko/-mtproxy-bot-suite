@@ -136,7 +136,7 @@ def main_menu_kb(tg_id: int, *, show_cancel_autopay: bool = True) -> InlineKeybo
         rows.append(
             [
                 InlineKeyboardButton(
-                    text="🚫 Отменить автопродление",
+                    text="🚫 Отменить автопродление (Lava.top)",
                     callback_data="menu:cancel_recurring",
                 ),
             ]
@@ -158,13 +158,34 @@ def status_active_kb(tg_id: int, *, show_cancel_autopay: bool = True) -> InlineK
         rows.append(
             [
                 InlineKeyboardButton(
-                    text="🚫 Отменить автопродление",
+                    text="🚫 Отменить автопродление (Lava.top)",
                     callback_data="menu:cancel_recurring",
                 )
             ]
         )
     rows.append([InlineKeyboardButton(text="🏠 Главное меню", callback_data="menu:main")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def status_paid_kb(tg_id: int) -> InlineKeyboardMarkup:
+    """Экран «Статус» для платной подписки: отмена Lava — первая кнопка, на видном месте."""
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text="🚫 Отменить автопродление Lava.top",
+                    callback_data="menu:cancel_recurring",
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    text="🧊 Личный кабинет — 2 в 1",
+                    web_app=WebAppInfo(url=_miniapp_url(tg_id)),
+                )
+            ],
+            [InlineKeyboardButton(text="🏠 Главное меню", callback_data="menu:main")],
+        ]
+    )
 
 
 def support_kb() -> InlineKeyboardMarkup | None:
@@ -179,7 +200,7 @@ def support_chat_kb(*, show_cancel_autopay: bool = True) -> InlineKeyboardMarkup
         rows.append(
             [
                 InlineKeyboardButton(
-                    text="🚫 Отменить автопродление",
+                    text="🚫 Отменить автопродление (Lava.top)",
                     callback_data="menu:cancel_recurring",
                 )
             ]
@@ -200,9 +221,9 @@ def cancel_recurring_confirm_kb() -> InlineKeyboardMarkup:
 
 
 CANCEL_RECURRING_CONFIRM_HTML = (
-    "Отключить <b>автопродление</b>?\n\n"
-    "Списание с карты сейчас не выполняется: доступ останется до конца оплаченного периода, "
-    "но <b>следующий месяц не продлится сам</b> — нужно будет оплатить снова, если захотите продолжить."
+    "Отключить <b>автопродление Lava.top</b>?\n\n"
+    "Списание сейчас не выполняется: доступ останется до конца уже оплаченного периода, "
+    "но <b>следующий платёж через Lava не уйдёт сам</b> — продление только если снова оплатите вручную."
 )
 
 
@@ -415,14 +436,14 @@ async def _get_proxy_link(session: aiohttp.ClientSession, tg_id: int) -> str | N
 
 
 async def show_cancel_autopay_button(session: aiohttp.ClientSession, tg_id: int) -> bool:
-    """Показывать кнопку отмены только при активной подписке с включённым автопродлением в БД."""
+    """Кнопка отмены Lava в меню/поддержке: для любой активной платной (не trial) подписки."""
     try:
         data = await backend_get(session, f"/subscription/{tg_id}")
     except Exception:
         return True
-    if not data.get("active") or data.get("suspended"):
+    if not data.get("active") or data.get("suspended") or data.get("is_trial"):
         return False
-    return bool(data.get("autopay_enabled"))
+    return True
 
 
 def _get_session(dp: Dispatcher) -> aiohttp.ClientSession:
@@ -680,21 +701,28 @@ async def cmd_status(message: Message, session: aiohttp.ClientSession, tg_id: in
     expires_at = format_dt(data.get("expires_at"))
     is_trial = bool(data.get("is_trial"))
     autopay_on = bool(data.get("autopay_enabled"))
+    lava_autopay = bool(data.get("lava_autopay_enabled"))
     proxy_link = data.get("proxy_link")
     if is_trial:
         renew_line = f"🎁 <b>Пробный день</b> — затем {PRICE_RUB} ₽/мес\n"
         autopay_line = ""
+    elif lava_autopay:
+        renew_line = f"💳 Тариф: {PRICE_RUB} ₽/мес · 10 ₽/день\n"
+        autopay_line = (
+            "🔄 <b>Lava.top</b>: автопродление <b>включено</b>. Отключить без потери текущего срока — "
+            "первая кнопка ниже (спросим подтверждение).\n"
+        )
     elif autopay_on:
         renew_line = f"💳 Тариф: {PRICE_RUB} ₽/мес · 10 ₽/день\n"
         autopay_line = (
-            "🔄 <b>Автопродление включено</b> — продление раз в месяц. "
-            "Отключить без потери текущего срока: кнопка ниже (с подтверждением).\n"
+            "🔄 Автопродление через другой способ (не Lava) — в боте отмена пока только для Lava.top; "
+            "по ЮMoney / другим способам напишите в поддержку.\n"
         )
     else:
         renew_line = f"💳 Тариф: {PRICE_RUB} ₽/мес · 10 ₽/день\n"
         autopay_line = (
-            "🔄 <b>Автопродление выключено</b> — после окончания даты доступ не продлится сам, "
-            "нужна новая оплата в мини-приложении.\n"
+            "🔄 Контракт Lava.top в базе не привязан — автопродление через Lava, скорее всего, уже нет. "
+            "Если сомневаетесь, всё равно можно нажать кнопку отмены ниже.\n"
         )
     status_text = (
         f"✅ <b>Подписка 2 в 1 активна</b>\n"
@@ -714,10 +742,14 @@ async def cmd_status(message: Message, session: aiohttp.ClientSession, tg_id: in
             "⚠️ Доступ в кабинете ещё полностью не подгрузился. "
             "Если нет прокси или VPN — напиши в поддержку."
         )
+    if is_trial:
+        status_kb: InlineKeyboardMarkup = status_active_kb(tg_id, show_cancel_autopay=False)
+    else:
+        status_kb = status_paid_kb(tg_id)
     await message.answer(
         status_text,
         parse_mode="HTML",
-        reply_markup=status_active_kb(tg_id, show_cancel_autopay=autopay_on and not is_trial),
+        reply_markup=status_kb,
     )
 
 
@@ -995,13 +1027,11 @@ async def main() -> None:
                     or "Не удалось отменить автопродление. Напишите в чат, мы разберёмся."
                 )
             in_support = (await state.get_state()) == SupportStates.chatting.state
-            if ok and in_support:
-                await state.update_data(support_show_cancel=False)
+            sc = await show_cancel_autopay_button(session, tg_uid)
             if in_support:
-                sc = False if ok else bool((await state.get_data()).get("support_show_cancel", True))
+                await state.update_data(support_show_cancel=sc)
                 reply_kb = support_chat_kb(show_cancel_autopay=sc)
             else:
-                sc = await show_cancel_autopay_button(session, tg_uid) if not ok else False
                 reply_kb = main_menu_kb(tg_uid, show_cancel_autopay=sc)
             await msg.answer(text, reply_markup=reply_kb)
             return
