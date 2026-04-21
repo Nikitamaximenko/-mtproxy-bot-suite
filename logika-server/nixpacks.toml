@@ -1,0 +1,4 @@
+# После стандартного `pip install -r requirements.txt` — Chromium для PDF как на сайте.
+[phases.build]
+dependsOn = ["install"]
+cmds = ["python -m playwright install chromium"]

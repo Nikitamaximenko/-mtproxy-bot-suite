@@ -60,9 +60,11 @@ class Settings(BaseSettings):
 
     questions_count: int = 5
 
-    # PDF: «playwright» = тот же HTML, что экран отчёта (Chromium); «reportlab» = запасной вариант без браузера.
+    # PDF: «playwright» = тот же HTML, что экран отчёта (Chromium); «reportlab» = запасной без браузера.
     pdf_engine: Literal["playwright", "reportlab"] = "playwright"
-    pdf_fallback_reportlab: bool = True
+    # По умолчанию false: PDF обязан совпадать с сайтом; без Chromium эндпоинт PDF вернёт ошибку (см. README).
+    # Локально без playwright install: задай PDF_FALLBACK_REPORTLAB=true в .env.
+    pdf_fallback_reportlab: bool = False
 
     @field_validator("smsaero_email", "smsaero_api_key", "anthropic_api_key", mode="before")
     @classmethod
