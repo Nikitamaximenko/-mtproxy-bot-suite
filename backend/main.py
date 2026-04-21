@@ -1774,7 +1774,10 @@ async def lava_webhook(req: Request, db: Session = Depends(get_db)) -> OkRespons
 
 @app.post("/webhooks/yookassa")
 async def yookassa_webhook(req: Request, db: Session = Depends(get_db)) -> PlainTextResponse:
-    """HTTP-уведомления ЮKassa: payment.succeeded / payment.canceled (в т.ч. неуспешное продление)."""
+    """HTTP-уведомления ЮKassa: обрабатываем payment.succeeded и payment.canceled (продление).
+
+    Остальные события (payment_method.*, refund.*, waiting_for_capture) подтверждаем 200 OK без GET /payments.
+    """
     if not _yookassa_configured():
         logger.warning("YooKassa webhook called but API keys not set")
         raise HTTPException(status_code=503, detail="YooKassa not configured")
@@ -1792,6 +1795,21 @@ async def yookassa_webhook(req: Request, db: Session = Depends(get_db)) -> Plain
     obj = payload.get("object")
     if not isinstance(obj, dict):
         return PlainTextResponse("OK", status_code=200)
+
+    # Не Payment: id в object — не payment_id, GET /payments/{id} даст 404.
+    if event.startswith("payment_method.") or event.startswith("refund."):
+        logger.info("YooKassa webhook ack (no handler): event=%s", event)
+        return PlainTextResponse("OK", status_code=200)
+
+    # Двухстадийные сценарии не используем (capture: true); достаточно подтвердить доставку.
+    if event == "payment.waiting_for_capture":
+        logger.info("YooKassa webhook: payment.waiting_for_capture (ignored)")
+        return PlainTextResponse("OK", status_code=200)
+
+    if event not in ("payment.succeeded", "payment.canceled"):
+        logger.info("YooKassa webhook ack: event=%s", event)
+        return PlainTextResponse("OK", status_code=200)
+
     pay_id = str(obj.get("id") or "").strip()
     if not pay_id:
         return PlainTextResponse("OK", status_code=200)
