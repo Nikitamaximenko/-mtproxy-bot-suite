@@ -46,6 +46,18 @@ const EDGES: Edge[] = [
   { from: 'x', to: 'm', relation: 'conflicts', delay: 3.8 },
 ]
 
+/** Кривая для рёбер «противоречие», чтобы не резать узел «Мотив» по прямой. */
+function conflictEdgePath(ax: number, ay: number, bx: number, by: number): string {
+  const midx = (ax + bx) / 2
+  const midy = (ay + by) / 2
+  const dx = bx - ax
+  const dy = by - ay
+  const len = Math.hypot(dx, dy) || 1
+  const ox = (-dy / len) * 14
+  const oy = (dx / len) * 14
+  return `M ${ax} ${ay} Q ${midx + ox} ${midy + oy} ${bx} ${by}`
+}
+
 const CYCLE_SEC = 5.4
 
 function nodeFill(kind: Node['kind']): string {
@@ -220,19 +232,21 @@ export function ArgumentMap() {
                   const to = NODES.find((n) => n.id === edge.to)!
                   const visible = edge.delay <= t
                   const stroke = edge.relation === 'conflicts' ? '#ff4d4d' : '#c4f542'
+                  const isConflict = edge.relation === 'conflicts'
+                  const pathD = isConflict
+                    ? conflictEdgePath(from.x, from.y, to.x, to.y)
+                    : `M ${from.x} ${from.y} L ${to.x} ${to.y}`
                   return (
-                    <motion.line
+                    <motion.path
                       key={`${edge.from}-${edge.to}-${cycle}`}
-                      x1={from.x}
-                      y1={from.y}
-                      x2={to.x}
-                      y2={to.y}
+                      d={pathD}
+                      fill="none"
                       stroke={stroke}
-                      strokeWidth={edge.relation === 'conflicts' ? 0.45 : 0.3}
-                      strokeDasharray={edge.relation === 'conflicts' ? '1.2 0.8' : undefined}
+                      strokeWidth={isConflict ? 0.45 : 0.3}
+                      strokeDasharray={isConflict ? '1.2 0.8' : undefined}
                       strokeLinecap="round"
                       initial={{ pathLength: 0, opacity: 0 }}
-                      animate={visible ? { pathLength: 1, opacity: 0.8 } : { pathLength: 0, opacity: 0 }}
+                      animate={visible ? { pathLength: 1, opacity: 0.78 } : { pathLength: 0, opacity: 0 }}
                       transition={{ duration: 0.7, ease }}
                     />
                   )
@@ -255,45 +269,36 @@ export function ArgumentMap() {
                 const visible = n.delay <= t
                 const isMotive = n.kind === 'motive'
                 return (
-                  <motion.div
-                    key={`${n.id}-label-${cycle}`}
-                    initial={{ opacity: 0, scale: 0.92 }}
-                    animate={
-                      visible ? { opacity: 1, scale: 1 } : { opacity: 0, scale: 0.92 }
-                    }
-                    transition={{ duration: 0.4, ease, delay: visible ? 0.06 : 0 }}
-                    className="pointer-events-none absolute z-10 -translate-x-1/2 -translate-y-1/2"
-                    style={{
-                      left: `${n.x}%`,
-                      top: `${n.y}%`,
-                      transformOrigin: 'center center',
-                    }}
+                  <div
+                    key={`${n.id}-anchor-${cycle}`}
+                    className="pointer-events-none absolute z-10 flex h-0 w-0 items-center justify-center"
+                    style={{ left: `${n.x}%`, top: `${n.y}%` }}
                   >
-                    <div
-                      className={`${nodeBg(n.kind)} text-xs font-medium shadow-[0_4px_18px_rgba(0,0,0,0.45)] ${
-                        isMotive
-                          ? 'flex max-w-[148px] flex-col items-center gap-1 rounded-[10px] px-3 py-2 text-center sm:max-w-[176px]'
-                          : 'rounded-[8px] px-3 py-1.5 whitespace-nowrap'
-                      }`}
+                    {/* Якорь 0×0 + flex: центр без scale — текст не размывается при анимации */}
+                    <motion.div
+                      className="[backface-visibility:hidden]"
+                      initial={{ opacity: 0, y: 10 }}
+                      animate={visible ? { opacity: 1, y: 0 } : { opacity: 0, y: 10 }}
+                      transition={{ duration: 0.38, ease, delay: visible ? 0.05 : 0 }}
                     >
-                      <span
-                        className={`font-mono text-[9px] uppercase tracking-[0.08em] opacity-70 ${
-                          isMotive ? '' : 'mr-2'
-                        }`}
+                      <div
+                        className={[
+                          nodeBg(n.kind),
+                          'min-w-0 max-w-[min(14.5rem,42vw)] shadow-[0_4px_20px_rgba(0,0,0,0.52)]',
+                          'rounded-[10px] px-3 py-2 sm:max-w-[min(16rem,40vw)]',
+                          'flex flex-col gap-1 font-medium antialiased',
+                          isMotive ? 'items-center text-center' : 'text-left',
+                        ].join(' ')}
                       >
-                        {kindLabel(n.kind)}
-                      </span>
-                      <span
-                        className={
-                          isMotive
-                            ? 'text-[11px] leading-snug text-balance sm:text-xs'
-                            : 'inline'
-                        }
-                      >
-                        {n.label}
-                      </span>
-                    </div>
-                  </motion.div>
+                        <span className="font-mono text-[9px] uppercase tracking-[0.07em] opacity-75 leading-tight">
+                          {kindLabel(n.kind)}
+                        </span>
+                        <span className="text-[12px] leading-[1.42] [overflow-wrap:anywhere] text-balance sm:text-[13px] sm:leading-[1.48]">
+                          {n.label}
+                        </span>
+                      </div>
+                    </motion.div>
+                  </div>
                 )
               })}
             </div>
