@@ -136,7 +136,7 @@ def main_menu_kb(tg_id: int, *, show_cancel_autopay: bool = True) -> InlineKeybo
         rows.append(
             [
                 InlineKeyboardButton(
-                    text="🚫 Отменить автопродление (Lava.top)",
+                    text="🚫 Отменить автопродление",
                     callback_data="menu:cancel_recurring",
                 ),
             ]
@@ -158,7 +158,7 @@ def status_active_kb(tg_id: int, *, show_cancel_autopay: bool = True) -> InlineK
         rows.append(
             [
                 InlineKeyboardButton(
-                    text="🚫 Отменить автопродление (Lava.top)",
+                    text="🚫 Отменить автопродление",
                     callback_data="menu:cancel_recurring",
                 )
             ]
@@ -168,12 +168,12 @@ def status_active_kb(tg_id: int, *, show_cancel_autopay: bool = True) -> InlineK
 
 
 def status_paid_kb(tg_id: int) -> InlineKeyboardMarkup:
-    """Экран «Статус» для платной подписки: отмена Lava — первая кнопка, на видном месте."""
+    """Экран «Статус» для платной подписки: отмена автопродления на видном месте."""
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [
                 InlineKeyboardButton(
-                    text="🚫 Отменить автопродление Lava.top",
+                    text="🚫 Отменить автопродление",
                     callback_data="menu:cancel_recurring",
                 )
             ],
@@ -200,7 +200,7 @@ def support_chat_kb(*, show_cancel_autopay: bool = True) -> InlineKeyboardMarkup
         rows.append(
             [
                 InlineKeyboardButton(
-                    text="🚫 Отменить автопродление (Lava.top)",
+                    text="🚫 Отменить автопродление",
                     callback_data="menu:cancel_recurring",
                 )
             ]
@@ -221,9 +221,9 @@ def cancel_recurring_confirm_kb() -> InlineKeyboardMarkup:
 
 
 CANCEL_RECURRING_CONFIRM_HTML = (
-    "Отключить <b>автопродление Lava.top</b>?\n\n"
+    "Отключить <b>автопродление</b>?\n\n"
     "Списание сейчас не выполняется: доступ останется до конца уже оплаченного периода, "
-    "но <b>следующий платёж через Lava не уйдёт сам</b> — продление только если снова оплатите вручную."
+    "но <b>следующий платёж не уйдёт сам</b> — продление только если снова оплатите вручную."
 )
 
 
@@ -436,7 +436,7 @@ async def _get_proxy_link(session: aiohttp.ClientSession, tg_id: int) -> str | N
 
 
 async def show_cancel_autopay_button(session: aiohttp.ClientSession, tg_id: int) -> bool:
-    """Кнопка отмены Lava в меню/поддержке: для любой активной платной (не trial) подписки."""
+    """Кнопка отмены в меню/поддержке: для любой активной платной (не trial) подписки."""
     try:
         data = await backend_get(session, f"/subscription/{tg_id}")
     except Exception:
@@ -715,13 +715,12 @@ async def cmd_status(message: Message, session: aiohttp.ClientSession, tg_id: in
     elif autopay_on:
         renew_line = f"💳 Тариф: {PRICE_RUB} ₽/мес · 10 ₽/день\n"
         autopay_line = (
-            "🔄 Автопродление через другой способ (не Lava) — в боте отмена пока только для Lava.top; "
-            "по ЮMoney / другим способам напишите в поддержку.\n"
+            "🔄 <b>ЮKassa/ЮMoney</b>: автопродление включено. Отключить можно той же кнопкой ниже.\n"
         )
     else:
         renew_line = f"💳 Тариф: {PRICE_RUB} ₽/мес · 10 ₽/день\n"
         autopay_line = (
-            "🔄 Контракт Lava.top в базе не привязан — автопродление через Lava, скорее всего, уже нет. "
+            "🔄 Рекуррентный метод в базе не привязан — автопродление, скорее всего, уже отключено. "
             "Если сомневаетесь, всё равно можно нажать кнопку отмены ниже.\n"
         )
     status_text = (

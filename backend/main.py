@@ -627,7 +627,7 @@ class CancelRecurringResponse(BaseModel):
 def bot_cancel_recurring(
     payload: CancelRecurringRequest, req: Request, db: Session = Depends(get_db)
 ) -> CancelRecurringResponse:
-    """Отмена автопродления только Lava.top (DELETE contract). ЮKassa/ЮMoney через бота пока не отключаем."""
+    """Отмена автопродления: Lava.top (DELETE contract) и/или ЮKassa (DELETE payment_method)."""
     _require_internal_token(req)
     tg_id = int(payload.telegram_id)
     now = utcnow()
@@ -640,8 +640,8 @@ def bot_cancel_recurring(
             return CancelRecurringResponse(
                 ok=True,
                 message=(
-                    "Автопродление Lava.top к аккаунту не привязано в базе — отменять нечего "
-                    "(уже отключали или оплата была не через Lava). Доступ активен до конца оплаченного срока."
+                    "К активной подписке не привязан рекуррентный метод (Lava.top/ЮKassa) — отменять нечего. "
+                    "Доступ активен до конца оплаченного срока."
                 ),
             )
         return CancelRecurringResponse(
@@ -652,26 +652,38 @@ def bot_cancel_recurring(
             ),
         )
 
-    cid = sub.lava_contract_id or ""
+    had_lava = bool((sub.lava_contract_id or "").strip())
+    had_yk = bool((sub.yookassa_payment_method_id or "").strip())
     errors: list[str] = []
     any_cleared = False
 
-    if not email:
-        return CancelRecurringResponse(
-            ok=False,
-            error="email_required",
-            message=(
-                "Чтобы отменить автопродление Lava, нужен email из оплаты. "
-                "Откройте мини-приложение, укажите email при следующей оплате или напишите его сюда одним сообщением — мы подскажем дальше."
-            ),
-        )
-    try:
-        _lava_cancel_subscription_api(cid, email)
-        sub.lava_contract_id = None
-        any_cleared = True
-        logger.info("Lava recurring cancelled tg_id=%s", tg_id)
-    except Exception as e:
-        errors.append(f"Lava: {e}")
+    if had_lava:
+        cid = sub.lava_contract_id or ""
+        if not email:
+            return CancelRecurringResponse(
+                ok=False,
+                error="email_required",
+                message=(
+                    "Чтобы отменить автопродление Lava, нужен email из оплаты. "
+                    "Откройте мини-приложение, укажите email при следующей оплате или напишите его сюда одним сообщением — мы подскажем дальше."
+                ),
+            )
+        try:
+            _lava_cancel_subscription_api(cid, email)
+            sub.lava_contract_id = None
+            any_cleared = True
+            logger.info("Lava recurring cancelled tg_id=%s", tg_id)
+        except Exception as e:
+            errors.append(f"Lava: {e}")
+
+    if had_yk and (sub.yookassa_payment_method_id or "").strip():
+        try:
+            _yookassa_delete_payment_method(sub.yookassa_payment_method_id or "")
+            sub.yookassa_payment_method_id = None
+            any_cleared = True
+            logger.info("YooKassa payment_method removed tg_id=%s", tg_id)
+        except Exception as e:
+            errors.append(f"ЮKassa: {e}")
 
     if any_cleared:
         db.commit()
@@ -680,13 +692,21 @@ def bot_cancel_recurring(
         return CancelRecurringResponse(
             ok=False,
             error="provider_failed",
-            message="Не удалось отменить автопродление Lava: " + " ".join(errors),
+            message="Не удалось отменить автопродление: " + " ".join(errors),
+        )
+    if errors and any_cleared:
+        return CancelRecurringResponse(
+            ok=True,
+            message=(
+                "Автопродление частично отключено. Доступ к сервису до конца оплаченного периода сохраняется. "
+                "Детали: " + " ".join(errors) + " Напишите в поддержку, если списания повторятся."
+            ),
         )
     return CancelRecurringResponse(
         ok=True,
         message=(
-            "Автопродление Lava.top отменено. Текущий оплаченный период действует до даты окончания в мини-приложении; "
-            "повторных списаний Lava не будет."
+            "Автопродление отключено. Текущий оплаченный период действует до даты окончания в мини-приложении; "
+            "повторных списаний не будет."
         ),
     )
 
@@ -885,7 +905,7 @@ def _yookassa_delete_payment_method(payment_method_id: str) -> None:
 
 
 def _subscription_with_recurring_to_cancel(db: Session, tg_id: int) -> Subscription | None:
-    """Активная paid-подписка с контрактом Lava.top (отмена рекуррента только для Lava)."""
+    """Активная paid-подписка с рекуррентом (Lava contract или сохранённый метод ЮKassa)."""
     now = utcnow()
     return (
         db.execute(
@@ -895,10 +915,15 @@ def _subscription_with_recurring_to_cancel(db: Session, tg_id: int) -> Subscript
                 Subscription.payment_status == "paid",
                 Subscription.expires_at.is_not(None),
                 Subscription.expires_at > now,
-                Subscription.lava_contract_id.is_not(None),
-                Subscription.lava_contract_id != "",
+                or_(
+                    Subscription.lava_contract_id.is_not(None),
+                    Subscription.yookassa_payment_method_id.is_not(None),
+                ),
             )
-            .order_by(Subscription.expires_at.desc())
+            .order_by(
+                case((Subscription.lava_contract_id.is_not(None), 1), else_=0).desc(),
+                Subscription.expires_at.desc(),
+            )
             .limit(1)
         )
         .scalars()
