@@ -122,46 +122,49 @@ def _miniapp_url(tg_id: int) -> str:
     return f"{base}{path}?tg_id={tg_id}&v={v}"
 
 
-def main_menu_kb(tg_id: int) -> InlineKeyboardMarkup:
-    row3 = [
-        InlineKeyboardButton(text="✅ Статус", callback_data="menu:status"),
-        # Всегда чат в боте — не открываем личку по url (t.me)
-        InlineKeyboardButton(text="🆘 Поддержка", callback_data="menu:support"),
-    ]
-    row_cancel = [
-        InlineKeyboardButton(
-            text="🚫 Отменить автопродление",
-            callback_data="menu:cancel_recurring",
-        ),
-    ]
-    return InlineKeyboardMarkup(inline_keyboard=[
+def main_menu_kb(tg_id: int, *, show_cancel_autopay: bool = True) -> InlineKeyboardMarkup:
+    rows: list[list[InlineKeyboardButton]] = [
         [InlineKeyboardButton(text="🧊 2 в 1 — Прокси + VPN", web_app=WebAppInfo(url=_miniapp_url(tg_id)))],
         [InlineKeyboardButton(text="🎁 Бесплатный день", callback_data="menu:trial")],
         [InlineKeyboardButton(text="ℹ️ Инструкция", callback_data="menu:help")],
-        row3,
-        row_cancel,
-    ])
-
-
-def status_active_kb(tg_id: int) -> InlineKeyboardMarkup:
-    """Активная подписка: прокси + VPN в мини-приложении."""
-    return InlineKeyboardMarkup(
-        inline_keyboard=[
+        [
+            InlineKeyboardButton(text="✅ Статус", callback_data="menu:status"),
+            InlineKeyboardButton(text="🆘 Поддержка", callback_data="menu:support"),
+        ],
+    ]
+    if show_cancel_autopay:
+        rows.append(
             [
                 InlineKeyboardButton(
-                    text="🧊 Личный кабинет — 2 в 1",
-                    web_app=WebAppInfo(url=_miniapp_url(tg_id)),
-                )
-            ],
+                    text="🚫 Отменить автопродление",
+                    callback_data="menu:cancel_recurring",
+                ),
+            ]
+        )
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def status_active_kb(tg_id: int, *, show_cancel_autopay: bool = True) -> InlineKeyboardMarkup:
+    """Активная подписка: прокси + VPN в мини-приложении."""
+    rows: list[list[InlineKeyboardButton]] = [
+        [
+            InlineKeyboardButton(
+                text="🧊 Личный кабинет — 2 в 1",
+                web_app=WebAppInfo(url=_miniapp_url(tg_id)),
+            )
+        ],
+    ]
+    if show_cancel_autopay:
+        rows.append(
             [
                 InlineKeyboardButton(
                     text="🚫 Отменить автопродление",
                     callback_data="menu:cancel_recurring",
                 )
-            ],
-            [InlineKeyboardButton(text="🏠 Главное меню", callback_data="menu:main")],
-        ]
-    )
+            ]
+        )
+    rows.append([InlineKeyboardButton(text="🏠 Главное меню", callback_data="menu:main")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
 def support_kb() -> InlineKeyboardMarkup | None:
@@ -170,18 +173,37 @@ def support_kb() -> InlineKeyboardMarkup | None:
     )
 
 
-def support_chat_kb() -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(
-        inline_keyboard=[
+def support_chat_kb(*, show_cancel_autopay: bool = True) -> InlineKeyboardMarkup:
+    rows: list[list[InlineKeyboardButton]] = []
+    if show_cancel_autopay:
+        rows.append(
             [
                 InlineKeyboardButton(
                     text="🚫 Отменить автопродление",
                     callback_data="menu:cancel_recurring",
                 )
+            ]
+        )
+    rows.append([InlineKeyboardButton(text="✖️ Закрыть чат", callback_data="menu:exit_support")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def cancel_recurring_confirm_kb() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(text="✅ Да, отключить", callback_data="menu:cancel_recurring:ok"),
+                InlineKeyboardButton(text="↩️ Нет", callback_data="menu:cancel_recurring:no"),
             ],
-            [InlineKeyboardButton(text="✖️ Закрыть чат", callback_data="menu:exit_support")],
         ]
     )
+
+
+CANCEL_RECURRING_CONFIRM_HTML = (
+    "Отключить <b>автопродление</b>?\n\n"
+    "Списание с карты сейчас не выполняется: доступ останется до конца оплаченного периода, "
+    "но <b>следующий месяц не продлится сам</b> — нужно будет оплатить снова, если захотите продолжить."
+)
 
 
 def support_invite_html() -> str:
@@ -236,7 +258,8 @@ HELP_GENERAL = (
     "\n"
     "<b>Сколько устройств?</b> До 10 на одном аккаунте\n"
     "<b>Лимит трафика?</b> Нет — скорость и трафик не ограничены\n"
-    "<b>Как отменить?</b> Напишите в поддержку через бота (кнопка «Поддержка»)"
+    "<b>Как отменить автопродление?</b> Кнопка «Отменить автопродление» в меню бота или в разделе «Статус» "
+    "(сначала подтверждение, чтобы не нажать случайно)."
 )
 
 
@@ -391,6 +414,17 @@ async def _get_proxy_link(session: aiohttp.ClientSession, tg_id: int) -> str | N
     return data.get("proxy_link") or None
 
 
+async def show_cancel_autopay_button(session: aiohttp.ClientSession, tg_id: int) -> bool:
+    """Показывать кнопку отмены только при активной подписке с включённым автопродлением в БД."""
+    try:
+        data = await backend_get(session, f"/subscription/{tg_id}")
+    except Exception:
+        return True
+    if not data.get("active") or data.get("suspended"):
+        return False
+    return bool(data.get("autopay_enabled"))
+
+
 def _get_session(dp: Dispatcher) -> aiohttp.ClientSession:
     """FIX: Centralised session access with a clear error if startup didn't complete."""
     session: aiohttp.ClientSession | None = dp.get("http_session")
@@ -414,10 +448,11 @@ async def send_grant_trial_result(
     if status >= 400:
         detail = data.get("detail") if isinstance(data.get("detail"), str) else None
         _log.warning("grant_trial http %s: %s", status, data)
+        sc = await show_cancel_autopay_button(session, tg_id)
         await message.answer(
             detail
             or "Сервис временно не смог выдать пробный период. Попробуйте позже или оформите подписку в мини-приложении.",
-            reply_markup=main_menu_kb(tg_id),
+            reply_markup=main_menu_kb(tg_id, show_cancel_autopay=sc),
         )
         return
     if not data.get("ok"):
@@ -442,14 +477,16 @@ async def send_grant_trial_result(
             )
             return
         if err == "already_subscribed":
+            sc = await show_cancel_autopay_button(session, tg_id)
             await message.answer(
                 "✅ У вас уже есть активная подписка.\n\nОткройте личный кабинет:",
-                reply_markup=status_active_kb(tg_id),
+                reply_markup=status_active_kb(tg_id, show_cancel_autopay=sc),
             )
             return
+        sc = await show_cancel_autopay_button(session, tg_id)
         await message.answer(
             "Не получилось активировать пробный период. Попробуйте позже или напишите в поддержку.",
-            reply_markup=main_menu_kb(tg_id),
+            reply_markup=main_menu_kb(tg_id, show_cancel_autopay=sc),
         )
         return
 
@@ -462,7 +499,7 @@ async def send_grant_trial_result(
             f"🎁 <b>Пробный период уже активен</b> до <b>{exp_human}</b>\n\n"
             "Личный кабинет — кнопка ниже.",
             parse_mode="HTML",
-            reply_markup=status_active_kb(tg_id),
+            reply_markup=status_active_kb(tg_id, show_cancel_autopay=False),
         )
         return
     await message.answer(
@@ -471,7 +508,7 @@ async def send_grant_trial_result(
         "📡 MTProxy для Telegram и 🛡 VPN — в личном кабинете. "
         "Когда срок закончится, оформите подписку, чтобы не потерять доступ.",
         parse_mode="HTML",
-        reply_markup=status_active_kb(tg_id),
+        reply_markup=status_active_kb(tg_id, show_cancel_autopay=False),
     )
 
 
@@ -540,11 +577,12 @@ async def cmd_start(message: Message, session: aiohttp.ClientSession, state: FSM
                 data = {}
 
             if data.get("ok"):
+                sc = await show_cancel_autopay_button(session, tg_id)
                 await message.answer(
                     "🧊 <b>Frosty — подписка 2 в 1 активирована!</b>\n\n"
                     "✅ Прокси для Telegram и VPN — в личном кабинете (кнопка ниже).",
                     parse_mode="HTML",
-                    reply_markup=status_active_kb(tg_id),
+                    reply_markup=status_active_kb(tg_id, show_cancel_autopay=sc),
                 )
                 return
         # Некорректный или чужой токен — показываем обычный стартовый экран
@@ -558,13 +596,15 @@ async def cmd_start(message: Message, session: aiohttp.ClientSession, state: FSM
 
         if data.get("found"):
             expires_at = format_dt(data.get("expires_at"))
+            sc = await show_cancel_autopay_button(session, tg_id)
             await message.answer(
                 f"✅ Подписка 2 в 1 активна до {expires_at}.\n\n"
                 "📡 Прокси и 🛡 VPN — в личном кабинете, нажми кнопку ниже.",
-                reply_markup=status_active_kb(tg_id),
+                reply_markup=status_active_kb(tg_id, show_cancel_autopay=sc),
             )
             return
 
+    sc_menu = await show_cancel_autopay_button(session, tg_id)
     await message.answer(
         f"🧊 <b>Frosty — 2 в 1 за {PRICE_RUB} ₽/мес</b>\n"
         "\n"
@@ -576,7 +616,7 @@ async def cmd_start(message: Message, session: aiohttp.ClientSession, state: FSM
         f"<b>10 ₽/день · {PRICE_RUB} ₽/мес · Отмена в любой момент</b>\n\n"
         f"🎁 Один <b>бесплатный день</b> — кнопка в меню ниже (только здесь, в боте).",
         parse_mode="HTML",
-        reply_markup=main_menu_kb(tg_id),
+        reply_markup=main_menu_kb(tg_id, show_cancel_autopay=sc_menu),
     )
 
 
@@ -639,7 +679,23 @@ async def cmd_status(message: Message, session: aiohttp.ClientSession, tg_id: in
 
     expires_at = format_dt(data.get("expires_at"))
     is_trial = bool(data.get("is_trial"))
+    autopay_on = bool(data.get("autopay_enabled"))
     proxy_link = data.get("proxy_link")
+    if is_trial:
+        renew_line = f"🎁 <b>Пробный день</b> — затем {PRICE_RUB} ₽/мес\n"
+        autopay_line = ""
+    elif autopay_on:
+        renew_line = f"💳 Тариф: {PRICE_RUB} ₽/мес · 10 ₽/день\n"
+        autopay_line = (
+            "🔄 <b>Автопродление включено</b> — продление раз в месяц. "
+            "Отключить без потери текущего срока: кнопка ниже (с подтверждением).\n"
+        )
+    else:
+        renew_line = f"💳 Тариф: {PRICE_RUB} ₽/мес · 10 ₽/день\n"
+        autopay_line = (
+            "🔄 <b>Автопродление выключено</b> — после окончания даты доступ не продлится сам, "
+            "нужна новая оплата в мини-приложении.\n"
+        )
     status_text = (
         f"✅ <b>Подписка 2 в 1 активна</b>\n"
         f"\n"
@@ -647,13 +703,10 @@ async def cmd_status(message: Message, session: aiohttp.ClientSession, tg_id: in
         f"🛡 VPN — там же (вкладка «VPN»), кнопка ниже\n"
         f"\n"
         f"📅 Действует до: {expires_at}\n"
-        + (
-            f"🎁 <b>Пробный день</b> — затем {PRICE_RUB} ₽/мес\n"
-            if is_trial
-            else f"💳 Тариф: {PRICE_RUB} ₽/мес · 10 ₽/день\n"
-        )
-        + f"🖥 Устройств: до 10 на аккаунте\n"
-        f"❓ Отмена — через кнопку «Поддержка» в боте"
+        f"{renew_line}"
+        f"{autopay_line}"
+        f"🖥 Устройств: до 10 на аккаунте\n"
+        f"❓ Вопросы по оплате — «Поддержка» в меню"
     )
     if not proxy_link:
         status_text += (
@@ -661,7 +714,11 @@ async def cmd_status(message: Message, session: aiohttp.ClientSession, tg_id: in
             "⚠️ Доступ в кабинете ещё полностью не подгрузился. "
             "Если нет прокси или VPN — напиши в поддержку."
         )
-    await message.answer(status_text, parse_mode="HTML", reply_markup=status_active_kb(tg_id))
+    await message.answer(
+        status_text,
+        parse_mode="HTML",
+        reply_markup=status_active_kb(tg_id, show_cancel_autopay=autopay_on and not is_trial),
+    )
 
 
 async def main() -> None:
@@ -831,9 +888,10 @@ async def main() -> None:
 
         if action == "main":
             tg_id = query.from_user.id
+            sc = await show_cancel_autopay_button(session, tg_id)
             await msg.answer(
                 "Выбери действие:",
-                reply_markup=main_menu_kb(tg_id),
+                reply_markup=main_menu_kb(tg_id, show_cancel_autopay=sc),
             )
             await query.answer()
             return
@@ -884,18 +942,49 @@ async def main() -> None:
 
         if action == "support":
             await state.set_state(SupportStates.chatting)
-            await state.update_data(support_history=[])
+            tg_uid = query.from_user.id
+            sc = await show_cancel_autopay_button(session, tg_uid)
+            await state.update_data(support_history=[], support_show_cancel=sc)
             await query.answer()
-            await msg.answer(support_invite_html(), parse_mode="HTML", reply_markup=support_chat_kb())
+            await msg.answer(
+                support_invite_html(),
+                parse_mode="HTML",
+                reply_markup=support_chat_kb(show_cancel_autopay=sc),
+            )
             return
 
         if action == "cancel_recurring":
             await query.answer()
-            session = _get_session(dp)
+            await msg.answer(
+                CANCEL_RECURRING_CONFIRM_HTML,
+                parse_mode="HTML",
+                reply_markup=cancel_recurring_confirm_kb(),
+            )
+            return
+
+        if action == "cancel_recurring:no":
+            await query.answer("Ок")
+            tg_uid = query.from_user.id
+            in_support = (await state.get_state()) == SupportStates.chatting.state
+            if in_support:
+                sdata = await state.get_data()
+                sc = bool(sdata.get("support_show_cancel", True))
+                await msg.answer("Оставляем автопродление как есть.", reply_markup=support_chat_kb(show_cancel_autopay=sc))
+            else:
+                sc = await show_cancel_autopay_button(session, tg_uid)
+                await msg.answer(
+                    "Оставляем автопродление как есть.",
+                    reply_markup=main_menu_kb(tg_uid, show_cancel_autopay=sc),
+                )
+            return
+
+        if action == "cancel_recurring:ok":
+            await query.answer()
             tg_uid = query.from_user.id
             status, data = await backend_cancel_recurring(session, tg_uid)
             text: str
-            if status == 200 and data.get("ok"):
+            ok = status == 200 and data.get("ok")
+            if ok:
                 text = str(data.get("message") or "Автопродление отменено.")
             elif status == 403:
                 text = "Сервис временно не может выполнить запрос. Напишите текстом «отменить подписку» — администратор поможет."
@@ -906,7 +995,14 @@ async def main() -> None:
                     or "Не удалось отменить автопродление. Напишите в чат, мы разберёмся."
                 )
             in_support = (await state.get_state()) == SupportStates.chatting.state
-            reply_kb = support_chat_kb() if in_support else main_menu_kb(tg_uid)
+            if ok and in_support:
+                await state.update_data(support_show_cancel=False)
+            if in_support:
+                sc = False if ok else bool((await state.get_data()).get("support_show_cancel", True))
+                reply_kb = support_chat_kb(show_cancel_autopay=sc)
+            else:
+                sc = await show_cancel_autopay_button(session, tg_uid) if not ok else False
+                reply_kb = main_menu_kb(tg_uid, show_cancel_autopay=sc)
             await msg.answer(text, reply_markup=reply_kb)
             return
 
@@ -914,9 +1010,10 @@ async def main() -> None:
             await state.clear()
             await query.answer("Чат закрыт")
             tg_id = query.from_user.id
+            sc = await show_cancel_autopay_button(session, tg_id)
             await msg.answer(
                 "Диалог закрыт. Поддержка снова — кнопка «Поддержка» или /support.",
-                reply_markup=main_menu_kb(tg_id),
+                reply_markup=main_menu_kb(tg_id, show_cancel_autopay=sc),
             )
             return
 
@@ -924,26 +1021,37 @@ async def main() -> None:
 
     @dp.message(Command("support"))
     async def _cmd_support(message: Message, state: FSMContext) -> None:
+        session = _get_session(dp)
+        tg_id = message.from_user.id if message.from_user else 0
+        sc = await show_cancel_autopay_button(session, tg_id) if tg_id else True
         await state.set_state(SupportStates.chatting)
-        await state.update_data(support_history=[])
-        await message.answer(support_invite_html(), parse_mode="HTML", reply_markup=support_chat_kb())
+        await state.update_data(support_history=[], support_show_cancel=sc)
+        await message.answer(
+            support_invite_html(),
+            parse_mode="HTML",
+            reply_markup=support_chat_kb(show_cancel_autopay=sc),
+        )
 
     @dp.message(Command("done"), StateFilter(SupportStates.chatting))
     async def _cmd_done(message: Message, state: FSMContext) -> None:
+        session = _get_session(dp)
         await state.clear()
         tg_id = message.from_user.id if message.from_user else 0
+        sc = await show_cancel_autopay_button(session, tg_id) if tg_id else True
         await message.answer(
             "Диалог закрыт. Снова нажмите «Поддержка» в меню или /support — снова напомним, что писать нужно в этот чат.",
-            reply_markup=main_menu_kb(tg_id),
+            reply_markup=main_menu_kb(tg_id, show_cancel_autopay=sc),
         )
 
     @dp.message(Command("reset"), StateFilter(SupportStates.chatting))
     async def _cmd_reset(message: Message, state: FSMContext) -> None:
         """Очищает контекст диалога с ИИ, не выходя из чата поддержки."""
+        data = await state.get_data()
+        sc = bool(data.get("support_show_cancel", True))
         await state.update_data(support_history=[])
         await message.answer(
             "Контекст очищен. Опишите вопрос заново — продолжаем в этом чате.",
-            reply_markup=support_chat_kb(),
+            reply_markup=support_chat_kb(show_cancel_autopay=sc),
         )
 
     @dp.message(StateFilter(SupportStates.chatting), F.text, _TextNotCommand())
@@ -969,6 +1077,7 @@ async def main() -> None:
             from support_ai import SUPPORT_AI_MODEL, run_support_reply
 
             data = await state.get_data()
+            sc_chat = bool(data.get("support_show_cancel", True))
             history_raw = data.get("support_history") or []
             history: list[dict[str, Any]] = history_raw if isinstance(history_raw, list) else []
             started_at = time.monotonic()
@@ -982,9 +1091,9 @@ async def main() -> None:
                 new_history = history
                 reply_ok = False
                 reply_err = str(exc)[:500]
-                await message.answer(reply, reply_markup=support_chat_kb())
+                await message.answer(reply, reply_markup=support_chat_kb(show_cancel_autopay=sc_chat))
             else:
-                await message.answer(reply, reply_markup=support_chat_kb())
+                await message.answer(reply, reply_markup=support_chat_kb(show_cancel_autopay=sc_chat))
             finally:
                 duration_ms = int((time.monotonic() - started_at) * 1000)
                 await state.update_data(support_history=new_history)
@@ -1008,17 +1117,21 @@ async def main() -> None:
                 )
             return
 
+        data = await state.get_data()
+        sc_chat = bool(data.get("support_show_cancel", True))
         await message.answer(
             "Сообщение получено. Автоответ помощника сейчас недоступен — "
             "попробуйте позже или откройте «Статус» и мини-приложение в меню бота.",
-            reply_markup=support_chat_kb(),
+            reply_markup=support_chat_kb(show_cancel_autopay=sc_chat),
         )
 
     @dp.message(StateFilter(SupportStates.chatting))
-    async def _support_non_text(message: Message) -> None:
+    async def _support_non_text(message: Message, state: FSMContext) -> None:
+        data = await state.get_data()
+        sc_chat = bool(data.get("support_show_cancel", True))
         await message.answer(
             "Пока принимаем только текст — напишите вопрос прямо в этот чат сообщением.",
-            reply_markup=support_chat_kb(),
+            reply_markup=support_chat_kb(show_cancel_autopay=sc_chat),
         )
 
     @dp.callback_query(lambda c: c.data == "copy_proxy_link")

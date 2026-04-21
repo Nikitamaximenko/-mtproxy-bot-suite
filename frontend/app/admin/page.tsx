@@ -65,6 +65,8 @@ type SubInfo = {
   has_proxy: boolean
   access_suspended?: boolean
   access_blocked_reason?: string | null
+  /** Lava contract / ЮKassa saved method — в БД есть привязка к автопродлению */
+  autopay_enabled?: boolean
   // Реальное состояние VPN в 3X-UI (главный показатель доступа). null = записи
   // vpn_clients ещё нет (провижининг не сработал), true/false = клиент есть
   // и активен/деактивирован.
@@ -1589,6 +1591,7 @@ export default function AdminPage() {
                       <th className="px-4 py-3 font-medium">Истекает</th>
                       <th className="px-4 py-3 font-medium">Создана</th>
                       <th className="px-4 py-3 font-medium">Прокси</th>
+                      <th className="px-4 py-3 font-medium">Автопродление</th>
                       <th className="px-4 py-3 font-medium">VPN</th>
                       <th className="px-4 py-3 font-medium text-right">Доступ</th>
                     </tr>
@@ -1625,6 +1628,17 @@ export default function AdminPage() {
                               <span className="text-emerald-400">✓</span>
                             ) : (
                               <span className="text-gray-600">—</span>
+                            )}
+                          </td>
+                          <td className="px-4 py-3">
+                            {s.autopay_enabled ? (
+                              <span className="text-amber-300" title="В БД есть Lava contract или сохранённый способ ЮKassa">
+                                вкл
+                              </span>
+                            ) : (
+                              <span className="text-gray-500" title="Рекуррент в БД не привязан (отменено или не настраивалось)">
+                                выкл
+                              </span>
                             )}
                           </td>
                           <td className="px-4 py-3">
@@ -1665,7 +1679,7 @@ export default function AdminPage() {
                     })}
                     {subscribers.length === 0 && (
                       <tr>
-                        <td colSpan={9} className="px-4 py-8 text-center text-gray-500">
+                        <td colSpan={10} className="px-4 py-8 text-center text-gray-500">
                           Нет платных подписчиков
                         </td>
                       </tr>

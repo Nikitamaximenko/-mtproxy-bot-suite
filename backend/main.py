@@ -2497,6 +2497,15 @@ class SubscriptionResponse(BaseModel):
     proxy_link: str | None = None
     suspended: bool = False
     is_trial: bool = False
+    # Автопродление (Lava contract / сохранённый метод ЮKassa) по текущей активной строке подписки.
+    autopay_enabled: bool = False
+
+
+def _subscription_autopay_enabled(sub: Subscription) -> bool:
+    """Рекуррент только у платных: trial и pending без привязки к провайдеру."""
+    if sub.payment_status != "paid":
+        return False
+    return bool((sub.lava_contract_id or "").strip() or (sub.yookassa_payment_method_id or "").strip())
 
 
 @app.get("/subscription/{telegram_id}", response_model=SubscriptionResponse)
@@ -2528,24 +2537,42 @@ def get_subscription(telegram_id: int, req: Request, db: Session = Depends(get_d
     )
 
     if not sub:
-        return SubscriptionResponse(active=False, expires_at=None, proxy_link=None, suspended=False, is_trial=False)
+        return SubscriptionResponse(
+            active=False, expires_at=None, proxy_link=None, suspended=False, is_trial=False, autopay_enabled=False
+        )
 
     if sub.access_suspended or sub.access_blocked_reason:
         return SubscriptionResponse(
-            active=False, expires_at=sub.expires_at, proxy_link=None, suspended=True, is_trial=False
+            active=False,
+            expires_at=sub.expires_at,
+            proxy_link=None,
+            suspended=True,
+            is_trial=False,
+            autopay_enabled=_subscription_autopay_enabled(sub),
         )
 
     is_trial = sub.payment_status == "trial"
+    ap = _subscription_autopay_enabled(sub)
     if not (sub.proxy_server and sub.proxy_port and sub.proxy_secret):
         return SubscriptionResponse(
-            active=True, expires_at=sub.expires_at, proxy_link=None, suspended=False, is_trial=is_trial
+            active=True,
+            expires_at=sub.expires_at,
+            proxy_link=None,
+            suspended=False,
+            is_trial=is_trial,
+            autopay_enabled=ap,
         )
 
     proxy_link: str | None = None
     if has_token:
         proxy_link = f"tg://proxy?server={sub.proxy_server}&port={sub.proxy_port}&secret={sub.proxy_secret}"
     return SubscriptionResponse(
-        active=True, expires_at=sub.expires_at, proxy_link=proxy_link, suspended=False, is_trial=is_trial
+        active=True,
+        expires_at=sub.expires_at,
+        proxy_link=proxy_link,
+        suspended=False,
+        is_trial=is_trial,
+        autopay_enabled=ap,
     )
 
 
@@ -3517,6 +3544,8 @@ def admin_user_debug(telegram_id: int, req: Request, db: Session = Depends(get_d
                 "payment_status": s.payment_status,
                 "expires_at": s.expires_at.isoformat() if s.expires_at else None,
                 "lava_contract_id": s.lava_contract_id,
+                "yookassa_payment_method_id": s.yookassa_payment_method_id,
+                "autopay_enabled": _subscription_autopay_enabled(s),
                 "created_at": s.created_at.isoformat() if s.created_at else None,
                 "access_suspended": bool(s.access_suspended),
                 "access_blocked_reason": s.access_blocked_reason,
@@ -3952,6 +3981,8 @@ def internal_diag_subscription(
             "has_proxy_port": bool(s.proxy_port),
             "has_proxy_secret": bool(s.proxy_secret),
             "lava_contract_id": s.lava_contract_id,
+            "yookassa_payment_method_id": s.yookassa_payment_method_id,
+            "autopay_enabled": _subscription_autopay_enabled(s),
         }
 
     would: dict
@@ -4445,6 +4476,7 @@ class SubInfo(BaseModel):
     has_proxy: bool
     access_suspended: bool = False
     access_blocked_reason: str | None = None
+    autopay_enabled: bool = False
     # Реальное состояние VPN-клиента в 3X-UI (VLESS Reality) — главный показатель
     # доступа. None = записи vpn_clients вообще нет (provisioning не сработал
     # или юзер ни разу не клеймил VPN); False = есть, но помечен inactive (толкали
@@ -4480,6 +4512,7 @@ def _sub_info(s: Subscription, username: str | None, vpn_map: dict[int, VpnClien
         has_proxy=bool(s.proxy_server and s.proxy_port and s.proxy_secret),
         access_suspended=bool(s.access_suspended),
         access_blocked_reason=s.access_blocked_reason,
+        autopay_enabled=_subscription_autopay_enabled(s),
         vpn_active=bool(vc.active) if vc is not None else None,
         vpn_uuid=vc.uuid if vc is not None else None,
     )
