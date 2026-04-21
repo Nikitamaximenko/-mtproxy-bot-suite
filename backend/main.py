@@ -907,6 +907,14 @@ def _yookassa_delete_payment_method(payment_method_id: str) -> None:
 def _subscription_with_recurring_to_cancel(db: Session, tg_id: int) -> Subscription | None:
     """Активная paid-подписка с рекуррентом (Lava contract или сохранённый метод ЮKassa)."""
     now = utcnow()
+    has_lava = and_(
+        Subscription.lava_contract_id.is_not(None),
+        func.length(func.trim(Subscription.lava_contract_id)) > 0,
+    )
+    has_yk = and_(
+        Subscription.yookassa_payment_method_id.is_not(None),
+        func.length(func.trim(Subscription.yookassa_payment_method_id)) > 0,
+    )
     return (
         db.execute(
             select(Subscription)
@@ -915,13 +923,10 @@ def _subscription_with_recurring_to_cancel(db: Session, tg_id: int) -> Subscript
                 Subscription.payment_status == "paid",
                 Subscription.expires_at.is_not(None),
                 Subscription.expires_at > now,
-                or_(
-                    Subscription.lava_contract_id.is_not(None),
-                    Subscription.yookassa_payment_method_id.is_not(None),
-                ),
+                or_(has_lava, has_yk),
             )
             .order_by(
-                case((Subscription.lava_contract_id.is_not(None), 1), else_=0).desc(),
+                case((has_lava, 1), else_=0).desc(),
                 Subscription.expires_at.desc(),
             )
             .limit(1)
