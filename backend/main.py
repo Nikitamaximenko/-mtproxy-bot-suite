@@ -31,6 +31,7 @@ from sqlalchemy import (
     Integer,
     String,
     and_,
+    case,
     create_engine,
     delete,
     exists,
@@ -911,7 +912,10 @@ def _subscription_with_recurring_to_cancel(db: Session, tg_id: int) -> Subscript
                     Subscription.yookassa_payment_method_id.is_not(None),
                 ),
             )
-            .order_by(Subscription.expires_at.desc())
+            .order_by(
+                case((Subscription.lava_contract_id.is_not(None), 1), else_=0).desc(),
+                Subscription.expires_at.desc(),
+            )
             .limit(1)
         )
         .scalars()
@@ -2508,6 +2512,26 @@ def _subscription_autopay_enabled(sub: Subscription) -> bool:
     return bool((sub.lava_contract_id or "").strip() or (sub.yookassa_payment_method_id or "").strip())
 
 
+def _autopay_enabled_for_user(db: Session, telegram_id: int, now: datetime) -> bool:
+    """True, если у пользователя есть хотя бы одна неистёкшая paid-подписка с Lava/ЮKassa в БД."""
+    rows = (
+        db.execute(
+            select(Subscription).where(
+                Subscription.telegram_id == int(telegram_id),
+                Subscription.payment_status == "paid",
+                Subscription.expires_at.is_not(None),
+                Subscription.expires_at > now,
+            )
+        )
+        .scalars()
+        .all()
+    )
+    for s in rows:
+        if (s.lava_contract_id or "").strip() or (s.yookassa_payment_method_id or "").strip():
+            return True
+    return False
+
+
 @app.get("/subscription/{telegram_id}", response_model=SubscriptionResponse)
 def get_subscription(telegram_id: int, req: Request, db: Session = Depends(get_db)) -> SubscriptionResponse:
     # Status fields (active/expires_at/suspended) are low-sensitivity and served publicly
@@ -2529,7 +2553,10 @@ def get_subscription(telegram_id: int, req: Request, db: Session = Depends(get_d
                 Subscription.expires_at.is_not(None),
                 Subscription.expires_at > now,
             )
-            .order_by(Subscription.expires_at.desc())
+            .order_by(
+                case((Subscription.payment_status == "paid", 1), else_=0).desc(),
+                Subscription.expires_at.desc(),
+            )
             .limit(1)
         )
         .scalars()
@@ -2541,6 +2568,8 @@ def get_subscription(telegram_id: int, req: Request, db: Session = Depends(get_d
             active=False, expires_at=None, proxy_link=None, suspended=False, is_trial=False, autopay_enabled=False
         )
 
+    ap_user = _autopay_enabled_for_user(db, int(telegram_id), now)
+
     if sub.access_suspended or sub.access_blocked_reason:
         return SubscriptionResponse(
             active=False,
@@ -2548,11 +2577,11 @@ def get_subscription(telegram_id: int, req: Request, db: Session = Depends(get_d
             proxy_link=None,
             suspended=True,
             is_trial=False,
-            autopay_enabled=_subscription_autopay_enabled(sub),
+            autopay_enabled=ap_user,
         )
 
     is_trial = sub.payment_status == "trial"
-    ap = _subscription_autopay_enabled(sub)
+    ap = ap_user
     if not (sub.proxy_server and sub.proxy_port and sub.proxy_secret):
         return SubscriptionResponse(
             active=True,
