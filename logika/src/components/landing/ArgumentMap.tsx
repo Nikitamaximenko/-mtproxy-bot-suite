@@ -30,7 +30,8 @@ const NODES: Node[] = [
   { id: 'c', kind: 'claim', label: 'Я должен уволиться', x: 50, y: 14, delay: 0 },
   { id: 'p1', kind: 'premise', label: 'Я выгораю', x: 18, y: 40, delay: 0.6 },
   { id: 'p2', kind: 'premise', label: 'Мне скучно', x: 82, y: 40, delay: 1.0 },
-  { id: 'm', kind: 'motive', label: 'Страх стабильности', x: 50, y: 62, delay: 1.6 },
+  // Центр: оставляем место под двухстрочную подпись; координаты совпадают с рёбрами в viewBox 100×100
+  { id: 'm', kind: 'motive', label: 'Страх стабильности', x: 50, y: 58, delay: 1.6 },
   { id: 'x', kind: 'conflict', label: 'Но ипотека', x: 22, y: 86, delay: 2.4 },
   { id: 'y', kind: 'conflict', label: 'Нет плана «что дальше»', x: 78, y: 86, delay: 2.9 },
 ]
@@ -186,9 +187,9 @@ export function ArgumentMap() {
             whileInView={{ opacity: 1, y: 0 }}
             viewport={{ once: true, margin: '-10%' }}
             transition={{ duration: 0.6, ease }}
-            className="border-border bg-card relative overflow-hidden rounded-[16px] border"
+            className="border-border bg-card relative overflow-visible rounded-[16px] border"
           >
-            <div className="border-border text-dim flex items-center justify-between border-b px-4 py-3 font-mono text-[11px] uppercase tracking-[0.08em]">
+            <div className="border-border text-dim flex items-center justify-between overflow-hidden rounded-t-[15px] border-b px-4 py-3 font-mono text-[11px] uppercase tracking-[0.08em]">
               <span>Карта аргумента — цикл #{cycle + 1}</span>
               <span>
                 {visibleNodes.length} узлов · {visibleEdges.length} рёбер ·{' '}
@@ -196,7 +197,7 @@ export function ArgumentMap() {
               </span>
             </div>
 
-            <div className="relative aspect-[4/3] w-full">
+            <div className="relative aspect-[4/3] w-full overflow-visible px-1 sm:px-2">
               <svg
                 viewBox="0 0 100 100"
                 className="absolute inset-0 h-full w-full"
@@ -252,24 +253,45 @@ export function ArgumentMap() {
 
               {NODES.map((n) => {
                 const visible = n.delay <= t
+                const isMotive = n.kind === 'motive'
                 return (
                   <motion.div
                     key={`${n.id}-label-${cycle}`}
-                    initial={{ opacity: 0, y: 6, scale: 0.95 }}
-                    animate={visible ? { opacity: 1, y: 0, scale: 1 } : { opacity: 0, y: 6, scale: 0.95 }}
-                    transition={{ duration: 0.45, ease, delay: 0.1 }}
-                    className="pointer-events-none absolute -translate-x-1/2 -translate-y-1/2"
-                    style={{ left: `${n.x}%`, top: `${n.y}%` }}
+                    initial={{ opacity: 0, scale: 0.92 }}
+                    animate={
+                      visible ? { opacity: 1, scale: 1 } : { opacity: 0, scale: 0.92 }
+                    }
+                    transition={{ duration: 0.4, ease, delay: visible ? 0.06 : 0 }}
+                    className="pointer-events-none absolute z-10 -translate-x-1/2 -translate-y-1/2"
+                    style={{
+                      left: `${n.x}%`,
+                      top: `${n.y}%`,
+                      transformOrigin: 'center center',
+                    }}
                   >
                     <div
-                      className={`${nodeBg(
-                        n.kind,
-                      )} rounded-[8px] px-3 py-1.5 text-xs font-medium whitespace-nowrap shadow-[0_4px_18px_rgba(0,0,0,0.45)]`}
+                      className={`${nodeBg(n.kind)} text-xs font-medium shadow-[0_4px_18px_rgba(0,0,0,0.45)] ${
+                        isMotive
+                          ? 'flex max-w-[148px] flex-col items-center gap-1 rounded-[10px] px-3 py-2 text-center sm:max-w-[176px]'
+                          : 'rounded-[8px] px-3 py-1.5 whitespace-nowrap'
+                      }`}
                     >
-                      <span className="mr-2 font-mono text-[9px] uppercase tracking-[0.08em] opacity-70">
+                      <span
+                        className={`font-mono text-[9px] uppercase tracking-[0.08em] opacity-70 ${
+                          isMotive ? '' : 'mr-2'
+                        }`}
+                      >
                         {kindLabel(n.kind)}
                       </span>
-                      {n.label}
+                      <span
+                        className={
+                          isMotive
+                            ? 'text-[11px] leading-snug text-balance sm:text-xs'
+                            : 'inline'
+                        }
+                      >
+                        {n.label}
+                      </span>
                     </div>
                   </motion.div>
                 )
