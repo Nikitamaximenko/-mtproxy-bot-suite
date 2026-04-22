@@ -539,6 +539,15 @@ function FlowPage() {
           >
             На лендинг
           </Link>
+          {phase === 'cabinet' && apiMode && (
+            <button
+              type="button"
+              onClick={handleLogout}
+              className="text-dim hover:text-foreground whitespace-nowrap font-mono text-[11px] uppercase tracking-[0.08em] sm:text-[13px]"
+            >
+              Выйти
+            </button>
+          )}
         </div>
       </header>
       {flowError && (
