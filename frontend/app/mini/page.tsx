@@ -273,6 +273,7 @@ function readStoredEmail(): string | null {
 /* ── Main Page ── */
 export default function MiniAppPage() {
   /** Не использовать useMemo(getTelegramUser): SDK подставляет initDataUnsafe позже первого кадра. */
+  const tgUser = getTelegramUser()
   const [tgId, setTgId] = useState<number | null>(null)
   const [sub, setSub] = useState<SubscriptionData | null>(null)
   const [loading, setLoading] = useState(true)
