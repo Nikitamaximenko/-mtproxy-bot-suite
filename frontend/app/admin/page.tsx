@@ -872,7 +872,7 @@ export default function AdminPage() {
             aria-label="Дополнительные экраны админки"
           >
             <span className="text-gray-500">
-              Экраны из merge (витрина UI, отдельно от данных ниже):
+              Дополнительные live-экраны:
             </span>
             <Link
               href="/admin/analytics"
@@ -896,7 +896,7 @@ export default function AdminPage() {
             </Link>
             <span className="text-gray-600">·</span>
             <Link href="/admin" className="text-gray-400 hover:text-gray-300">
-              Этот дашборд (данные API)
+              Главный дашборд
             </Link>
           </nav>
         </div>

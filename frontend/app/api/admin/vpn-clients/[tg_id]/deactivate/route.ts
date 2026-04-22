@@ -4,11 +4,12 @@ const BACKEND = (process.env.BACKEND_URL || "http://localhost:8000").replace(/\/
 
 export async function POST(
   req: NextRequest,
-  { params }: { params: { tg_id: string } },
+  { params }: { params: Promise<{ tg_id: string }> },
 ) {
   const adminKey = req.headers.get("x-admin-key") || ""
+  const { tg_id } = await params
   try {
-    const res = await fetch(`${BACKEND}/admin/vpn-clients/${params.tg_id}/deactivate`, {
+    const res = await fetch(`${BACKEND}/admin/vpn-clients/${tg_id}/deactivate`, {
       method: "POST",
       headers: { "x-admin-key": adminKey, "Content-Type": "application/json" },
       body: "{}",

@@ -1,348 +1,394 @@
 "use client"
 
-import { AdminSidebar } from "@/components/admin/AdminSidebar"
 import { AdminHeader } from "@/components/admin/AdminHeader"
-import { useState } from "react"
-import { 
-  Search, 
-  Filter,
-  MoreVertical,
-  Crown,
-  User,
-  Ban,
-  Trash2,
-  Mail,
-  Calendar,
-  Server,
-  ChevronLeft,
-  ChevronRight,
-  Download,
-  UserPlus
-} from "lucide-react"
+import { AdminSidebar } from "@/components/admin/AdminSidebar"
+import {
+  AdminAuthError,
+  RegistryUserInfo,
+  Stats,
+  SubInfo,
+  UsersOverview,
+  VpnClientInfo,
+  VpnClientsData,
+  clearStoredAdminKey,
+  fetchAdminJson,
+  formatAdminDate,
+  formatNumber,
+  getStoredAdminKey,
+  isSubAccessActive,
+} from "@/lib/admin"
+import { CreditCard, Search, ShieldCheck, UserPlus, Users, Wifi } from "lucide-react"
+import { useRouter } from "next/navigation"
+import { useCallback, useEffect, useMemo, useState } from "react"
 
-interface UserData {
-  id: string
-  telegramId: string
-  username: string
-  plan: "free" | "basic" | "premium"
-  status: "active" | "inactive" | "banned"
-  server: string
-  registeredAt: string
-  lastActive: string
-  totalPaid: number
+const REFRESH_MS = 30000
+
+type SubscriberFilter = "all" | "active" | "expired" | "suspended" | "vpn_problem"
+
+function paymentLabel(status: string) {
+  switch (status) {
+    case "paid":
+      return "Оплачено"
+    case "trial":
+      return "Триал"
+    case "expired":
+      return "Истекло"
+    case "pending":
+      return "Ожидает оплату"
+    default:
+      return status
+  }
 }
 
-const users: UserData[] = [
-  { id: "1", telegramId: "123456789", username: "@user_alpha", plan: "premium", status: "active", server: "EU-1", registeredAt: "2024-01-15", lastActive: "2 мин назад", totalPaid: 12000 },
-  { id: "2", telegramId: "987654321", username: "@telegram_user", plan: "basic", status: "active", server: "EU-2", registeredAt: "2024-02-20", lastActive: "5 мин назад", totalPaid: 3500 },
-  { id: "3", telegramId: "456789123", username: "@cool_guy", plan: "basic", status: "active", server: "EU-1", registeredAt: "2024-03-01", lastActive: "1 час назад", totalPaid: 2000 },
-  { id: "4", telegramId: "789123456", username: "@new_user", plan: "free", status: "inactive", server: "-", registeredAt: "2024-03-10", lastActive: "3 дня назад", totalPaid: 0 },
-  { id: "5", telegramId: "321654987", username: "@pro_member", plan: "premium", status: "active", server: "AS-1", registeredAt: "2024-01-05", lastActive: "10 мин назад", totalPaid: 24000 },
-  { id: "6", telegramId: "654987321", username: "@banned_user", plan: "basic", status: "banned", server: "-", registeredAt: "2024-02-01", lastActive: "1 мес назад", totalPaid: 500 },
-  { id: "7", telegramId: "147258369", username: "@active_member", plan: "basic", status: "active", server: "US-1", registeredAt: "2024-02-28", lastActive: "30 мин назад", totalPaid: 1500 },
-  { id: "8", telegramId: "369258147", username: "@vip_client", plan: "premium", status: "active", server: "EU-3", registeredAt: "2023-12-01", lastActive: "1 мин назад", totalPaid: 36000 },
-]
+function paymentColor(status: string) {
+  switch (status) {
+    case "paid":
+      return "bg-success/10 text-success"
+    case "trial":
+      return "bg-sky-500/10 text-sky-600"
+    case "expired":
+      return "bg-destructive/10 text-destructive"
+    case "pending":
+      return "bg-warning/10 text-warning"
+    default:
+      return "bg-secondary text-foreground"
+  }
+}
+
+function accessState(sub: SubInfo): SubscriberFilter | "inactive" {
+  if (sub.access_suspended || sub.access_blocked_reason) return "suspended"
+  if (isSubAccessActive(sub)) return "active"
+  if (sub.expires_at && new Date(sub.expires_at).getTime() <= Date.now()) return "expired"
+  if (sub.vpn_active !== true) return "vpn_problem"
+  return "inactive"
+}
+
+function accessLabel(sub: SubInfo) {
+  const state = accessState(sub)
+  switch (state) {
+    case "active":
+      return "Доступ активен"
+    case "expired":
+      return "Срок истёк"
+    case "suspended":
+      return "Отключено вручную"
+    case "vpn_problem":
+      return "Есть оплата, но VPN не активен"
+    default:
+      return "Нет доступа"
+  }
+}
+
+function vpnLabel(sub: SubInfo, client: VpnClientInfo | null) {
+  if (sub.vpn_active === true || client?.active) return "VPN активен"
+  if (sub.vpn_active === false || client) return "VPN выключен"
+  return "VPN не выдан"
+}
+
+function userMatchesSearch(value: { telegram_id: number; username?: string | null }, search: string) {
+  const normalized = search.trim().toLowerCase()
+  if (!normalized) return true
+  return (
+    String(value.telegram_id).includes(normalized) ||
+    (value.username ?? "").toLowerCase().includes(normalized)
+  )
+}
 
 export default function UsersPage() {
+  const router = useRouter()
+  const [overview, setOverview] = useState<UsersOverview | null>(null)
+  const [stats, setStats] = useState<Stats | null>(null)
+  const [vpnClients, setVpnClients] = useState<VpnClientsData | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState("")
+  const [tab, setTab] = useState<"subscribers" | "new">("subscribers")
   const [searchQuery, setSearchQuery] = useState("")
-  const [filterPlan, setFilterPlan] = useState<string>("all")
-  const [filterStatus, setFilterStatus] = useState<string>("all")
-  const [selectedUsers, setSelectedUsers] = useState<string[]>([])
-  const [showUserMenu, setShowUserMenu] = useState<string | null>(null)
+  const [filter, setFilter] = useState<SubscriberFilter>("all")
 
-  const filteredUsers = users.filter(user => {
-    const matchesSearch = user.username.toLowerCase().includes(searchQuery.toLowerCase()) ||
-                         user.telegramId.includes(searchQuery)
-    const matchesPlan = filterPlan === "all" || user.plan === filterPlan
-    const matchesStatus = filterStatus === "all" || user.status === filterStatus
-    return matchesSearch && matchesPlan && matchesStatus
-  })
+  const loadData = useCallback(
+    async (adminKey: string) => {
+      setLoading(true)
+      setError("")
+      try {
+        const [overviewData, statsData, vpnClientsData] = await Promise.all([
+          fetchAdminJson<UsersOverview>("/api/admin/users-overview", adminKey),
+          fetchAdminJson<Stats>("/api/admin/stats", adminKey),
+          fetchAdminJson<VpnClientsData>("/api/admin/vpn-clients", adminKey),
+        ])
+        setOverview(overviewData)
+        setStats(statsData)
+        setVpnClients(vpnClientsData)
+      } catch (err) {
+        if (err instanceof AdminAuthError) {
+          clearStoredAdminKey()
+          router.replace("/admin")
+          return
+        }
+        setError(err instanceof Error ? err.message : "Не удалось загрузить live-данные")
+      } finally {
+        setLoading(false)
+      }
+    },
+    [router],
+  )
 
-  const planColors = {
-    free: "bg-muted text-muted-foreground",
-    basic: "bg-primary/10 text-primary",
-    premium: "bg-warning/10 text-warning"
-  }
+  useEffect(() => {
+    const adminKey = getStoredAdminKey()
+    if (!adminKey) {
+      router.replace("/admin")
+      return
+    }
+    void loadData(adminKey)
+  }, [loadData, router])
 
-  const planLabels = {
-    free: "Free",
-    basic: "Basic",
-    premium: "Premium"
-  }
+  useEffect(() => {
+    const adminKey = getStoredAdminKey()
+    if (!adminKey) return
+    const timer = setInterval(() => {
+      void loadData(adminKey)
+    }, REFRESH_MS)
+    return () => clearInterval(timer)
+  }, [loadData])
 
-  const statusColors = {
-    active: "bg-success/10 text-success",
-    inactive: "bg-muted text-muted-foreground",
-    banned: "bg-destructive/10 text-destructive"
-  }
+  const vpnMap = useMemo(
+    () => new Map((vpnClients?.clients ?? []).map((client) => [client.telegram_id, client])),
+    [vpnClients],
+  )
 
-  const statusLabels = {
-    active: "Активен",
-    inactive: "Неактивен",
-    banned: "Заблокирован"
-  }
+  const filteredSubscribers = useMemo(() => {
+    const subscribers = overview?.subscribers ?? []
+    return subscribers.filter((sub) => {
+      if (!userMatchesSearch(sub, searchQuery)) return false
+      if (filter === "all") return true
+      return accessState(sub) === filter
+    })
+  }, [filter, overview?.subscribers, searchQuery])
 
-  const toggleUserSelection = (userId: string) => {
-    setSelectedUsers(prev => 
-      prev.includes(userId) 
-        ? prev.filter(id => id !== userId)
-        : [...prev, userId]
-    )
-  }
+  const filteredNewUsers = useMemo(() => {
+    const newUsers = overview?.new_users ?? []
+    return newUsers.filter((user) => userMatchesSearch(user, searchQuery))
+  }, [overview?.new_users, searchQuery])
 
-  const toggleAllUsers = () => {
-    setSelectedUsers(prev => 
-      prev.length === filteredUsers.length 
-        ? [] 
-        : filteredUsers.map(u => u.id)
-    )
-  }
-
-  const totalPremium = users.filter(u => u.plan === 'premium').length
-  const totalBasic = users.filter(u => u.plan === 'basic').length
-  const totalActive = users.filter(u => u.status === 'active').length
+  const analyticsScoped = Boolean(overview?.analytics_scoped) || Boolean(stats?.analytics_scoped)
 
   return (
-    <div className="flex min-h-screen">
+    <div className="flex min-h-screen bg-background">
       <AdminSidebar />
-      
+
       <div className="flex-1 lg:ml-64">
-        <AdminHeader title="Пользователи" subtitle="Управление подписчиками" />
-        
+        <AdminHeader
+          title="Пользователи"
+          subtitle="Реестр пользователей и доступов по live-данным"
+          note="Автообновление каждые 30 секунд"
+        />
+
         <main className="p-4 lg:p-6 space-y-6">
-          {/* Quick Stats */}
-          <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+          {analyticsScoped ? (
+            <div className="rounded-xl border border-warning/30 bg-warning/10 px-4 py-3 text-sm text-foreground">
+              Обзор пользователей ограничен серверным списком <code>ANALYTICS_PRODUCTION_TG_IDS</code>.
+            </div>
+          ) : null}
+
+          {error ? (
+            <div className="rounded-xl border border-destructive/30 bg-destructive/10 px-4 py-3 text-sm text-destructive">
+              {error}
+            </div>
+          ) : null}
+
+          <div className="grid grid-cols-2 xl:grid-cols-4 gap-4">
             <div className="bg-card rounded-xl p-4 border border-border">
               <div className="flex items-center gap-2 text-muted-foreground text-sm mb-1">
-                <User className="w-4 h-4" />
-                Всего
+                <Users className="w-4 h-4" />
+                Всего в users
               </div>
-              <p className="text-2xl font-bold text-foreground">{users.length}</p>
+              <p className="text-2xl font-semibold text-foreground">{formatNumber(overview?.users_table_total ?? 0)}</p>
             </div>
             <div className="bg-card rounded-xl p-4 border border-border">
               <div className="flex items-center gap-2 text-muted-foreground text-sm mb-1">
-                <Crown className="w-4 h-4 text-warning" />
-                Premium
+                <CreditCard className="w-4 h-4" />
+                С оплатой в истории
               </div>
-              <p className="text-2xl font-bold text-foreground">{totalPremium}</p>
+              <p className="text-2xl font-semibold text-foreground">{formatNumber(overview?.subscribers_total ?? 0)}</p>
             </div>
             <div className="bg-card rounded-xl p-4 border border-border">
               <div className="flex items-center gap-2 text-muted-foreground text-sm mb-1">
-                <User className="w-4 h-4 text-primary" />
-                Basic
+                <UserPlus className="w-4 h-4" />
+                Без оплаченной истории
               </div>
-              <p className="text-2xl font-bold text-foreground">{totalBasic}</p>
+              <p className="text-2xl font-semibold text-foreground">{formatNumber(overview?.new_users_total ?? 0)}</p>
             </div>
             <div className="bg-card rounded-xl p-4 border border-border">
-              <div className="flex items-center gap-2 text-success text-sm mb-1">
-                <div className="w-2 h-2 rounded-full bg-success" />
-                Онлайн
+              <div className="flex items-center gap-2 text-muted-foreground text-sm mb-1">
+                <ShieldCheck className="w-4 h-4" />
+                Активный доступ
               </div>
-              <p className="text-2xl font-bold text-foreground">{totalActive}</p>
+              <p className="text-2xl font-semibold text-foreground">{formatNumber(stats?.active_subscriptions ?? 0)}</p>
             </div>
           </div>
 
-          {/* Filters & Search */}
-          <div className="bg-card rounded-xl p-4 border border-border">
-            <div className="flex flex-col lg:flex-row gap-4">
-              {/* Search */}
-              <div className="flex-1 relative">
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-                <input
-                  type="text"
-                  placeholder="Поиск по username или Telegram ID..."
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  className="w-full pl-10 pr-4 py-2.5 bg-secondary border border-border rounded-lg text-sm"
-                />
-              </div>
-
-              {/* Filters */}
-              <div className="flex items-center gap-2">
-                <select
-                  value={filterPlan}
-                  onChange={(e) => setFilterPlan(e.target.value)}
-                  className="px-3 py-2.5 bg-secondary border border-border rounded-lg text-sm"
+          <div className="bg-card rounded-xl p-4 border border-border space-y-4">
+            <div className="flex flex-col lg:flex-row gap-3 lg:items-center lg:justify-between">
+              <div className="flex items-center gap-1 bg-secondary rounded-lg p-1 w-fit">
+                <button
+                  type="button"
+                  onClick={() => setTab("subscribers")}
+                  className={`px-4 py-2 text-sm rounded-md transition-colors ${
+                    tab === "subscribers" ? "bg-card text-foreground shadow-sm" : "text-muted-foreground"
+                  }`}
                 >
-                  <option value="all">Все тарифы</option>
-                  <option value="premium">Premium</option>
-                  <option value="basic">Basic</option>
-                  <option value="free">Free</option>
-                </select>
-
-                <select
-                  value={filterStatus}
-                  onChange={(e) => setFilterStatus(e.target.value)}
-                  className="px-3 py-2.5 bg-secondary border border-border rounded-lg text-sm"
+                  Подписчики
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setTab("new")}
+                  className={`px-4 py-2 text-sm rounded-md transition-colors ${
+                    tab === "new" ? "bg-card text-foreground shadow-sm" : "text-muted-foreground"
+                  }`}
                 >
-                  <option value="all">Все статусы</option>
-                  <option value="active">Активные</option>
-                  <option value="inactive">Неактивные</option>
-                  <option value="banned">Заблокированные</option>
-                </select>
-
-                <button className="flex items-center gap-2 px-3 py-2.5 text-sm text-muted-foreground hover:text-foreground hover:bg-secondary rounded-lg transition-colors border border-border">
-                  <Download className="w-4 h-4" />
-                  Экспорт
+                  Новые / без оплаты
                 </button>
               </div>
-            </div>
-          </div>
 
-          {/* Users Table */}
-          <div className="bg-card rounded-xl border border-border overflow-hidden">
-            <div className="overflow-x-auto">
-              <table className="w-full">
-                <thead>
-                  <tr className="border-b border-border bg-secondary/50">
-                    <th className="text-left p-4">
-                      <input 
-                        type="checkbox"
-                        checked={selectedUsers.length === filteredUsers.length && filteredUsers.length > 0}
-                        onChange={toggleAllUsers}
-                        className="w-4 h-4 rounded border-border"
-                      />
-                    </th>
-                    <th className="text-left text-xs font-medium text-muted-foreground p-4">Пользователь</th>
-                    <th className="text-left text-xs font-medium text-muted-foreground p-4">Тариф</th>
-                    <th className="text-left text-xs font-medium text-muted-foreground p-4">Статус</th>
-                    <th className="text-left text-xs font-medium text-muted-foreground p-4">Сервер</th>
-                    <th className="text-left text-xs font-medium text-muted-foreground p-4">Последняя активность</th>
-                    <th className="text-left text-xs font-medium text-muted-foreground p-4">Всего оплачено</th>
-                    <th className="text-left text-xs font-medium text-muted-foreground p-4"></th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-border">
-                  {filteredUsers.map((user) => (
-                    <tr key={user.id} className="hover:bg-secondary/30 transition-colors">
-                      <td className="p-4">
-                        <input 
-                          type="checkbox"
-                          checked={selectedUsers.includes(user.id)}
-                          onChange={() => toggleUserSelection(user.id)}
-                          className="w-4 h-4 rounded border-border"
-                        />
-                      </td>
-                      <td className="p-4">
-                        <div className="flex items-center gap-3">
-                          <div className="w-9 h-9 rounded-full bg-primary/10 flex items-center justify-center">
-                            {user.plan === 'premium' ? (
-                              <Crown className="w-4 h-4 text-warning" />
-                            ) : (
-                              <User className="w-4 h-4 text-primary" />
-                            )}
-                          </div>
-                          <div>
-                            <p className="text-sm font-medium text-foreground">{user.username}</p>
-                            <p className="text-xs text-muted-foreground">ID: {user.telegramId}</p>
-                          </div>
-                        </div>
-                      </td>
-                      <td className="p-4">
-                        <span className={`inline-flex items-center gap-1 text-xs font-medium px-2.5 py-1 rounded-full ${planColors[user.plan]}`}>
-                          {user.plan === 'premium' && <Crown className="w-3 h-3" />}
-                          {planLabels[user.plan]}
-                        </span>
-                      </td>
-                      <td className="p-4">
-                        <span className={`inline-flex items-center gap-1.5 text-xs font-medium px-2.5 py-1 rounded-full ${statusColors[user.status]}`}>
-                          <span className={`w-1.5 h-1.5 rounded-full ${
-                            user.status === 'active' ? 'bg-success' :
-                            user.status === 'banned' ? 'bg-destructive' : 'bg-muted-foreground'
-                          }`} />
-                          {statusLabels[user.status]}
-                        </span>
-                      </td>
-                      <td className="p-4">
-                        {user.server !== "-" ? (
-                          <span className="inline-flex items-center gap-1.5 text-sm text-foreground">
-                            <Server className="w-3.5 h-3.5 text-muted-foreground" />
-                            {user.server}
-                          </span>
-                        ) : (
-                          <span className="text-sm text-muted-foreground">-</span>
-                        )}
-                      </td>
-                      <td className="p-4">
-                        <span className="text-sm text-muted-foreground">{user.lastActive}</span>
-                      </td>
-                      <td className="p-4">
-                        <span className="text-sm font-medium text-foreground">
-                          {user.totalPaid.toLocaleString()} ₽
-                        </span>
-                      </td>
-                      <td className="p-4 relative">
-                        <button 
-                          onClick={() => setShowUserMenu(showUserMenu === user.id ? null : user.id)}
-                          className="p-2 hover:bg-secondary rounded-lg transition-colors"
-                        >
-                          <MoreVertical className="w-4 h-4 text-muted-foreground" />
-                        </button>
-                        {showUserMenu === user.id && (
-                          <div className="absolute right-4 top-12 w-48 bg-card border border-border rounded-lg shadow-lg z-10">
-                            <button className="w-full flex items-center gap-2 px-4 py-2.5 text-sm text-foreground hover:bg-secondary transition-colors">
-                              <Mail className="w-4 h-4" />
-                              Написать
-                            </button>
-                            <button className="w-full flex items-center gap-2 px-4 py-2.5 text-sm text-foreground hover:bg-secondary transition-colors">
-                              <Crown className="w-4 h-4" />
-                              Изменить тариф
-                            </button>
-                            <button className="w-full flex items-center gap-2 px-4 py-2.5 text-sm text-warning hover:bg-secondary transition-colors">
-                              <Ban className="w-4 h-4" />
-                              {user.status === 'banned' ? 'Разблокировать' : 'Заблокировать'}
-                            </button>
-                            <button className="w-full flex items-center gap-2 px-4 py-2.5 text-sm text-destructive hover:bg-secondary transition-colors">
-                              <Trash2 className="w-4 h-4" />
-                              Удалить
-                            </button>
-                          </div>
-                        )}
-                      </td>
+              <div className="flex flex-col lg:flex-row gap-3 lg:items-center">
+                <div className="relative min-w-[260px]">
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+                  <input
+                    type="text"
+                    value={searchQuery}
+                    onChange={(event) => setSearchQuery(event.target.value)}
+                    placeholder="Поиск по username или Telegram ID"
+                    className="w-full pl-10 pr-4 py-2.5 bg-secondary border border-border rounded-lg text-sm"
+                  />
+                </div>
+
+                {tab === "subscribers" ? (
+                  <select
+                    value={filter}
+                    onChange={(event) => setFilter(event.target.value as SubscriberFilter)}
+                    className="px-3 py-2.5 bg-secondary border border-border rounded-lg text-sm"
+                  >
+                    <option value="all">Все статусы</option>
+                    <option value="active">Доступ активен</option>
+                    <option value="expired">Истекли</option>
+                    <option value="suspended">Отключены вручную</option>
+                    <option value="vpn_problem">Проблема с VPN</option>
+                  </select>
+                ) : null}
+              </div>
+            </div>
+
+            {loading && !overview ? (
+              <div className="rounded-xl bg-secondary/50 border border-border px-4 py-10 text-center text-muted-foreground">
+                Загружаю реальный список пользователей…
+              </div>
+            ) : null}
+
+            {tab === "subscribers" ? (
+              <div className="overflow-x-auto">
+                <table className="w-full min-w-[920px]">
+                  <thead>
+                    <tr className="text-left text-xs text-muted-foreground border-b border-border">
+                      <th className="py-3 pr-4 font-medium">Пользователь</th>
+                      <th className="py-3 pr-4 font-medium">Оплата</th>
+                      <th className="py-3 pr-4 font-medium">Доступ</th>
+                      <th className="py-3 pr-4 font-medium">VPN / MTProxy</th>
+                      <th className="py-3 pr-4 font-medium">Истекает</th>
+                      <th className="py-3 font-medium">Автоплатёж</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-
-            {/* Pagination */}
-            <div className="flex items-center justify-between p-4 border-t border-border">
-              <p className="text-sm text-muted-foreground">
-                Показано {filteredUsers.length} из {users.length} пользователей
-              </p>
-              <div className="flex items-center gap-1">
-                <button className="p-2 hover:bg-secondary rounded-lg transition-colors disabled:opacity-50" disabled>
-                  <ChevronLeft className="w-4 h-4 text-muted-foreground" />
-                </button>
-                <button className="w-8 h-8 bg-primary text-white rounded-lg text-sm font-medium">1</button>
-                <button className="w-8 h-8 hover:bg-secondary rounded-lg text-sm text-muted-foreground">2</button>
-                <button className="w-8 h-8 hover:bg-secondary rounded-lg text-sm text-muted-foreground">3</button>
-                <button className="p-2 hover:bg-secondary rounded-lg transition-colors">
-                  <ChevronRight className="w-4 h-4 text-muted-foreground" />
-                </button>
+                  </thead>
+                  <tbody>
+                    {filteredSubscribers.map((sub) => {
+                      const vpnClient = vpnMap.get(sub.telegram_id) ?? null
+                      return (
+                        <tr key={sub.id} className="border-b border-border last:border-0">
+                          <td className="py-4 pr-4 align-top">
+                            <p className="font-medium text-foreground">{sub.username || "Без username"}</p>
+                            <p className="text-sm text-muted-foreground mt-1">ID: {sub.telegram_id}</p>
+                            <p className="text-xs text-muted-foreground mt-1">Запись подписки: {formatAdminDate(sub.created_at)}</p>
+                          </td>
+                          <td className="py-4 pr-4 align-top">
+                            <span className={`inline-flex rounded-full px-2.5 py-1 text-xs font-medium ${paymentColor(sub.payment_status)}`}>
+                              {paymentLabel(sub.payment_status)}
+                            </span>
+                          </td>
+                          <td className="py-4 pr-4 align-top">
+                            <p className="text-sm text-foreground">{accessLabel(sub)}</p>
+                            <p className="text-xs text-muted-foreground mt-1">
+                              {sub.access_blocked_reason || (sub.access_suspended ? "manual" : "—")}
+                            </p>
+                          </td>
+                          <td className="py-4 pr-4 align-top">
+                            <p className="text-sm text-foreground">{vpnLabel(sub, vpnClient)}</p>
+                            <p className="text-xs text-muted-foreground mt-1">
+                              MTProxy: {sub.has_proxy ? "выдан" : "нет"}{vpnClient ? ` · UUID ${vpnClient.uuid_prefix}` : ""}
+                            </p>
+                          </td>
+                          <td className="py-4 pr-4 align-top text-sm text-foreground">{formatAdminDate(sub.expires_at)}</td>
+                          <td className="py-4 align-top">
+                            <span className={`inline-flex rounded-full px-2.5 py-1 text-xs font-medium ${sub.autopay_enabled ? "bg-success/10 text-success" : "bg-secondary text-muted-foreground"}`}>
+                              {sub.autopay_enabled ? "Включён" : "Нет"}
+                            </span>
+                          </td>
+                        </tr>
+                      )
+                    })}
+                    {filteredSubscribers.length === 0 ? (
+                      <tr>
+                        <td colSpan={6} className="py-10 text-center text-muted-foreground">
+                          По этому фильтру пользователей нет.
+                        </td>
+                      </tr>
+                    ) : null}
+                  </tbody>
+                </table>
               </div>
-            </div>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full min-w-[820px]">
+                  <thead>
+                    <tr className="text-left text-xs text-muted-foreground border-b border-border">
+                      <th className="py-3 pr-4 font-medium">Пользователь</th>
+                      <th className="py-3 pr-4 font-medium">Источник</th>
+                      <th className="py-3 pr-4 font-medium">Создан</th>
+                      <th className="py-3 pr-4 font-medium">VPN</th>
+                      <th className="py-3 font-medium">Комментарий</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {filteredNewUsers.map((user: RegistryUserInfo) => {
+                      const vpnClient = vpnMap.get(user.telegram_id) ?? null
+                      return (
+                        <tr key={user.id} className="border-b border-border last:border-0">
+                          <td className="py-4 pr-4 align-top">
+                            <p className="font-medium text-foreground">{user.username || "Без username"}</p>
+                            <p className="text-sm text-muted-foreground mt-1">ID: {user.telegram_id}</p>
+                          </td>
+                          <td className="py-4 pr-4 align-top text-sm text-foreground">{user.ref_source || "—"}</td>
+                          <td className="py-4 pr-4 align-top text-sm text-foreground">{formatAdminDate(user.created_at)}</td>
+                          <td className="py-4 pr-4 align-top">
+                            <div className="inline-flex items-center gap-2 text-sm text-foreground">
+                              <Wifi className="w-4 h-4 text-muted-foreground" />
+                              {vpnClient ? (vpnClient.active ? "VPN активен" : "VPN выключен") : "Нет клиента"}
+                            </div>
+                          </td>
+                          <td className="py-4 align-top text-sm text-muted-foreground">
+                            Без оплаченной истории в subscriptions
+                          </td>
+                        </tr>
+                      )
+                    })}
+                    {filteredNewUsers.length === 0 ? (
+                      <tr>
+                        <td colSpan={5} className="py-10 text-center text-muted-foreground">
+                          По этому фильтру пользователей нет.
+                        </td>
+                      </tr>
+                    ) : null}
+                  </tbody>
+                </table>
+              </div>
+            )}
           </div>
-
-          {/* Bulk Actions */}
-          {selectedUsers.length > 0 && (
-            <div className="fixed bottom-4 left-1/2 -translate-x-1/2 lg:left-auto lg:translate-x-0 lg:right-6 bg-card border border-border rounded-xl p-4 shadow-lg flex items-center gap-4">
-              <span className="text-sm text-muted-foreground">
-                Выбрано: <span className="font-medium text-foreground">{selectedUsers.length}</span>
-              </span>
-              <div className="flex items-center gap-2">
-                <button className="px-3 py-1.5 text-sm text-foreground hover:bg-secondary rounded-lg transition-colors">
-                  Изменить тариф
-                </button>
-                <button className="px-3 py-1.5 text-sm text-warning hover:bg-warning/10 rounded-lg transition-colors">
-                  Заблокировать
-                </button>
-                <button className="px-3 py-1.5 text-sm text-destructive hover:bg-destructive/10 rounded-lg transition-colors">
-                  Удалить
-                </button>
-              </div>
-            </div>
-          )}
         </main>
       </div>
     </div>

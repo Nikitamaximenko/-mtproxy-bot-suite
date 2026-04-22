@@ -4544,6 +4544,15 @@ def admin_cleanup_web_users(req: Request, db: Session = Depends(get_db)) -> Clea
     if not web_tg_ids:
         return CleanupWebUsersResponse(deleted_users=0, deleted_pending_subscriptions=0, kept_paid_subscriptions=0)
 
+    protected_web_tg_ids = db.execute(
+        select(Subscription.telegram_id)
+        .where(
+            Subscription.telegram_id.in_(web_tg_ids),
+            Subscription.payment_status.in_(["paid", "expired"]),
+        )
+        .distinct()
+    ).scalars().all()
+
     # Count paid subs we're keeping
     kept = db.execute(
         select(func.count()).select_from(Subscription).where(
@@ -4552,20 +4561,27 @@ def admin_cleanup_web_users(req: Request, db: Session = Depends(get_db)) -> Clea
         )
     ).scalar() or 0
 
-    # Delete pending subscriptions only
-    del_subs = db.execute(
-        delete(Subscription).where(
-            Subscription.telegram_id.in_(web_tg_ids),
-            Subscription.payment_status == "pending",
+    protected_set = {int(tg) for tg in protected_web_tg_ids}
+    deletable_web_tg_ids = [int(tg) for tg in web_tg_ids if int(tg) not in protected_set]
+
+    del_subs_rowcount = 0
+    del_users_rowcount = 0
+    if deletable_web_tg_ids:
+        # Delete pending subscriptions only for anonymous users that do not own kept paid rows.
+        del_subs = db.execute(
+            delete(Subscription).where(
+                Subscription.telegram_id.in_(deletable_web_tg_ids),
+                Subscription.payment_status == "pending",
+            )
         )
-    )
-    # Delete user rows
-    del_users = db.execute(delete(User).where(User.telegram_id < 0))
+        del_users = db.execute(delete(User).where(User.telegram_id.in_(deletable_web_tg_ids)))
+        del_subs_rowcount = int(del_subs.rowcount or 0)
+        del_users_rowcount = int(del_users.rowcount or 0)
     db.commit()
 
     return CleanupWebUsersResponse(
-        deleted_users=del_users.rowcount,
-        deleted_pending_subscriptions=del_subs.rowcount,
+        deleted_users=del_users_rowcount,
+        deleted_pending_subscriptions=del_subs_rowcount,
         kept_paid_subscriptions=kept,
     )
 
@@ -4712,29 +4728,50 @@ def _pick_effective_subscription_for_admin(rows: list[Subscription], now: dateti
     return rows[0]
 
 
+def _effective_subscription_map(telegram_ids: list[int], db: Session) -> dict[int, Subscription]:
+    """Return one effective subscription row per telegram_id using the same access logic as runtime."""
+    unique_tg_ids = sorted({int(tg) for tg in telegram_ids})
+    if not unique_tg_ids:
+        return {}
+
+    all_subs = db.execute(
+        select(Subscription)
+        .where(Subscription.telegram_id.in_(unique_tg_ids))
+        .order_by(Subscription.telegram_id.asc(), Subscription.created_at.desc())
+    ).scalars().all()
+
+    grouped: dict[int, list[Subscription]] = {}
+    for sub in all_subs:
+        grouped.setdefault(int(sub.telegram_id), []).append(sub)
+
+    now = utcnow()
+    return {
+        tg_id: _pick_effective_subscription_for_admin(rows, now)
+        for tg_id, rows in grouped.items()
+        if rows
+    }
+
+
 @app.get("/admin/users", response_model=AdminSubsResponse)
 def admin_users(req: Request, db: Session = Depends(get_db)) -> AdminSubsResponse:
-    """Unique users with their latest subscription status (one row per telegram_id)."""
+    """Unique users with their effective subscription status (one row per telegram_id)."""
     _require_admin(req)
-    latest_subq = _latest_subquery_for_telegram_ids(None)
+    tg_ids = db.execute(select(Subscription.telegram_id).distinct()).scalars().all()
+    effective_map = _effective_subscription_map([int(tg) for tg in tg_ids], db)
+    effective_rows = sorted(effective_map.values(), key=lambda s: s.created_at, reverse=True)
+    usernames = (
+        db.execute(
+            select(User.telegram_id, User.username).where(User.telegram_id.in_(list(effective_map.keys())))
+        ).all()
+        if effective_map
+        else []
+    )
+    username_map = {int(tg): uname for tg, uname in usernames}
+    paged_rows = effective_rows[:5000]
+    vpn_map = _vpn_state_map([int(s.telegram_id) for s in paged_rows], db)
 
-    rows = db.execute(
-        select(Subscription, User.username)
-        .join(
-            latest_subq,
-            and_(
-                Subscription.telegram_id == latest_subq.c.tg_id,
-                Subscription.created_at == latest_subq.c.max_created,
-            ),
-        )
-        .outerjoin(User, User.telegram_id == Subscription.telegram_id)
-        .order_by(Subscription.created_at.desc())
-        .limit(5000)
-    ).all()
-    vpn_map = _vpn_state_map([int(s.telegram_id) for s, _ in rows], db)
-
-    items = [_sub_info(s, uname, vpn_map) for s, uname in rows]
-    return AdminSubsResponse(subscriptions=items, total=len(items))
+    items = [_sub_info(s, username_map.get(int(s.telegram_id)), vpn_map) for s in paged_rows]
+    return AdminSubsResponse(subscriptions=items, total=len(effective_rows))
 
 
 class RegistryUserInfo(BaseModel):
@@ -4809,22 +4846,7 @@ def admin_users_overview(
             select(User.telegram_id, User.username).where(User.telegram_id.in_(paid_tg_ids))
         ).all()
         username_map = {int(tg): uname for tg, uname in users_rows}
-
-        all_subs = db.execute(
-            select(Subscription)
-            .where(Subscription.telegram_id.in_(paid_tg_ids))
-            .order_by(Subscription.telegram_id.asc(), Subscription.created_at.desc())
-        ).scalars().all()
-
-        grouped: dict[int, list[Subscription]] = {}
-        for s in all_subs:
-            grouped.setdefault(int(s.telegram_id), []).append(s)
-
-        for tg in paid_tg_ids:
-            rows = grouped.get(int(tg)) or []
-            if not rows:
-                continue
-            effective_rows.append(_pick_effective_subscription_for_admin(rows, utcnow()))
+        effective_rows = list(_effective_subscription_map(paid_tg_ids, db).values())
 
     effective_rows.sort(key=lambda s: s.created_at, reverse=True)
     effective_rows = effective_rows[:limit]
@@ -4951,21 +4973,13 @@ def admin_vpn_clients(req: Request, db: Session = Depends(get_db)) -> VpnClients
     ).scalars().all()
     tg_ids = [int(c.telegram_id) for c in clients]
     users_set: set[int] = set()
-    latest_sub_by_tg: dict[int, Subscription] = {}
+    effective_sub_by_tg: dict[int, Subscription] = {}
     if tg_ids:
         users_rows = db.execute(
             select(User.telegram_id).where(User.telegram_id.in_(tg_ids))
         ).all()
         users_set = {int(tg) for (tg,) in users_rows}
-        latest_sub_rows = db.execute(
-            select(Subscription)
-            .where(Subscription.telegram_id.in_(tg_ids))
-            .order_by(Subscription.telegram_id.asc(), Subscription.created_at.desc())
-        ).scalars().all()
-        for s in latest_sub_rows:
-            t = int(s.telegram_id)
-            if t not in latest_sub_by_tg:
-                latest_sub_by_tg[t] = s
+        effective_sub_by_tg = _effective_subscription_map(tg_ids, db)
     items = [
         VpnClientInfo(
             id=c.id,
@@ -4975,18 +4989,18 @@ def admin_vpn_clients(req: Request, db: Session = Depends(get_db)) -> VpnClients
             active=c.active,
             user_exists=int(c.telegram_id) in users_set,
             subscription_status=(
-                latest_sub_by_tg[int(c.telegram_id)].payment_status
-                if int(c.telegram_id) in latest_sub_by_tg
+                effective_sub_by_tg[int(c.telegram_id)].payment_status
+                if int(c.telegram_id) in effective_sub_by_tg
                 else None
             ),
             subscription_expires_at=(
-                latest_sub_by_tg[int(c.telegram_id)].expires_at
-                if int(c.telegram_id) in latest_sub_by_tg
+                effective_sub_by_tg[int(c.telegram_id)].expires_at
+                if int(c.telegram_id) in effective_sub_by_tg
                 else None
             ),
             subscription_access_suspended=(
-                bool(latest_sub_by_tg[int(c.telegram_id)].access_suspended)
-                if int(c.telegram_id) in latest_sub_by_tg
+                bool(effective_sub_by_tg[int(c.telegram_id)].access_suspended)
+                if int(c.telegram_id) in effective_sub_by_tg
                 else False
             ),
             traffic_used_gb=round(c.traffic_used_bytes / (1024 ** 3), 3),

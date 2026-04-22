@@ -1,296 +1,361 @@
 "use client"
 
-import { AdminSidebar } from "@/components/admin/AdminSidebar"
 import { AdminHeader } from "@/components/admin/AdminHeader"
-import { useState } from "react"
-import { 
-  TrendingUp,
-  TrendingDown,
-  Users,
-  DollarSign,
+import { AdminSidebar } from "@/components/admin/AdminSidebar"
+import {
+  AdminAuthError,
+  FunnelStats,
+  ProxyStatus,
+  Stats,
+  UsersOverview,
+  VpnClientsData,
+  VpnOnline,
+  clearStoredAdminKey,
+  fetchAdminJson,
+  formatNumber,
+  formatRubles,
+  formatTrafficGb,
+  getStoredAdminKey,
+} from "@/lib/admin"
+import {
   Activity,
-  Globe,
-  Calendar,
-  ArrowUpRight,
-  ArrowDownRight
+  AlertTriangle,
+  BarChart3,
+  Clock3,
+  Database,
+  DollarSign,
+  ShieldCheck,
+  Users,
 } from "lucide-react"
+import { useRouter } from "next/navigation"
+import { useCallback, useEffect, useState } from "react"
 
-const revenueData = [
-  { month: "Янв", revenue: 425000, users: 1850 },
-  { month: "Фев", revenue: 512000, users: 2100 },
-  { month: "Мар", revenue: 589000, users: 2340 },
-  { month: "Апр", revenue: 634000, users: 2450 },
-  { month: "Май", revenue: 721000, users: 2620 },
-  { month: "Июн", revenue: 847500, users: 2847 },
-]
+const REFRESH_MS = 30000
 
-const geoData = [
-  { country: "Россия", users: 1847, percentage: 65 },
-  { country: "Украина", users: 423, percentage: 15 },
-  { country: "Беларусь", users: 284, percentage: 10 },
-  { country: "Казахстан", users: 170, percentage: 6 },
-  { country: "Другие", users: 123, percentage: 4 },
-]
+function MetricCard({
+  label,
+  value,
+  hint,
+  icon: Icon,
+}: {
+  label: string
+  value: string
+  hint: string
+  icon: typeof Users
+}) {
+  return (
+    <div className="bg-card rounded-xl p-5 border border-border">
+      <div className="flex items-center justify-between gap-3">
+        <div>
+          <p className="text-sm text-muted-foreground">{label}</p>
+          <p className="text-2xl font-semibold text-foreground mt-2">{value}</p>
+        </div>
+        <div className="w-11 h-11 rounded-xl bg-primary/10 text-primary flex items-center justify-center shrink-0">
+          <Icon className="w-5 h-5" />
+        </div>
+      </div>
+      <p className="text-xs text-muted-foreground mt-3">{hint}</p>
+    </div>
+  )
+}
 
-const planDistribution = [
-  { plan: "Premium", users: 847, revenue: 847000, color: "bg-warning" },
-  { plan: "Basic", users: 1423, revenue: 711500, color: "bg-primary" },
-  { plan: "Free (Trial)", users: 577, revenue: 0, color: "bg-muted" },
-]
+function HealthBadge({ proxy }: { proxy: ProxyStatus | null }) {
+  if (!proxy) {
+    return <span className="text-xs text-muted-foreground">Нет данных</span>
+  }
 
-const hourlyActivity = Array.from({ length: 24 }, (_, i) => ({
-  hour: i,
-  users: Math.floor(Math.random() * 500) + 100 + (i >= 10 && i <= 22 ? 800 : 0)
-}))
+  if (!proxy.online) {
+    return (
+      <span className="inline-flex items-center gap-2 rounded-full bg-destructive/10 px-3 py-1 text-xs font-medium text-destructive">
+        <span className="w-2 h-2 rounded-full bg-destructive" />
+        Offline
+      </span>
+    )
+  }
 
-export default function AnalyticsPage() {
-  const [period, setPeriod] = useState<"week" | "month" | "year">("month")
-  
-  const maxRevenue = Math.max(...revenueData.map(d => d.revenue))
-  const totalRevenue = revenueData[revenueData.length - 1].revenue
-  const prevRevenue = revenueData[revenueData.length - 2].revenue
-  const revenueChange = ((totalRevenue - prevRevenue) / prevRevenue * 100).toFixed(1)
-  
-  const totalUsers = revenueData[revenueData.length - 1].users
-  const prevUsers = revenueData[revenueData.length - 2].users
-  const usersChange = ((totalUsers - prevUsers) / prevUsers * 100).toFixed(1)
-
-  const maxHourlyUsers = Math.max(...hourlyActivity.map(h => h.users))
+  if (proxy.degraded) {
+    return (
+      <span className="inline-flex items-center gap-2 rounded-full bg-warning/10 px-3 py-1 text-xs font-medium text-warning">
+        <span className="w-2 h-2 rounded-full bg-warning" />
+        Degraded
+      </span>
+    )
+  }
 
   return (
-    <div className="flex min-h-screen">
+    <span className="inline-flex items-center gap-2 rounded-full bg-success/10 px-3 py-1 text-xs font-medium text-success">
+      <span className="w-2 h-2 rounded-full bg-success" />
+      Online
+    </span>
+  )
+}
+
+export default function AnalyticsPage() {
+  const router = useRouter()
+  const [stats, setStats] = useState<Stats | null>(null)
+  const [funnel, setFunnel] = useState<FunnelStats | null>(null)
+  const [overview, setOverview] = useState<UsersOverview | null>(null)
+  const [proxy, setProxy] = useState<ProxyStatus | null>(null)
+  const [vpnOnline, setVpnOnline] = useState<VpnOnline | null>(null)
+  const [vpnClients, setVpnClients] = useState<VpnClientsData | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState("")
+
+  const loadData = useCallback(
+    async (adminKey: string) => {
+      setLoading(true)
+      setError("")
+      try {
+        const [statsData, funnelData, overviewData, proxyData, vpnOnlineData, vpnClientsData] =
+          await Promise.all([
+            fetchAdminJson<Stats>("/api/admin/stats", adminKey),
+            fetchAdminJson<FunnelStats>("/api/admin/funnel", adminKey),
+            fetchAdminJson<UsersOverview>("/api/admin/users-overview", adminKey),
+            fetchAdminJson<ProxyStatus>("/api/admin/proxy-status", adminKey),
+            fetchAdminJson<VpnOnline>("/api/admin/vpn-online", adminKey),
+            fetchAdminJson<VpnClientsData>("/api/admin/vpn-clients", adminKey),
+          ])
+
+        setStats(statsData)
+        setFunnel(funnelData)
+        setOverview(overviewData)
+        setProxy(proxyData)
+        setVpnOnline(vpnOnlineData)
+        setVpnClients(vpnClientsData)
+      } catch (err) {
+        if (err instanceof AdminAuthError) {
+          clearStoredAdminKey()
+          router.replace("/admin")
+          return
+        }
+        setError(err instanceof Error ? err.message : "Не удалось загрузить live-данные")
+      } finally {
+        setLoading(false)
+      }
+    },
+    [router],
+  )
+
+  useEffect(() => {
+    const adminKey = getStoredAdminKey()
+    if (!adminKey) {
+      router.replace("/admin")
+      return
+    }
+    void loadData(adminKey)
+  }, [loadData, router])
+
+  useEffect(() => {
+    const adminKey = getStoredAdminKey()
+    if (!adminKey) return
+    const timer = setInterval(() => {
+      void loadData(adminKey)
+    }, REFRESH_MS)
+    return () => clearInterval(timer)
+  }, [loadData])
+
+  const analyticsScoped =
+    Boolean(stats?.analytics_scoped) ||
+    Boolean(funnel?.analytics_scoped) ||
+    Boolean(overview?.analytics_scoped)
+
+  const trialClaimed = stats?.trial_offers_claimed ?? 0
+  const trialConverted = stats?.trial_converted_to_paid ?? 0
+  const trialConversionRate = trialClaimed > 0 ? Math.round((trialConverted / trialClaimed) * 100) : 0
+
+  return (
+    <div className="flex min-h-screen bg-background">
       <AdminSidebar />
-      
+
       <div className="flex-1 lg:ml-64">
-        <AdminHeader title="Аналитика" subtitle="Статистика и метрики" />
-        
+        <AdminHeader
+          title="Аналитика"
+          subtitle="Только live-статистика из backend и БД"
+          note="Автообновление каждые 30 секунд"
+        />
+
         <main className="p-4 lg:p-6 space-y-6">
-          {/* Period Selector */}
-          <div className="flex items-center justify-between">
-            <h2 className="text-lg font-semibold text-foreground">Обзор</h2>
-            <div className="flex items-center gap-1 bg-secondary rounded-lg p-1">
-              {(["week", "month", "year"] as const).map((p) => (
-                <button
-                  key={p}
-                  onClick={() => setPeriod(p)}
-                  className={`px-4 py-1.5 text-sm font-medium rounded-md transition-colors ${
-                    period === p 
-                      ? 'bg-card text-foreground shadow-sm' 
-                      : 'text-muted-foreground hover:text-foreground'
-                  }`}
-                >
-                  {p === 'week' ? 'Неделя' : p === 'month' ? 'Месяц' : 'Год'}
-                </button>
-              ))}
+          {analyticsScoped ? (
+            <div className="rounded-xl border border-warning/30 bg-warning/10 px-4 py-3 text-sm text-foreground">
+              Метрики ограничены серверным списком <code>ANALYTICS_PRODUCTION_TG_IDS</code>, не всей базой.
             </div>
-          </div>
+          ) : null}
 
-          {/* Key Metrics */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-            <div className="bg-card rounded-xl p-5 border border-border">
-              <div className="flex items-center justify-between">
-                <div className="w-10 h-10 rounded-lg bg-success/10 flex items-center justify-center">
-                  <DollarSign className="w-5 h-5 text-success" />
-                </div>
-                <div className={`flex items-center gap-1 text-xs font-medium text-success`}>
-                  <ArrowUpRight className="w-3 h-3" />
-                  +{revenueChange}%
-                </div>
-              </div>
-              <p className="text-2xl font-bold text-foreground mt-4">
-                {(totalRevenue / 1000).toFixed(0)}K ₽
-              </p>
-              <p className="text-sm text-muted-foreground">Выручка за месяц</p>
+          {error ? (
+            <div className="rounded-xl border border-destructive/30 bg-destructive/10 px-4 py-3 text-sm text-destructive">
+              {error}
             </div>
+          ) : null}
 
-            <div className="bg-card rounded-xl p-5 border border-border">
-              <div className="flex items-center justify-between">
-                <div className="w-10 h-10 rounded-lg bg-primary/10 flex items-center justify-center">
-                  <Users className="w-5 h-5 text-primary" />
-                </div>
-                <div className={`flex items-center gap-1 text-xs font-medium text-success`}>
-                  <ArrowUpRight className="w-3 h-3" />
-                  +{usersChange}%
-                </div>
-              </div>
-              <p className="text-2xl font-bold text-foreground mt-4">{totalUsers.toLocaleString()}</p>
-              <p className="text-sm text-muted-foreground">Активных пользователей</p>
+          {loading && !stats && !funnel ? (
+            <div className="rounded-xl border border-border bg-card px-4 py-10 text-center text-muted-foreground">
+              Загружаю live-метрики…
             </div>
+          ) : null}
 
-            <div className="bg-card rounded-xl p-5 border border-border">
-              <div className="flex items-center justify-between">
-                <div className="w-10 h-10 rounded-lg bg-warning/10 flex items-center justify-center">
-                  <TrendingUp className="w-5 h-5 text-warning" />
-                </div>
-                <div className={`flex items-center gap-1 text-xs font-medium text-success`}>
-                  <ArrowUpRight className="w-3 h-3" />
-                  +5.2%
-                </div>
+          {stats && funnel ? (
+            <>
+              <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
+                <MetricCard
+                  label="Telegram-пользователи"
+                  value={formatNumber(stats.tg_users)}
+                  hint={`Новых за 7 дней: ${formatNumber(funnel.tg_users_7d)}`}
+                  icon={Users}
+                />
+                <MetricCard
+                  label="Активные подписки"
+                  value={formatNumber(stats.active_subscriptions)}
+                  hint={`Истекли: ${formatNumber(stats.expired_subscriptions)} · ждут оплату: ${formatNumber(stats.pending_payments)}`}
+                  icon={ShieldCheck}
+                />
+                <MetricCard
+                  label="Выручка"
+                  value={formatRubles(stats.revenue_estimate)}
+                  hint="Оценка по завершённым оплаченным периодам"
+                  icon={DollarSign}
+                />
+                <MetricCard
+                  label="Пробный день"
+                  value={`${formatNumber(trialConverted)} / ${formatNumber(trialClaimed)}`}
+                  hint={`Конверсия в оплату: ${trialConversionRate}%`}
+                  icon={Activity}
+                />
               </div>
-              <p className="text-2xl font-bold text-foreground mt-4">297 ₽</p>
-              <p className="text-sm text-muted-foreground">Ср. чек</p>
-            </div>
 
-            <div className="bg-card rounded-xl p-5 border border-border">
-              <div className="flex items-center justify-between">
-                <div className="w-10 h-10 rounded-lg bg-ice/10 flex items-center justify-center">
-                  <Activity className="w-5 h-5 text-ice" />
-                </div>
-                <div className={`flex items-center gap-1 text-xs font-medium text-destructive`}>
-                  <ArrowDownRight className="w-3 h-3" />
-                  -2.1%
-                </div>
-              </div>
-              <p className="text-2xl font-bold text-foreground mt-4">4.2%</p>
-              <p className="text-sm text-muted-foreground">Отток (Churn)</p>
-            </div>
-          </div>
-
-          {/* Charts Row */}
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-            {/* Revenue Chart */}
-            <div className="lg:col-span-2 bg-card rounded-xl p-5 border border-border">
-              <div className="flex items-center justify-between mb-6">
-                <div>
-                  <h3 className="font-semibold text-foreground">Выручка</h3>
-                  <p className="text-sm text-muted-foreground">Динамика за 6 месяцев</p>
-                </div>
-              </div>
-              
-              <div className="flex items-end justify-between h-48 gap-4">
-                {revenueData.map((data, i) => (
-                  <div key={i} className="flex-1 flex flex-col items-center gap-2">
-                    <span className="text-xs text-muted-foreground">
-                      {(data.revenue / 1000).toFixed(0)}K
-                    </span>
-                    <div 
-                      className="w-full bg-primary/20 rounded-t relative overflow-hidden"
-                      style={{ height: `${(data.revenue / maxRevenue) * 140}px` }}
-                    >
-                      <div 
-                        className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-primary to-primary/70 rounded-t"
-                        style={{ height: '100%' }}
-                      />
-                    </div>
-                    <span className="text-xs text-muted-foreground">{data.month}</span>
+              <section className="bg-card rounded-xl border border-border p-5">
+                <div className="flex items-center gap-2 mb-5">
+                  <BarChart3 className="w-5 h-5 text-primary" />
+                  <div>
+                    <h2 className="font-semibold text-foreground">Живая воронка</h2>
+                    <p className="text-sm text-muted-foreground">Без синтетических графиков, только реальные счётчики</p>
                   </div>
-                ))}
-              </div>
-            </div>
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-5 gap-4">
+                  {[
+                    { label: "Запустили бота", value: funnel.tg_users, note: `7 дней: ${formatNumber(funnel.tg_users_7d)}` },
+                    { label: "Дошли до checkout", value: funnel.tg_checkout, note: `7 дней: ${formatNumber(funnel.tg_checkout_7d)}` },
+                    { label: "Получили ссылку оплаты", value: funnel.tg_payment_link, note: "Уникальные TG-пользователи" },
+                    { label: "Оплатили", value: funnel.tg_paid, note: `7 дней: ${formatNumber(funnel.tg_paid_7d)}` },
+                    { label: "Активны сейчас", value: funnel.active_now, note: "Оплата/триал + срок не истёк" },
+                  ].map((item) => (
+                    <div key={item.label} className="rounded-xl bg-secondary/50 border border-border p-4">
+                      <p className="text-sm text-muted-foreground">{item.label}</p>
+                      <p className="text-2xl font-semibold text-foreground mt-2">{formatNumber(item.value)}</p>
+                      <p className="text-xs text-muted-foreground mt-2">{item.note}</p>
+                    </div>
+                  ))}
+                </div>
 
-            {/* Plan Distribution */}
-            <div className="bg-card rounded-xl p-5 border border-border">
-              <h3 className="font-semibold text-foreground mb-4">Распределение тарифов</h3>
-              <div className="space-y-4">
-                {planDistribution.map((plan) => (
-                  <div key={plan.plan}>
-                    <div className="flex items-center justify-between text-sm mb-2">
-                      <span className="text-foreground font-medium">{plan.plan}</span>
-                      <span className="text-muted-foreground">{plan.users} пользователей</span>
-                    </div>
-                    <div className="w-full h-3 bg-secondary rounded-full overflow-hidden">
-                      <div 
-                        className={`h-full rounded-full ${plan.color}`}
-                        style={{ width: `${(plan.users / totalUsers) * 100}%` }}
-                      />
-                    </div>
-                    <p className="text-xs text-muted-foreground mt-1">
-                      {plan.revenue > 0 ? `${(plan.revenue / 1000).toFixed(0)}K ₽ выручки` : 'Бесплатный период'}
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mt-4">
+                  <div className="rounded-xl bg-secondary/50 border border-border p-4">
+                    <p className="text-sm text-muted-foreground">Веб-пользователи</p>
+                    <p className="text-2xl font-semibold text-foreground mt-2">{formatNumber(funnel.web_users)}</p>
+                    <p className="text-xs text-muted-foreground mt-2">Оплатили: {formatNumber(funnel.web_paid)}</p>
+                  </div>
+                  <div className="rounded-xl bg-secondary/50 border border-border p-4">
+                    <p className="text-sm text-muted-foreground">Маркетинг nudges</p>
+                    <p className="text-2xl font-semibold text-foreground mt-2">
+                      {formatNumber(funnel.nudge_1_sent)} / {formatNumber(funnel.nudge_2_sent)} / {formatNumber(funnel.nudge_3_sent)}
                     </p>
+                    <p className="text-xs text-muted-foreground mt-2">Конвертировали в оплату: {formatNumber(funnel.nudge_converted)}</p>
                   </div>
-                ))}
-              </div>
-            </div>
-          </div>
+                  <div className="rounded-xl bg-secondary/50 border border-border p-4">
+                    <p className="text-sm text-muted-foreground">Отписались от маркетинга</p>
+                    <p className="text-2xl font-semibold text-foreground mt-2">{formatNumber(funnel.opted_out)}</p>
+                    <p className="text-xs text-muted-foreground mt-2">Всего записей users: {formatNumber(overview?.users_table_total ?? 0)}</p>
+                  </div>
+                </div>
+              </section>
 
-          {/* Second Row */}
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            {/* Geography */}
-            <div className="bg-card rounded-xl p-5 border border-border">
-              <div className="flex items-center justify-between mb-4">
-                <h3 className="font-semibold text-foreground">География пользователей</h3>
-                <Globe className="w-4 h-4 text-muted-foreground" />
-              </div>
-              <div className="space-y-3">
-                {geoData.map((geo) => (
-                  <div key={geo.country} className="flex items-center gap-4">
-                    <div className="w-20 text-sm text-foreground">{geo.country}</div>
-                    <div className="flex-1">
-                      <div className="w-full h-2 bg-secondary rounded-full overflow-hidden">
-                        <div 
-                          className="h-full bg-primary rounded-full"
-                          style={{ width: `${geo.percentage}%` }}
-                        />
+              <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
+                <section className="bg-card rounded-xl border border-border p-5">
+                  <div className="flex items-center gap-2 mb-5">
+                    <Database className="w-5 h-5 text-primary" />
+                    <div>
+                      <h2 className="font-semibold text-foreground">Источники трафика</h2>
+                      <p className="text-sm text-muted-foreground">Пользователи и оплата по реальным ref_source</p>
+                    </div>
+                  </div>
+
+                  {funnel.source_stats.length === 0 ? (
+                    <p className="text-sm text-muted-foreground">Источник не зафиксирован ни у одной записи.</p>
+                  ) : (
+                    <div className="space-y-3">
+                      {funnel.source_stats.map((source) => {
+                        const conversion = source.users > 0 ? Math.round((source.paid / source.users) * 100) : 0
+                        return (
+                          <div key={source.source ?? "unknown"} className="rounded-xl bg-secondary/50 border border-border p-4">
+                            <div className="flex items-start justify-between gap-3">
+                              <div>
+                                <p className="font-medium text-foreground">{source.source ?? "Без source"}</p>
+                                <p className="text-sm text-muted-foreground mt-1">
+                                  {formatNumber(source.users)} пользователей · {formatNumber(source.paid)} оплатили
+                                </p>
+                              </div>
+                              <span className="text-sm font-medium text-primary">{conversion}%</span>
+                            </div>
+                          </div>
+                        )
+                      })}
+                    </div>
+                  )}
+                </section>
+
+                <section className="bg-card rounded-xl border border-border p-5">
+                  <div className="flex items-center gap-2 mb-5">
+                    <Clock3 className="w-5 h-5 text-primary" />
+                    <div>
+                      <h2 className="font-semibold text-foreground">Инфраструктура сейчас</h2>
+                      <p className="text-sm text-muted-foreground">Текущее состояние MTProxy и VPN без выдуманных серверов</p>
+                    </div>
+                  </div>
+
+                  <div className="space-y-4">
+                    <div className="rounded-xl bg-secondary/50 border border-border p-4">
+                      <div className="flex items-center justify-between gap-3">
+                        <div>
+                          <p className="text-sm text-muted-foreground">MTProxy</p>
+                          <p className="font-medium text-foreground mt-1">
+                            {proxy ? `${proxy.server}:${proxy.port}` : "Нет данных"}
+                          </p>
+                        </div>
+                        <HealthBadge proxy={proxy} />
+                      </div>
+                      <p className="text-xs text-muted-foreground mt-3">
+                        Латентность: {proxy?.latency_ms != null ? `${proxy.latency_ms} ms` : "—"} · handshake: {proxy?.handshake ?? "—"}
+                      </p>
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      <div className="rounded-xl bg-secondary/50 border border-border p-4">
+                        <p className="text-sm text-muted-foreground">VPN online сейчас</p>
+                        <p className="text-2xl font-semibold text-foreground mt-2">
+                          {formatNumber(vpnOnline?.online ?? 0)}
+                        </p>
+                        <p className="text-xs text-muted-foreground mt-2">Онлайн-сессии по backend endpoint `/vpn/online`</p>
+                      </div>
+                      <div className="rounded-xl bg-secondary/50 border border-border p-4">
+                        <p className="text-sm text-muted-foreground">VPN-клиенты</p>
+                        <p className="text-2xl font-semibold text-foreground mt-2">
+                          {formatNumber(vpnClients?.active_count ?? 0)} / {formatNumber(vpnClients?.total ?? 0)}
+                        </p>
+                        <p className="text-xs text-muted-foreground mt-2">
+                          Активны · трафик: {formatTrafficGb(vpnClients?.total_traffic_gb ?? 0)}
+                        </p>
                       </div>
                     </div>
-                    <div className="w-16 text-right">
-                      <span className="text-sm font-medium text-foreground">{geo.percentage}%</span>
-                    </div>
-                    <div className="w-16 text-right">
-                      <span className="text-xs text-muted-foreground">{geo.users}</span>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
 
-            {/* Hourly Activity */}
-            <div className="bg-card rounded-xl p-5 border border-border">
-              <div className="flex items-center justify-between mb-4">
-                <h3 className="font-semibold text-foreground">Активность по часам</h3>
-                <Activity className="w-4 h-4 text-muted-foreground" />
-              </div>
-              <div className="flex items-end gap-1 h-32">
-                {hourlyActivity.map((hour) => (
-                  <div 
-                    key={hour.hour}
-                    className="flex-1 bg-primary/30 rounded-t hover:bg-primary/50 transition-colors cursor-pointer group relative"
-                    style={{ height: `${(hour.users / maxHourlyUsers) * 100}%` }}
-                  >
-                    <div className="opacity-0 group-hover:opacity-100 absolute -top-8 left-1/2 -translate-x-1/2 bg-foreground text-background text-xs px-2 py-1 rounded whitespace-nowrap transition-opacity">
-                      {hour.hour}:00 — {hour.users}
-                    </div>
+                    {proxy?.degraded ? (
+                      <div className="rounded-xl border border-warning/30 bg-warning/10 px-4 py-3 text-sm text-foreground flex items-start gap-2">
+                        <AlertTriangle className="w-4 h-4 mt-0.5 text-warning shrink-0" />
+                        Порт отвечает, но поведение не похоже на нормальный MTProxy. Telegram-клиентам это может мешать.
+                      </div>
+                    ) : null}
                   </div>
-                ))}
+                </section>
               </div>
-              <div className="flex justify-between mt-2 text-xs text-muted-foreground">
-                <span>00:00</span>
-                <span>06:00</span>
-                <span>12:00</span>
-                <span>18:00</span>
-                <span>24:00</span>
-              </div>
-            </div>
-          </div>
-
-          {/* Conversion Funnel */}
-          <div className="bg-card rounded-xl p-5 border border-border">
-            <h3 className="font-semibold text-foreground mb-4">Воронка конверсий</h3>
-            <div className="flex items-center justify-between gap-4">
-              {[
-                { label: "Посетители", value: 12450, percentage: 100 },
-                { label: "Запустили бота", value: 5678, percentage: 45.6 },
-                { label: "Активировали trial", value: 3421, percentage: 27.5 },
-                { label: "Оплатили", value: 2270, percentage: 18.2 },
-                { label: "Продлили", value: 1847, percentage: 14.8 },
-              ].map((step, i) => (
-                <div key={step.label} className="flex-1 text-center">
-                  <div 
-                    className="mx-auto mb-3 bg-primary/20 rounded-lg flex items-center justify-center"
-                    style={{ 
-                      width: `${40 + step.percentage * 0.6}%`,
-                      height: `${60 + step.percentage * 0.4}px`,
-                      minWidth: '60px'
-                    }}
-                  >
-                    <span className="text-sm font-semibold text-primary">{step.percentage}%</span>
-                  </div>
-                  <p className="text-lg font-bold text-foreground">{step.value.toLocaleString()}</p>
-                  <p className="text-xs text-muted-foreground">{step.label}</p>
-                </div>
-              ))}
-            </div>
-          </div>
+            </>
+          ) : null}
         </main>
       </div>
     </div>

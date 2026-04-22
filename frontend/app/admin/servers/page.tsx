@@ -1,469 +1,338 @@
 "use client"
 
-import { AdminSidebar } from "@/components/admin/AdminSidebar"
 import { AdminHeader } from "@/components/admin/AdminHeader"
-import { useState } from "react"
-import { 
-  Server, 
-  Power, 
-  RefreshCw, 
-  Settings,
-  Plus,
-  MoreVertical,
-  Globe,
-  Users,
-  Zap,
-  HardDrive,
-  Cpu,
-  Wifi,
+import { AdminSidebar } from "@/components/admin/AdminSidebar"
+import {
+  AdminAuthError,
+  ProxyStatus,
+  Stats,
+  VpnClientsData,
+  VpnOnline,
+  clearStoredAdminKey,
+  fetchAdminJson,
+  formatAdminDate,
+  formatNumber,
+  formatTrafficGb,
+  getStoredAdminKey,
+} from "@/lib/admin"
+import {
   AlertTriangle,
-  Check,
-  X,
-  Copy,
-  ExternalLink
+  Clock3,
+  Search,
+  Server,
+  ShieldCheck,
+  Users,
+  Wifi,
 } from "lucide-react"
+import { useRouter } from "next/navigation"
+import { useCallback, useEffect, useMemo, useState } from "react"
 
-interface ServerData {
-  id: string
-  name: string
-  location: string
-  ip: string
-  port: number
-  status: "online" | "offline" | "maintenance"
-  load: number
-  users: number
-  maxUsers: number
-  latency: number
-  uptime: string
-  cpu: number
-  ram: number
-  bandwidth: { used: number; total: number }
+const REFRESH_MS = 30000
+
+function proxyStateLabel(proxy: ProxyStatus | null) {
+  if (!proxy) return "Нет данных"
+  if (!proxy.online) return "Offline"
+  if (proxy.degraded) return "Degraded"
+  return "Online"
 }
 
-const servers: ServerData[] = [
-  { 
-    id: "eu-1",
-    name: "EU-1 Frankfurt", 
-    location: "Frankfurt, DE",
-    ip: "45.142.XXX.XXX",
-    port: 443,
-    status: "online",
-    load: 78,
-    users: 423,
-    maxUsers: 600,
-    latency: 12,
-    uptime: "99.98%",
-    cpu: 65,
-    ram: 72,
-    bandwidth: { used: 847, total: 1000 }
-  },
-  { 
-    id: "eu-2",
-    name: "EU-2 Amsterdam", 
-    location: "Amsterdam, NL",
-    ip: "185.234.XXX.XXX",
-    port: 443,
-    status: "online",
-    load: 45,
-    users: 267,
-    maxUsers: 600,
-    latency: 18,
-    uptime: "99.95%",
-    cpu: 42,
-    ram: 48,
-    bandwidth: { used: 523, total: 1000 }
-  },
-  { 
-    id: "eu-3",
-    name: "EU-3 London", 
-    location: "London, UK",
-    ip: "91.207.XXX.XXX",
-    port: 443,
-    status: "online",
-    load: 62,
-    users: 341,
-    maxUsers: 500,
-    latency: 24,
-    uptime: "99.92%",
-    cpu: 58,
-    ram: 61,
-    bandwidth: { used: 678, total: 1000 }
-  },
-  { 
-    id: "us-1",
-    name: "US-1 New York", 
-    location: "New York, US",
-    ip: "104.238.XXX.XXX",
-    port: 443,
-    status: "online",
-    load: 34,
-    users: 189,
-    maxUsers: 400,
-    latency: 89,
-    uptime: "99.99%",
-    cpu: 28,
-    ram: 35,
-    bandwidth: { used: 312, total: 1000 }
-  },
-  { 
-    id: "us-2",
-    name: "US-2 Los Angeles", 
-    location: "Los Angeles, US",
-    ip: "209.141.XXX.XXX",
-    port: 443,
-    status: "maintenance",
-    load: 0,
-    users: 0,
-    maxUsers: 400,
-    latency: 0,
-    uptime: "98.50%",
-    cpu: 0,
-    ram: 0,
-    bandwidth: { used: 0, total: 1000 }
-  },
-  { 
-    id: "as-1",
-    name: "AS-1 Singapore", 
-    location: "Singapore, SG",
-    ip: "139.99.XXX.XXX",
-    port: 443,
-    status: "online",
-    load: 91,
-    users: 512,
-    maxUsers: 500,
-    latency: 67,
-    uptime: "99.87%",
-    cpu: 89,
-    ram: 92,
-    bandwidth: { used: 945, total: 1000 }
-  },
-]
-
-function ServerCard({ server }: { server: ServerData }) {
-  const [showMenu, setShowMenu] = useState(false)
-  const [copied, setCopied] = useState(false)
-
-  const copyIP = () => {
-    navigator.clipboard.writeText(`${server.ip}:${server.port}`)
-    setCopied(true)
-    setTimeout(() => setCopied(false), 2000)
+function subscriptionLabel(status: string | null | undefined) {
+  switch (status) {
+    case "paid":
+      return "Оплачено"
+    case "trial":
+      return "Триал"
+    case "expired":
+      return "Истекло"
+    case "pending":
+      return "Ожидает оплату"
+    default:
+      return "—"
   }
-
-  const statusColors = {
-    online: "bg-success",
-    offline: "bg-destructive",
-    maintenance: "bg-warning"
-  }
-
-  const statusLabels = {
-    online: "Online",
-    offline: "Offline",
-    maintenance: "Maintenance"
-  }
-
-  return (
-    <div className="bg-card rounded-xl border border-border overflow-hidden">
-      {/* Header */}
-      <div className="p-4 border-b border-border">
-        <div className="flex items-start justify-between">
-          <div className="flex items-center gap-3">
-            <div className={`w-10 h-10 rounded-lg ${
-              server.status === 'online' ? 'bg-primary' : 
-              server.status === 'maintenance' ? 'bg-warning' : 'bg-muted'
-            } flex items-center justify-center`}>
-              <Server className="w-5 h-5 text-white" />
-            </div>
-            <div>
-              <h3 className="font-semibold text-foreground">{server.name}</h3>
-              <p className="text-sm text-muted-foreground">{server.location}</p>
-            </div>
-          </div>
-          <div className="relative">
-            <button 
-              onClick={() => setShowMenu(!showMenu)}
-              className="p-2 hover:bg-secondary rounded-lg transition-colors"
-            >
-              <MoreVertical className="w-4 h-4 text-muted-foreground" />
-            </button>
-            {showMenu && (
-              <div className="absolute right-0 top-10 w-48 bg-card border border-border rounded-lg shadow-lg z-10">
-                <button className="w-full flex items-center gap-2 px-4 py-2.5 text-sm text-foreground hover:bg-secondary transition-colors">
-                  <RefreshCw className="w-4 h-4" />
-                  Перезагрузить
-                </button>
-                <button className="w-full flex items-center gap-2 px-4 py-2.5 text-sm text-foreground hover:bg-secondary transition-colors">
-                  <Settings className="w-4 h-4" />
-                  Настройки
-                </button>
-                <button className="w-full flex items-center gap-2 px-4 py-2.5 text-sm text-destructive hover:bg-secondary transition-colors">
-                  <Power className="w-4 h-4" />
-                  {server.status === 'online' ? 'Остановить' : 'Запустить'}
-                </button>
-              </div>
-            )}
-          </div>
-        </div>
-
-        {/* Status badge */}
-        <div className="flex items-center gap-2 mt-3">
-          <span className={`inline-flex items-center gap-1.5 text-xs font-medium px-2.5 py-1 rounded-full ${
-            server.status === 'online' ? 'bg-success/10 text-success' :
-            server.status === 'maintenance' ? 'bg-warning/10 text-warning' :
-            'bg-destructive/10 text-destructive'
-          }`}>
-            <span className={`w-1.5 h-1.5 rounded-full ${statusColors[server.status]}`} />
-            {statusLabels[server.status]}
-          </span>
-          <span className="text-xs text-muted-foreground">Uptime: {server.uptime}</span>
-        </div>
-      </div>
-
-      {/* Stats */}
-      <div className="p-4 space-y-4">
-        {/* IP Address */}
-        <div className="flex items-center justify-between">
-          <span className="text-sm text-muted-foreground">IP:Port</span>
-          <div className="flex items-center gap-2">
-            <code className="text-sm font-mono text-foreground bg-secondary px-2 py-0.5 rounded">
-              {server.ip}:{server.port}
-            </code>
-            <button 
-              onClick={copyIP}
-              className="p-1 hover:bg-secondary rounded transition-colors"
-            >
-              {copied ? <Check className="w-3.5 h-3.5 text-success" /> : <Copy className="w-3.5 h-3.5 text-muted-foreground" />}
-            </button>
-          </div>
-        </div>
-
-        {/* Users */}
-        <div>
-          <div className="flex items-center justify-between text-sm mb-1.5">
-            <span className="text-muted-foreground flex items-center gap-1.5">
-              <Users className="w-3.5 h-3.5" />
-              Пользователей
-            </span>
-            <span className="text-foreground font-medium">{server.users} / {server.maxUsers}</span>
-          </div>
-          <div className="w-full h-2 bg-secondary rounded-full overflow-hidden">
-            <div 
-              className={`h-full rounded-full ${
-                (server.users / server.maxUsers) > 0.9 ? 'bg-destructive' :
-                (server.users / server.maxUsers) > 0.7 ? 'bg-warning' : 'bg-primary'
-              }`}
-              style={{ width: `${(server.users / server.maxUsers) * 100}%` }}
-            />
-          </div>
-        </div>
-
-        {/* CPU */}
-        <div>
-          <div className="flex items-center justify-between text-sm mb-1.5">
-            <span className="text-muted-foreground flex items-center gap-1.5">
-              <Cpu className="w-3.5 h-3.5" />
-              CPU
-            </span>
-            <span className="text-foreground font-medium">{server.cpu}%</span>
-          </div>
-          <div className="w-full h-2 bg-secondary rounded-full overflow-hidden">
-            <div 
-              className={`h-full rounded-full ${
-                server.cpu > 80 ? 'bg-destructive' :
-                server.cpu > 60 ? 'bg-warning' : 'bg-success'
-              }`}
-              style={{ width: `${server.cpu}%` }}
-            />
-          </div>
-        </div>
-
-        {/* RAM */}
-        <div>
-          <div className="flex items-center justify-between text-sm mb-1.5">
-            <span className="text-muted-foreground flex items-center gap-1.5">
-              <HardDrive className="w-3.5 h-3.5" />
-              RAM
-            </span>
-            <span className="text-foreground font-medium">{server.ram}%</span>
-          </div>
-          <div className="w-full h-2 bg-secondary rounded-full overflow-hidden">
-            <div 
-              className={`h-full rounded-full ${
-                server.ram > 80 ? 'bg-destructive' :
-                server.ram > 60 ? 'bg-warning' : 'bg-success'
-              }`}
-              style={{ width: `${server.ram}%` }}
-            />
-          </div>
-        </div>
-
-        {/* Bandwidth */}
-        <div>
-          <div className="flex items-center justify-between text-sm mb-1.5">
-            <span className="text-muted-foreground flex items-center gap-1.5">
-              <Wifi className="w-3.5 h-3.5" />
-              Bandwidth
-            </span>
-            <span className="text-foreground font-medium">{server.bandwidth.used} / {server.bandwidth.total} GB</span>
-          </div>
-          <div className="w-full h-2 bg-secondary rounded-full overflow-hidden">
-            <div 
-              className="h-full rounded-full bg-primary"
-              style={{ width: `${(server.bandwidth.used / server.bandwidth.total) * 100}%` }}
-            />
-          </div>
-        </div>
-
-        {/* Latency */}
-        <div className="flex items-center justify-between pt-2 border-t border-border">
-          <span className="text-sm text-muted-foreground flex items-center gap-1.5">
-            <Zap className="w-3.5 h-3.5" />
-            Латентность
-          </span>
-          <span className={`text-sm font-medium ${
-            server.latency < 30 ? 'text-success' :
-            server.latency < 100 ? 'text-warning' : 'text-destructive'
-          }`}>
-            {server.latency}ms
-          </span>
-        </div>
-      </div>
-    </div>
-  )
 }
 
 export default function ServersPage() {
-  const [showAddModal, setShowAddModal] = useState(false)
-  
-  const onlineServers = servers.filter(s => s.status === 'online').length
-  const totalUsers = servers.reduce((acc, s) => acc + s.users, 0)
-  const avgLoad = Math.round(servers.filter(s => s.status === 'online').reduce((acc, s) => acc + s.load, 0) / onlineServers)
+  const router = useRouter()
+  const [proxy, setProxy] = useState<ProxyStatus | null>(null)
+  const [vpnOnline, setVpnOnline] = useState<VpnOnline | null>(null)
+  const [vpnClients, setVpnClients] = useState<VpnClientsData | null>(null)
+  const [stats, setStats] = useState<Stats | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState("")
+  const [searchQuery, setSearchQuery] = useState("")
+
+  const loadData = useCallback(
+    async (adminKey: string) => {
+      setLoading(true)
+      setError("")
+      try {
+        const [proxyData, vpnOnlineData, vpnClientsData, statsData] = await Promise.all([
+          fetchAdminJson<ProxyStatus>("/api/admin/proxy-status", adminKey),
+          fetchAdminJson<VpnOnline>("/api/admin/vpn-online", adminKey),
+          fetchAdminJson<VpnClientsData>("/api/admin/vpn-clients", adminKey),
+          fetchAdminJson<Stats>("/api/admin/stats", adminKey),
+        ])
+        setProxy(proxyData)
+        setVpnOnline(vpnOnlineData)
+        setVpnClients(vpnClientsData)
+        setStats(statsData)
+      } catch (err) {
+        if (err instanceof AdminAuthError) {
+          clearStoredAdminKey()
+          router.replace("/admin")
+          return
+        }
+        setError(err instanceof Error ? err.message : "Не удалось загрузить live-данные")
+      } finally {
+        setLoading(false)
+      }
+    },
+    [router],
+  )
+
+  useEffect(() => {
+    const adminKey = getStoredAdminKey()
+    if (!adminKey) {
+      router.replace("/admin")
+      return
+    }
+    void loadData(adminKey)
+  }, [loadData, router])
+
+  useEffect(() => {
+    const adminKey = getStoredAdminKey()
+    if (!adminKey) return
+    const timer = setInterval(() => {
+      void loadData(adminKey)
+    }, REFRESH_MS)
+    return () => clearInterval(timer)
+  }, [loadData])
+
+  const filteredClients = useMemo(() => {
+    const normalized = searchQuery.trim().toLowerCase()
+    const clients = vpnClients?.clients ?? []
+    if (!normalized) return clients
+    return clients.filter((client) => {
+      return (
+        String(client.telegram_id).includes(normalized) ||
+        client.uuid.toLowerCase().includes(normalized) ||
+        client.uuid_prefix.toLowerCase().includes(normalized)
+      )
+    })
+  }, [searchQuery, vpnClients?.clients])
 
   return (
-    <div className="flex min-h-screen">
+    <div className="flex min-h-screen bg-background">
       <AdminSidebar />
-      
+
       <div className="flex-1 lg:ml-64">
-        <AdminHeader title="Серверы" subtitle="Управление прокси-серверами" />
-        
+        <AdminHeader
+          title="Серверы"
+          subtitle="Текущее состояние MTProxy и VPN без выдуманных нод"
+          note="Автообновление каждые 30 секунд"
+        />
+
         <main className="p-4 lg:p-6 space-y-6">
-          {/* Quick Stats */}
-          <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+          {error ? (
+            <div className="rounded-xl border border-destructive/30 bg-destructive/10 px-4 py-3 text-sm text-destructive">
+              {error}
+            </div>
+          ) : null}
+
+          <div className="grid grid-cols-2 xl:grid-cols-4 gap-4">
             <div className="bg-card rounded-xl p-4 border border-border">
               <div className="flex items-center gap-2 text-muted-foreground text-sm mb-1">
                 <Server className="w-4 h-4" />
-                Серверов
+                MTProxy
               </div>
-              <p className="text-2xl font-bold text-foreground">{onlineServers}/{servers.length}</p>
+              <p className="text-2xl font-semibold text-foreground">{proxyStateLabel(proxy)}</p>
+              <p className="text-xs text-muted-foreground mt-2">
+                {proxy ? `${proxy.server}:${proxy.port}` : "Нет подключения"}
+              </p>
             </div>
             <div className="bg-card rounded-xl p-4 border border-border">
               <div className="flex items-center gap-2 text-muted-foreground text-sm mb-1">
                 <Users className="w-4 h-4" />
-                Пользователей
+                VPN online сейчас
               </div>
-              <p className="text-2xl font-bold text-foreground">{totalUsers.toLocaleString()}</p>
+              <p className="text-2xl font-semibold text-foreground">{formatNumber(vpnOnline?.online ?? 0)}</p>
+              <p className="text-xs text-muted-foreground mt-2">Из endpoint `/vpn/online`</p>
             </div>
             <div className="bg-card rounded-xl p-4 border border-border">
               <div className="flex items-center gap-2 text-muted-foreground text-sm mb-1">
-                <Cpu className="w-4 h-4" />
-                Ср. нагрузка
+                <ShieldCheck className="w-4 h-4" />
+                VPN-клиенты
               </div>
-              <p className="text-2xl font-bold text-foreground">{avgLoad}%</p>
-            </div>
-            <div className="bg-card rounded-xl p-4 border border-border">
-              <div className="flex items-center gap-2 text-muted-foreground text-sm mb-1">
-                <AlertTriangle className="w-4 h-4" />
-                Проблемы
-              </div>
-              <p className="text-2xl font-bold text-warning">1</p>
-            </div>
-          </div>
-
-          {/* Actions */}
-          <div className="flex items-center justify-between">
-            <h2 className="text-lg font-semibold text-foreground">Все серверы</h2>
-            <div className="flex items-center gap-2">
-              <button className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-muted-foreground hover:text-foreground hover:bg-secondary rounded-lg transition-colors">
-                <RefreshCw className="w-4 h-4" />
-                Обновить
-              </button>
-              <button 
-                onClick={() => setShowAddModal(true)}
-                className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-white bg-primary hover:bg-primary/90 rounded-lg transition-colors"
-              >
-                <Plus className="w-4 h-4" />
-                Добавить сервер
-              </button>
-            </div>
-          </div>
-
-          {/* Server Grid */}
-          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-            {servers.map((server) => (
-              <ServerCard key={server.id} server={server} />
-            ))}
-          </div>
-
-          {/* Warning Banner */}
-          <div className="bg-warning/10 border border-warning/30 rounded-xl p-4 flex items-start gap-3">
-            <AlertTriangle className="w-5 h-5 text-warning flex-shrink-0 mt-0.5" />
-            <div>
-              <h4 className="font-medium text-foreground">Сервер AS-1 Singapore перегружен</h4>
-              <p className="text-sm text-muted-foreground mt-1">
-                Нагрузка превышает 90%. Рекомендуем перераспределить пользователей или добавить новый сервер в регионе.
+              <p className="text-2xl font-semibold text-foreground">
+                {formatNumber(vpnClients?.active_count ?? 0)} / {formatNumber(vpnClients?.total ?? 0)}
               </p>
-              <div className="flex items-center gap-2 mt-3">
-                <button className="text-sm font-medium text-primary hover:underline">
-                  Перераспределить
-                </button>
-                <span className="text-muted-foreground">|</span>
-                <button className="text-sm font-medium text-muted-foreground hover:text-foreground">
-                  Игнорировать
-                </button>
+              <p className="text-xs text-muted-foreground mt-2">Активные / всего</p>
+            </div>
+            <div className="bg-card rounded-xl p-4 border border-border">
+              <div className="flex items-center gap-2 text-muted-foreground text-sm mb-1">
+                <Wifi className="w-4 h-4" />
+                Трафик
               </div>
+              <p className="text-2xl font-semibold text-foreground">{formatTrafficGb(vpnClients?.total_traffic_gb ?? 0)}</p>
+              <p className="text-xs text-muted-foreground mt-2">Активных подписок: {formatNumber(stats?.active_subscriptions ?? 0)}</p>
             </div>
           </div>
+
+          <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
+            <section className="bg-card rounded-xl border border-border p-5 space-y-4">
+              <div>
+                <h2 className="font-semibold text-foreground">MTProxy</h2>
+                <p className="text-sm text-muted-foreground">Реальное состояние TCP/handshake, без фиктивных uptime-графиков</p>
+              </div>
+
+              <div className="rounded-xl bg-secondary/50 border border-border p-4 space-y-3">
+                <div className="flex items-center justify-between gap-3">
+                  <span className="text-sm text-muted-foreground">Состояние</span>
+                  <span
+                    className={`inline-flex rounded-full px-2.5 py-1 text-xs font-medium ${
+                      !proxy?.online
+                        ? "bg-destructive/10 text-destructive"
+                        : proxy.degraded
+                          ? "bg-warning/10 text-warning"
+                          : "bg-success/10 text-success"
+                    }`}
+                  >
+                    {proxyStateLabel(proxy)}
+                  </span>
+                </div>
+                <div className="flex items-center justify-between gap-3">
+                  <span className="text-sm text-muted-foreground">Адрес</span>
+                  <span className="text-sm text-foreground">{proxy ? `${proxy.server}:${proxy.port}` : "—"}</span>
+                </div>
+                <div className="flex items-center justify-between gap-3">
+                  <span className="text-sm text-muted-foreground">Latency</span>
+                  <span className="text-sm text-foreground">{proxy?.latency_ms != null ? `${proxy.latency_ms} ms` : "—"}</span>
+                </div>
+                <div className="flex items-center justify-between gap-3">
+                  <span className="text-sm text-muted-foreground">Handshake</span>
+                  <span className="text-sm text-foreground">{proxy?.handshake ?? "—"}</span>
+                </div>
+              </div>
+
+              {proxy?.degraded ? (
+                <div className="rounded-xl border border-warning/30 bg-warning/10 px-4 py-3 text-sm text-foreground flex items-start gap-2">
+                  <AlertTriangle className="w-4 h-4 mt-0.5 text-warning shrink-0" />
+                  Порт открыт, но ответ не похож на корректный MTProxy. Это надо проверять на сервере.
+                </div>
+              ) : null}
+            </section>
+
+            <section className="bg-card rounded-xl border border-border p-5 space-y-4">
+              <div>
+                <h2 className="font-semibold text-foreground">VPN Reality</h2>
+                <p className="text-sm text-muted-foreground">Сводка по реально созданным клиентам и их трафику</p>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div className="rounded-xl bg-secondary/50 border border-border p-4">
+                  <p className="text-sm text-muted-foreground">Сейчас online</p>
+                  <p className="text-2xl font-semibold text-foreground mt-2">{formatNumber(vpnOnline?.online ?? 0)}</p>
+                </div>
+                <div className="rounded-xl bg-secondary/50 border border-border p-4">
+                  <p className="text-sm text-muted-foreground">Клиенты без user-записи</p>
+                  <p className="text-2xl font-semibold text-foreground mt-2">
+                    {formatNumber((vpnClients?.clients ?? []).filter((client) => !client.user_exists).length)}
+                  </p>
+                </div>
+                <div className="rounded-xl bg-secondary/50 border border-border p-4">
+                  <p className="text-sm text-muted-foreground">Активные клиенты</p>
+                  <p className="text-2xl font-semibold text-foreground mt-2">{formatNumber(vpnClients?.active_count ?? 0)}</p>
+                </div>
+                <div className="rounded-xl bg-secondary/50 border border-border p-4">
+                  <p className="text-sm text-muted-foreground">Суммарный трафик</p>
+                  <p className="text-2xl font-semibold text-foreground mt-2">{formatTrafficGb(vpnClients?.total_traffic_gb ?? 0)}</p>
+                </div>
+              </div>
+            </section>
+          </div>
+
+          <section className="bg-card rounded-xl border border-border p-5 space-y-4">
+            <div className="flex flex-col lg:flex-row gap-3 lg:items-center lg:justify-between">
+              <div>
+                <h2 className="font-semibold text-foreground">VPN-клиенты</h2>
+                <p className="text-sm text-muted-foreground">Список из `vpn_clients`, уже со сведённым статусом подписки</p>
+              </div>
+              <div className="relative min-w-[260px]">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+                <input
+                  type="text"
+                  value={searchQuery}
+                  onChange={(event) => setSearchQuery(event.target.value)}
+                  placeholder="Поиск по Telegram ID или UUID"
+                  className="w-full pl-10 pr-4 py-2.5 bg-secondary border border-border rounded-lg text-sm"
+                />
+              </div>
+            </div>
+
+            {loading && !vpnClients ? (
+              <div className="rounded-xl bg-secondary/50 border border-border px-4 py-10 text-center text-muted-foreground">
+                Загружаю live-список клиентов…
+              </div>
+            ) : null}
+
+            <div className="overflow-x-auto">
+              <table className="w-full min-w-[980px]">
+                <thead>
+                  <tr className="text-left text-xs text-muted-foreground border-b border-border">
+                    <th className="py-3 pr-4 font-medium">Telegram ID</th>
+                    <th className="py-3 pr-4 font-medium">UUID</th>
+                    <th className="py-3 pr-4 font-medium">Клиент</th>
+                    <th className="py-3 pr-4 font-medium">Подписка</th>
+                    <th className="py-3 pr-4 font-medium">Трафик</th>
+                    <th className="py-3 pr-4 font-medium">Лимит</th>
+                    <th className="py-3 font-medium">Последний sync</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {filteredClients.map((client) => (
+                    <tr key={client.id} className="border-b border-border last:border-0">
+                      <td className="py-4 pr-4 align-top text-sm text-foreground">{client.telegram_id}</td>
+                      <td className="py-4 pr-4 align-top">
+                        <div className="text-sm text-foreground font-mono">{client.uuid_prefix}…</div>
+                        <div className="text-xs text-muted-foreground mt-1">{formatAdminDate(client.created_at)}</div>
+                      </td>
+                      <td className="py-4 pr-4 align-top">
+                        <span className={`inline-flex rounded-full px-2.5 py-1 text-xs font-medium ${client.active ? "bg-success/10 text-success" : "bg-secondary text-muted-foreground"}`}>
+                          {client.active ? "Активен" : "Выключен"}
+                        </span>
+                        <p className="text-xs text-muted-foreground mt-2">{client.user_exists ? "user есть" : "без user-записи"}</p>
+                      </td>
+                      <td className="py-4 pr-4 align-top">
+                        <p className="text-sm text-foreground">{subscriptionLabel(client.subscription_status)}</p>
+                        <p className="text-xs text-muted-foreground mt-1">
+                          {client.subscription_access_suspended ? "Доступ снят вручную" : formatAdminDate(client.subscription_expires_at ?? null)}
+                        </p>
+                      </td>
+                      <td className="py-4 pr-4 align-top text-sm text-foreground">{formatTrafficGb(client.traffic_used_gb)}</td>
+                      <td className="py-4 pr-4 align-top text-sm text-foreground">
+                        {client.traffic_limit_gb > 0 ? `${formatNumber(client.traffic_limit_gb)} ГБ` : "Без лимита"}
+                      </td>
+                      <td className="py-4 align-top">
+                        <div className="inline-flex items-center gap-2 text-sm text-foreground">
+                          <Clock3 className="w-4 h-4 text-muted-foreground" />
+                          {formatAdminDate(client.last_sync_at)}
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                  {filteredClients.length === 0 ? (
+                    <tr>
+                      <td colSpan={7} className="py-10 text-center text-muted-foreground">
+                        По этому фильтру клиентов нет.
+                      </td>
+                    </tr>
+                  ) : null}
+                </tbody>
+              </table>
+            </div>
+          </section>
         </main>
       </div>
-
-      {/* Add Server Modal (placeholder) */}
-      {showAddModal && (
-        <div className="fixed inset-0 bg-foreground/50 z-50 flex items-center justify-center p-4">
-          <div className="bg-card rounded-xl border border-border w-full max-w-md p-6">
-            <div className="flex items-center justify-between mb-4">
-              <h3 className="text-lg font-semibold text-foreground">Добавить сервер</h3>
-              <button onClick={() => setShowAddModal(false)} className="p-1 hover:bg-secondary rounded">
-                <X className="w-5 h-5 text-muted-foreground" />
-              </button>
-            </div>
-            <div className="space-y-4">
-              <div>
-                <label className="block text-sm font-medium text-foreground mb-1">Название</label>
-                <input type="text" className="w-full px-3 py-2 bg-secondary border border-border rounded-lg text-sm" placeholder="EU-4 Paris" />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-foreground mb-1">IP адрес</label>
-                <input type="text" className="w-full px-3 py-2 bg-secondary border border-border rounded-lg text-sm" placeholder="192.168.1.1" />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-foreground mb-1">Порт</label>
-                <input type="text" className="w-full px-3 py-2 bg-secondary border border-border rounded-lg text-sm" placeholder="443" />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-foreground mb-1">Макс. пользователей</label>
-                <input type="text" className="w-full px-3 py-2 bg-secondary border border-border rounded-lg text-sm" placeholder="500" />
-              </div>
-            </div>
-            <div className="flex items-center gap-2 mt-6">
-              <button onClick={() => setShowAddModal(false)} className="flex-1 px-4 py-2.5 text-sm font-medium text-muted-foreground hover:bg-secondary rounded-lg transition-colors">
-                Отмена
-              </button>
-              <button className="flex-1 px-4 py-2.5 text-sm font-medium text-white bg-primary hover:bg-primary/90 rounded-lg transition-colors">
-                Добавить
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   )
 }

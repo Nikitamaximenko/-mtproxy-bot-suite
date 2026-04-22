@@ -15,7 +15,7 @@ import {
 import { useState } from "react"
 
 const navItems = [
-  { href: "/admin", label: "Дашборд (API)", icon: LayoutDashboard },
+  { href: "/admin", label: "Дашборд", icon: LayoutDashboard },
   { href: "/admin/analytics", label: "Аналитика", icon: BarChart3 },
   { href: "/admin/servers", label: "Серверы", icon: Server },
   { href: "/admin/users", label: "Пользователи", icon: Users },
@@ -96,21 +96,16 @@ export function AdminSidebar() {
 
         {/* Bottom section */}
         <div className="absolute bottom-0 left-0 right-0 p-4 border-t border-border">
-          <div className="flex items-center gap-3 mb-4">
-            <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center">
-              <span className="text-sm font-semibold text-primary">АД</span>
-            </div>
-            <div className="flex-1 min-w-0">
-              <p className="text-sm font-medium text-foreground truncate">Администратор</p>
-              <p className="text-xs text-muted-foreground truncate">admin@frosty.io</p>
-            </div>
+          <div className="mb-4 rounded-xl bg-secondary/60 px-3 py-2">
+            <p className="text-sm font-medium text-foreground">Live Admin</p>
+            <p className="text-xs text-muted-foreground">Только данные из backend и БД</p>
           </div>
           <Link
             href="/"
             className="flex items-center justify-center gap-2 w-full px-3 py-2 text-sm text-muted-foreground hover:text-foreground hover:bg-secondary rounded-lg transition-colors"
           >
             <LogOut className="w-4 h-4" />
-            Выйти
+            На сайт
           </Link>
         </div>
       </aside>
