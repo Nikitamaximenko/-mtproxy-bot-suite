@@ -124,7 +124,7 @@ function PaymentCard({ ping }: { ping: VpnPing | null }) {
           🎁 Есть бесплатный день
         </p>
         <p className="text-[11px] mt-1 leading-relaxed" style={{ color: "#4B5563" }}>
-          Если хочешь сначала проверить скорость и стабильность, забери пробный день в боте.
+          Хочешь сначала проверить сервис? Открой бота и забери бесплатный день.
         </p>
       </div>
 
@@ -475,17 +475,17 @@ export function Landing() {
                 className="font-display font-extrabold mb-3"
                 style={{ color: "#FFFFFF", fontSize: "clamp(28px, 4vw, 40px)", letterSpacing: "-0.03em", lineHeight: 1.05 }}
               >
-                Сначала проверь Frosty бесплатно.
+                Попробуй Frosty бесплатно.
               </h2>
               <p className="max-w-2xl mb-5" style={{ color: "#CBD5E1", fontSize: 16, lineHeight: 1.6 }}>
-                В Telegram-боте можно забрать один бесплатный день и спокойно проверить, как у тебя
-                работают MTProxy и VPN на реальном операторе, в Telegram и в обычных приложениях.
+                Забери бесплатный день в боте и проверь, как у тебя работают Telegram, YouTube,
+                Instagram и другие сайты.
               </p>
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                 {[
-                  "24 часа на проверку скорости и стабильности",
-                  "MTProxy для Telegram и VPN для сайтов в одном доступе",
-                  "Подходит, если хочешь попробовать перед оплатой",
+                  "1 день бесплатно",
+                  "Telegram и сайты в одном доступе",
+                  "Можно попробовать перед оплатой",
                 ].map((item) => (
                   <div
                     key={item}
@@ -503,11 +503,10 @@ export function Landing() {
               style={{ background: "#FFFFFF", borderRadius: 24, border: "1px solid rgba(255,255,255,0.14)" }}
             >
               <p className="text-xs font-bold uppercase mb-2" style={{ color: "#0284C7", letterSpacing: "0.06em" }}>
-                Что дальше
+                Как получить
               </p>
               <p className="text-sm mb-4" style={{ color: "#4B5563", lineHeight: 1.65 }}>
-                Нажмёшь кнопку ниже, откроется бот <strong>@frostytg_bot</strong> с оффером
-                <strong> siteoffer</strong>. Там можно активировать бесплатный день и вернуться в мини-приложение.
+                Нажми кнопку ниже. Откроется бот, где можно сразу забрать бесплатный день.
               </p>
               <a
                 href={TELEGRAM_SITE_OFFER_BOT}
@@ -523,11 +522,10 @@ export function Landing() {
                 }}
               >
                 <MessageCircle className="w-5 h-5" />
-                Забрать бесплатный день в Telegram
+                Открыть бота
               </a>
               <p className="text-[11px] mt-3" style={{ color: "#6B7280", lineHeight: 1.5 }}>
-                Бесплатный день активируется только через Telegram-бота. Если он уже использован,
-                бот просто покажет текущий статус подписки.
+                Если бесплатный день уже использован, бот просто покажет статус подписки.
               </p>
             </div>
           </div>

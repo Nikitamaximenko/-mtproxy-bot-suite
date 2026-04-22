@@ -1079,11 +1079,10 @@ export default function MiniAppPage() {
               </div>
               <div className="flex-1">
                 <p className="text-sm font-bold mb-1" style={{ color: "#111827" }}>
-                  Есть бесплатный день
+                  Попробуй бесплатно
                 </p>
                 <p className="text-xs leading-relaxed mb-3" style={{ color: "#4B5563" }}>
-                  Если хочешь сначала проверить MTProxy и VPN на своём операторе, забери оффер в боте.
-                  Откроется <strong>@frostytg_bot</strong> со стартом <strong>siteoffer</strong>.
+                  Нажми кнопку ниже и открой бота. Там можно сразу забрать бесплатный день.
                 </p>
                 <button
                   type="button"
@@ -1098,7 +1097,7 @@ export default function MiniAppPage() {
                   }}
                 >
                   <ExternalLink className="w-4 h-4" />
-                  Забрать бесплатный день в боте
+                  Открыть бота
                 </button>
               </div>
             </div>
