@@ -31,6 +31,8 @@ class Settings(BaseSettings):
     smtp_password: str = ""
     smtp_from: str = ""
     smtp_use_tls: bool = True
+    # Для провайдеров с implicit TLS (обычно порт 465): SMTP over SSL без starttls().
+    smtp_use_ssl: bool = False
     # Локально без SMTP: true — код в логах uvicorn
     email_allow_log_only: bool = False
 

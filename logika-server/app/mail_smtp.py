@@ -35,9 +35,15 @@ def send_otp_email(settings: Settings, to_address: str, code: str) -> None:
         f"Если вы не запрашивали вход — проигнорируйте это письмо.\n"
     )
 
-    with smtplib.SMTP(settings.smtp_host, settings.smtp_port, timeout=25) as smtp:
+    # Два стандартных режима:
+    # - SMTP + STARTTLS (587): smtp_use_tls=true, smtp_use_ssl=false
+    # - SMTP over SSL (465): smtp_use_ssl=true (или авто по порту 465)
+    use_ssl = settings.smtp_use_ssl or (settings.smtp_port == 465 and settings.smtp_use_tls)
+    smtp_cls = smtplib.SMTP_SSL if use_ssl else smtplib.SMTP
+
+    with smtp_cls(settings.smtp_host, settings.smtp_port, timeout=25) as smtp:
         smtp.ehlo()
-        if settings.smtp_use_tls:
+        if settings.smtp_use_tls and not use_ssl:
             smtp.starttls()
             smtp.ehlo()
         if settings.smtp_user and settings.smtp_password:

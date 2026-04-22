@@ -42,17 +42,6 @@ async def _bg_send_sms(phone_e164: str, digits: str, code: str) -> None:
             db2.commit()
 
 
-async def _bg_send_email(email_norm: str, code: str) -> None:
-    s = get_settings()
-    try:
-        await asyncio.to_thread(send_otp_email, s, email_norm, code)
-    except Exception:
-        logger.exception("SMTP: ошибка после быстрого ответа API; OTP аннулирован")
-        with SessionLocal() as db2:
-            db2.execute(delete(LogikaOtpCode).where(LogikaOtpCode.email_norm == email_norm))
-            db2.commit()
-
-
 # Браузер блокирует ответ без Access-Control-Allow-Origin → на фронте «Failed to fetch».
 # Явный список в CORS_ORIGINS обязателен для своего домена; превью/деплои Vercel покрываем regex.
 _VERCEL_PREVIEW_ORIGIN_RE = r"^https://[^\s/]+\.vercel\.app$"
@@ -122,9 +111,11 @@ def create_app() -> FastAPI:
         )
         smtp_ok = bool(s.smtp_host and (s.smtp_from or s.smtp_user))
         logger.info(
-            "SMTP: configured=%s email_log_only=%s",
+            "SMTP: configured=%s email_log_only=%s tls=%s ssl=%s",
             smtp_ok,
             s.email_allow_log_only,
+            s.smtp_use_tls,
+            s.smtp_use_ssl,
         )
         logger.info(
             "Anthropic: configured=%s demo_without_key=%s",
@@ -175,7 +166,6 @@ def create_app() -> FastAPI:
     @app.post("/v1/auth/request-email-code")
     async def request_email_code(
         payload: RequestEmailCodeBody,
-        background_tasks: BackgroundTasks,
         db: Session = Depends(get_db),
         settings: Settings = Depends(get_settings_dep),
     ) -> dict[str, bool]:
@@ -197,7 +187,18 @@ def create_app() -> FastAPI:
             )
         )
         db.commit()
-        background_tasks.add_task(_bg_send_email, email_norm, code)
+        # Для email важнее надёжность, чем "мгновенный ok":
+        # отправляем сразу и возвращаем ошибку клиенту, если SMTP не сработал.
+        try:
+            await asyncio.to_thread(send_otp_email, settings, email_norm, code)
+        except Exception as e:
+            logger.exception("SMTP: request-email-code failed; OTP revoked")
+            db.execute(delete(LogikaOtpCode).where(LogikaOtpCode.email_norm == email_norm))
+            db.commit()
+            raise HTTPException(
+                502,
+                "Не удалось отправить код на email. Проверьте SMTP-настройки и адрес почты.",
+            ) from e
         return {"ok": True}
 
     @app.post("/v1/auth/verify")
