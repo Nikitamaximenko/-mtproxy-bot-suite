@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react"
 import { Check, MessageCircle, Shield, Zap } from "lucide-react"
 
 const TELEGRAM_BOT = "https://t.me/frostytg_bot?start=site"
+const TELEGRAM_SITE_OFFER_BOT = "https://t.me/frostytg_bot?start=siteoffer"
 const PRICE_RUB = 299
 
 type VpnPing = { online: boolean; latency_ms: number | null }
@@ -115,6 +116,17 @@ function PaymentCard({ ping }: { ping: VpnPing | null }) {
       <p className="text-xs mb-4" style={{ color: "#6B7280" }}>
         ≈ 10 ₽ в день · отмена в любой момент
       </p>
+      <div
+        className="mb-4 px-3 py-2.5"
+        style={{ background: "#EFF6FF", borderRadius: 12, border: "1px solid #BFDBFE" }}
+      >
+        <p className="text-xs font-semibold" style={{ color: "#1D4ED8" }}>
+          🎁 Есть бесплатный день
+        </p>
+        <p className="text-[11px] mt-1 leading-relaxed" style={{ color: "#4B5563" }}>
+          Если хочешь сначала проверить скорость и стабильность, забери пробный день в боте.
+        </p>
+      </div>
 
       <div className="mb-3">
         <span className="block text-xs font-medium mb-1.5" style={{ color: "#6B7280" }}>
@@ -353,7 +365,7 @@ export function Landing() {
               className="inline-block text-xs font-bold uppercase tracking-wide px-3 py-1.5 mb-5"
               style={{ background: "#EFF6FF", color: "#2563EB", borderRadius: 999, letterSpacing: "0.06em" }}
             >
-              2 в 1 — Прокси + VPN
+              2 в 1 — Прокси + VPN · Бесплатный день в Telegram
             </span>
             <h1
               className="font-display font-extrabold leading-[1.05] mb-5"
@@ -368,7 +380,8 @@ export function Landing() {
               style={{ fontSize: 17, lineHeight: 1.55, color: "#4B5563" }}
             >
               Одна подписка — персональный MTProxy для Telegram и быстрый VPN для всего остального. Без
-              рекламы, логов и «общих серверов с 10 000 подключений».
+              рекламы, логов и «общих серверов с 10 000 подключений». Если хочешь сначала проверить
+              сервис на своём операторе и устройствах, в боте есть бесплатный день.
             </p>
 
             <div className="flex flex-wrap gap-3 mb-7">
@@ -437,6 +450,86 @@ export function Landing() {
 
           <div ref={paymentRef} className="lg:sticky lg:top-20">
             <PaymentCard ping={ping} />
+          </div>
+        </div>
+      </section>
+
+      <section className="px-5 pb-12">
+        <div className="max-w-6xl mx-auto">
+          <div
+            className="grid grid-cols-1 lg:grid-cols-[1.15fr_0.85fr] gap-6 p-6 sm:p-8"
+            style={{
+              background: "linear-gradient(135deg, #0F172A 0%, #111827 52%, #0C4A6E 100%)",
+              borderRadius: 28,
+              boxShadow: "0 18px 48px -20px rgba(15,23,42,0.45)",
+            }}
+          >
+            <div>
+              <span
+                className="inline-block text-xs font-bold uppercase tracking-wide px-3 py-1.5 mb-4"
+                style={{ background: "rgba(255,255,255,0.12)", color: "#E0F2FE", borderRadius: 999, letterSpacing: "0.06em" }}
+              >
+                🎁 Бесплатный день
+              </span>
+              <h2
+                className="font-display font-extrabold mb-3"
+                style={{ color: "#FFFFFF", fontSize: "clamp(28px, 4vw, 40px)", letterSpacing: "-0.03em", lineHeight: 1.05 }}
+              >
+                Сначала проверь Frosty бесплатно.
+              </h2>
+              <p className="max-w-2xl mb-5" style={{ color: "#CBD5E1", fontSize: 16, lineHeight: 1.6 }}>
+                В Telegram-боте можно забрать один бесплатный день и спокойно проверить, как у тебя
+                работают MTProxy и VPN на реальном операторе, в Telegram и в обычных приложениях.
+              </p>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                {[
+                  "24 часа на проверку скорости и стабильности",
+                  "MTProxy для Telegram и VPN для сайтов в одном доступе",
+                  "Подходит, если хочешь попробовать перед оплатой",
+                ].map((item) => (
+                  <div
+                    key={item}
+                    className="px-4 py-3 text-sm"
+                    style={{ background: "rgba(255,255,255,0.08)", borderRadius: 16, color: "#E5E7EB" }}
+                  >
+                    {item}
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <div
+              className="p-5 sm:p-6"
+              style={{ background: "#FFFFFF", borderRadius: 24, border: "1px solid rgba(255,255,255,0.14)" }}
+            >
+              <p className="text-xs font-bold uppercase mb-2" style={{ color: "#0284C7", letterSpacing: "0.06em" }}>
+                Что дальше
+              </p>
+              <p className="text-sm mb-4" style={{ color: "#4B5563", lineHeight: 1.65 }}>
+                Нажмёшь кнопку ниже, откроется бот <strong>@frostytg_bot</strong> с оффером
+                <strong> siteoffer</strong>. Там можно активировать бесплатный день и вернуться в мини-приложение.
+              </p>
+              <a
+                href={TELEGRAM_SITE_OFFER_BOT}
+                className="inline-flex items-center justify-center gap-2 w-full font-bold transition-transform active:scale-[0.98]"
+                style={{
+                  background: "#2AABEE",
+                  color: "#FFFFFF",
+                  minHeight: 56,
+                  borderRadius: 16,
+                  fontSize: 16,
+                  textDecoration: "none",
+                  boxShadow: "0 10px 24px -8px rgba(42,171,238,0.55)",
+                }}
+              >
+                <MessageCircle className="w-5 h-5" />
+                Забрать бесплатный день в Telegram
+              </a>
+              <p className="text-[11px] mt-3" style={{ color: "#6B7280", lineHeight: 1.5 }}>
+                Бесплатный день активируется только через Telegram-бота. Если он уже использован,
+                бот просто покажет текущий статус подписки.
+              </p>
+            </div>
           </div>
         </div>
       </section>
@@ -675,6 +768,10 @@ export function Landing() {
             <Faq
               q="Какие способы оплаты?"
               a="Сейчас оплата доступна банковской картой через lava.top и в мини-приложении, и на сайте. Подписка — 299 ₽/мес с автопродлением; отключить можно в боте."
+            />
+            <Faq
+              q="Можно сначала попробовать бесплатно?"
+              a="Да. В Telegram-боте есть оффер на один бесплатный день. Он нужен, чтобы проверить скорость MTProxy и VPN на ваших устройствах и операторе перед оплатой."
             />
             <Faq
               q="Вы пишете логи моего трафика?"

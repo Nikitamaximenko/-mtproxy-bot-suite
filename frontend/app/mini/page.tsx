@@ -37,6 +37,7 @@ function FrostIcon({ className }: { className?: string }) {
 }
 
 const MINI_TG_STORAGE_KEY = "frosty_mini_tg_id"
+const TELEGRAM_SITE_OFFER_BOT = "https://t.me/frostytg_bot?start=siteoffer"
 
 function getTgIdFallbackFromUrl(): number | null {
   const tgId = new URLSearchParams(window.location.search).get("tg_id")
@@ -571,6 +572,13 @@ export default function MiniAppPage() {
     setTimeout(() => setCopied(false), 2000)
   }
 
+  const handleOpenTrialOffer = useCallback(() => {
+    if (openTelegramLink(TELEGRAM_SITE_OFFER_BOT)) return
+    if (typeof window !== "undefined") {
+      window.location.href = TELEGRAM_SITE_OFFER_BOT
+    }
+  }, [])
+
   const handlePaymentConfirmed = useCallback((data: SubscriptionData) => {
     setSub(data)
     setPaymentUrl(null)
@@ -1052,6 +1060,49 @@ export default function MiniAppPage() {
           <p className="text-center mb-7" style={{ fontSize: "15px", fontWeight: 400, color: "#6B7280", lineHeight: "1.6" }}>
             Одна подписка решает сразу обе проблемы: прокси включает Telegram без лишних действий, а VPN открывает всё остальное.
           </p>
+
+          <div
+            className="mb-6 p-4"
+            style={{
+              background: "#EFF6FF",
+              borderRadius: "18px",
+              border: "1px solid #BFDBFE",
+              boxShadow: "0 10px 24px -16px rgba(37,99,235,0.35)",
+            }}
+          >
+            <div className="flex items-start gap-3">
+              <div
+                className="flex items-center justify-center flex-shrink-0"
+                style={{ width: "40px", height: "40px", borderRadius: "12px", background: "#DBEAFE", color: "#1D4ED8" }}
+              >
+                🎁
+              </div>
+              <div className="flex-1">
+                <p className="text-sm font-bold mb-1" style={{ color: "#111827" }}>
+                  Есть бесплатный день
+                </p>
+                <p className="text-xs leading-relaxed mb-3" style={{ color: "#4B5563" }}>
+                  Если хочешь сначала проверить MTProxy и VPN на своём операторе, забери оффер в боте.
+                  Откроется <strong>@frostytg_bot</strong> со стартом <strong>siteoffer</strong>.
+                </p>
+                <button
+                  type="button"
+                  onClick={handleOpenTrialOffer}
+                  className="w-full flex items-center justify-center gap-2 font-semibold touch-manipulation active:scale-[0.98] transition-all"
+                  style={{
+                    background: "#2AABEE",
+                    color: "#FFFFFF",
+                    minHeight: "48px",
+                    borderRadius: "14px",
+                    fontSize: "15px",
+                  }}
+                >
+                  <ExternalLink className="w-4 h-4" />
+                  Забрать бесплатный день в боте
+                </button>
+              </div>
+            </div>
+          </div>
 
           {/* 5. Features — две колонки */}
           <div className="grid grid-cols-2 gap-2 mb-3">
