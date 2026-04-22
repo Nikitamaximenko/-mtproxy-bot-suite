@@ -60,19 +60,6 @@ function conflictEdgePath(ax: number, ay: number, bx: number, by: number): strin
 
 const CYCLE_SEC = 5.4
 
-function nodeFill(kind: Node['kind']): string {
-  switch (kind) {
-    case 'claim':
-      return '#c4f542'
-    case 'premise':
-      return '#ffffff'
-    case 'motive':
-      return '#ffb23d'
-    case 'conflict':
-      return '#ff4d4d'
-  }
-}
-
 function nodeBg(kind: Node['kind']): string {
   switch (kind) {
     case 'claim':
@@ -251,18 +238,6 @@ export function ArgumentMap() {
                     />
                   )
                 })}
-                {NODES.map((n) => (
-                  <motion.circle
-                    key={`${n.id}-dot-${cycle}`}
-                    cx={n.x}
-                    cy={n.y}
-                    r={1.2}
-                    fill={nodeFill(n.kind)}
-                    initial={{ opacity: 0, scale: 0.4 }}
-                    animate={n.delay <= t ? { opacity: 1, scale: 1 } : { opacity: 0, scale: 0.4 }}
-                    transition={{ duration: 0.4, ease }}
-                  />
-                ))}
               </svg>
 
               {NODES.map((n) => {
