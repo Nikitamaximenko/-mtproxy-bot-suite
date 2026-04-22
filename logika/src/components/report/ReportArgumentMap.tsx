@@ -368,8 +368,11 @@ export function ReportArgumentMap({ report, dilemma }: ReportArgumentMapProps) {
                 <div
                   className={[
                     nodeClass(n.kind),
-                    'min-w-0 max-w-[min(14.5rem,42vw)] shadow-[0_4px_20px_rgba(0,0,0,0.55)]',
-                    'rounded-[10px] px-3 py-2 sm:max-w-[min(16rem,40vw)]',
+                    isCenter
+                      ? 'w-[11.5rem] max-w-[min(22rem,62vw)]'
+                      : 'w-[9.5rem] max-w-[min(18rem,48vw)]',
+                    'shrink-0 shadow-[0_4px_20px_rgba(0,0,0,0.55)]',
+                    'rounded-[10px] px-3 py-2 sm:max-w-[min(20rem,46vw)]',
                     'flex flex-col gap-1 font-medium antialiased',
                     isCenter ? 'items-center text-center' : 'text-left',
                   ].join(' ')}
@@ -378,7 +381,7 @@ export function ReportArgumentMap({ report, dilemma }: ReportArgumentMapProps) {
                   <span className="font-mono text-[9px] uppercase leading-tight tracking-[0.07em] opacity-75">
                     {kindTag(n.kind)}
                   </span>
-                  <span className="text-[12px] leading-[1.42] [overflow-wrap:anywhere] text-balance sm:text-[13px] sm:leading-[1.48]">
+                  <span className="text-[12px] leading-[1.42] break-words [word-break:normal] sm:text-[13px] sm:leading-[1.48]">
                     {n.label}
                   </span>
                 </div>
