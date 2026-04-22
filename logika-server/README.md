@@ -60,6 +60,7 @@ uvicorn app.main:app --reload --port 8000
 | `SMSAERO_TEST_MODE` | `true` → метод API `sms/testsend` (тестовая ветка в [доке SMS Aero](https://smsaero.ru/integration/documentation/api/)). На проде обычно `false`. |
 | `SMSAERO_HTTP_TIMEOUT_SECONDS` | Таймаут HTTP к шлюзу (по умолчанию `12`). |
 | `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASSWORD`, `SMTP_FROM`, `SMTP_USE_TLS`, `SMTP_USE_SSL` | Для `POST /v1/auth/request-email-code`. STARTTLS: `SMTP_USE_TLS=true` + `SMTP_USE_SSL=false` (обычно 587). SMTP SSL: `SMTP_USE_SSL=true` (обычно 465). |
+| `TELEGRAM_BOT_TOKEN` | Токен бота для `POST /v1/auth/telegram` (проверка `hash` Telegram Login Widget). |
 | `EMAIL_ALLOW_LOG_ONLY` | Локалка: `true` — код в логах без SMTP. На проде задайте SMTP. |
 | `ANTHROPIC_API_KEY` | Ключ [Anthropic Console](https://console.anthropic.com/) — **обязателен** для Sonnet/Opus; без него раньше включался демо-режим в чате. |
 | `ANTHROPIC_ALLOW_DEMO_WITHOUT_KEY` | Только локалка: `true` = шаблон без Claude. На **production не задавай** (по умолчанию `false`). |

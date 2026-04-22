@@ -16,11 +16,23 @@ def _migrate_postgres(conn: Connection) -> None:
     if "email_norm" not in ucols:
         conn.execute(text("ALTER TABLE logika_users ADD COLUMN email_norm VARCHAR(320)"))
         logger.info("migration: logika_users.email_norm added")
+    if "telegram_id" not in ucols:
+        conn.execute(text("ALTER TABLE logika_users ADD COLUMN telegram_id VARCHAR(32)"))
+        logger.info("migration: logika_users.telegram_id added")
+    if "telegram_username" not in ucols:
+        conn.execute(text("ALTER TABLE logika_users ADD COLUMN telegram_username VARCHAR(64)"))
+        logger.info("migration: logika_users.telegram_username added")
     insp = inspect(conn)
     ucols = {c["name"]: c for c in insp.get_columns("logika_users")}
     if "phone_e164" in ucols and ucols["phone_e164"].get("nullable") is False:
         conn.execute(text("ALTER TABLE logika_users ALTER COLUMN phone_e164 DROP NOT NULL"))
         logger.info("migration: logika_users.phone_e164 nullable")
+    conn.execute(
+        text(
+            "CREATE UNIQUE INDEX IF NOT EXISTS ix_logika_users_telegram_id "
+            "ON logika_users (telegram_id)"
+        )
+    )
 
     insp = inspect(conn)
     ocols = {c["name"]: c for c in insp.get_columns("logika_otp_codes")}
@@ -50,9 +62,12 @@ def _sqlite_rebuild_users(conn: Connection) -> None:
                 phone_e164 VARCHAR(20),
                 name VARCHAR(128),
                 email_norm VARCHAR(320),
+                telegram_id VARCHAR(32),
+                telegram_username VARCHAR(64),
                 created_at DATETIME NOT NULL,
                 UNIQUE (phone_e164),
-                UNIQUE (email_norm)
+                UNIQUE (email_norm),
+                UNIQUE (telegram_id)
             )
             """
         )
@@ -60,14 +75,17 @@ def _sqlite_rebuild_users(conn: Connection) -> None:
     conn.execute(
         text(
             """
-            INSERT INTO logika_users_new (id, phone_e164, name, email_norm, created_at)
-            SELECT id, phone_e164, name, NULL, created_at FROM logika_users
+            INSERT INTO logika_users_new
+            (id, phone_e164, name, email_norm, telegram_id, telegram_username, created_at)
+            SELECT id, phone_e164, name, NULL, NULL, NULL, created_at FROM logika_users
             """
         )
     )
     conn.execute(text("DROP TABLE logika_users"))
     conn.execute(text("ALTER TABLE logika_users_new RENAME TO logika_users"))
     conn.execute(text("CREATE INDEX IF NOT EXISTS ix_logika_users_phone_e164 ON logika_users (phone_e164)"))
+    conn.execute(text("CREATE INDEX IF NOT EXISTS ix_logika_users_email_norm ON logika_users (email_norm)"))
+    conn.execute(text("CREATE INDEX IF NOT EXISTS ix_logika_users_telegram_id ON logika_users (telegram_id)"))
 
 
 def _sqlite_rebuild_otp(conn: Connection) -> None:
@@ -107,11 +125,19 @@ def _migrate_sqlite(conn: Connection) -> None:
     ucols = _sqlite_pragma_cols(conn, "logika_users")
     if not ucols:
         return
-    need_users = "email_norm" not in ucols or (
+    need_users_rebuild = "email_norm" not in ucols or (
         "phone_e164" in ucols and int(ucols["phone_e164"].get("notnull") or 0) == 1
     )
-    if need_users:
+    if need_users_rebuild:
         _sqlite_rebuild_users(conn)
+    else:
+        if "telegram_id" not in ucols:
+            conn.execute(text("ALTER TABLE logika_users ADD COLUMN telegram_id VARCHAR(32)"))
+            logger.info("migration sqlite: logika_users.telegram_id added")
+        if "telegram_username" not in ucols:
+            conn.execute(text("ALTER TABLE logika_users ADD COLUMN telegram_username VARCHAR(64)"))
+            logger.info("migration sqlite: logika_users.telegram_username added")
+        conn.execute(text("CREATE INDEX IF NOT EXISTS ix_logika_users_telegram_id ON logika_users (telegram_id)"))
 
     ocols = _sqlite_pragma_cols(conn, "logika_otp_codes")
     if not ocols:

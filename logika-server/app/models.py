@@ -20,6 +20,8 @@ class LogikaUser(Base):
     id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
     phone_e164: Mapped[str | None] = mapped_column(String(20), unique=True, nullable=True, index=True)
     email_norm: Mapped[str | None] = mapped_column(String(320), unique=True, nullable=True, index=True)
+    telegram_id: Mapped[str | None] = mapped_column(String(32), unique=True, nullable=True, index=True)
+    telegram_username: Mapped[str | None] = mapped_column(String(64), nullable=True)
     name: Mapped[str | None] = mapped_column(String(128), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
 

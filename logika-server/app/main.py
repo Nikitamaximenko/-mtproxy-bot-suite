@@ -25,6 +25,7 @@ from app.phone import normalize_ru_phone, to_e164
 from app.schema_migrate import run_schema_migrations
 from app.security import create_access_token, decode_token, hash_otp, random_digits
 from app.smsaero import send_otp_sms
+from app.telegram_auth import verify_telegram_login
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -67,6 +68,16 @@ class VerifyBody(BaseModel):
         if bool(p) == bool(e):
             raise ValueError("Укажите ровно одно поле: phone или email")
         return self
+
+
+class TelegramLoginBody(BaseModel):
+    id: str
+    auth_date: str
+    hash: str
+    first_name: str | None = None
+    last_name: str | None = None
+    username: str | None = None
+    photo_url: str | None = None
 
 
 class StartSessionBody(BaseModel):
@@ -117,6 +128,7 @@ def create_app() -> FastAPI:
             s.smtp_use_tls,
             s.smtp_use_ssl,
         )
+        logger.info("Telegram login: configured=%s", bool(s.telegram_bot_token))
         logger.info(
             "Anthropic: configured=%s demo_without_key=%s",
             bool(s.anthropic_api_key),
@@ -264,6 +276,52 @@ def create_app() -> FastAPI:
         token = create_access_token(settings, user.id)
         return {"access_token": token, "token_type": "bearer"}
 
+    @app.post("/v1/auth/telegram")
+    def verify_telegram(
+        payload: TelegramLoginBody,
+        db: Session = Depends(get_db),
+        settings: Settings = Depends(get_settings_dep),
+    ) -> dict[str, str]:
+        raw = payload.model_dump(exclude_none=True)
+        try:
+            verify_telegram_login({k: str(v) for k, v in raw.items()}, settings)
+        except ValueError as e:
+            raise HTTPException(401, str(e)) from e
+
+        telegram_id = str(payload.id).strip()
+        if not telegram_id:
+            raise HTTPException(400, "Telegram id пустой")
+
+        username = (payload.username or "").strip() or None
+        full_name = " ".join(x for x in [payload.first_name or "", payload.last_name or ""] if x).strip()
+        display_name = full_name or username or None
+
+        user = db.execute(select(LogikaUser).where(LogikaUser.telegram_id == telegram_id)).scalar_one_or_none()
+        if user is None:
+            user = LogikaUser(
+                phone_e164=None,
+                email_norm=None,
+                telegram_id=telegram_id,
+                telegram_username=username,
+                name=display_name,
+            )
+            db.add(user)
+            db.commit()
+            db.refresh(user)
+        else:
+            changed = False
+            if username and user.telegram_username != username:
+                user.telegram_username = username
+                changed = True
+            if display_name and user.name != display_name:
+                user.name = display_name
+                changed = True
+            if changed:
+                db.commit()
+
+        token = create_access_token(settings, user.id)
+        return {"access_token": token, "token_type": "bearer"}
+
     def get_bearer_user(
         authorization: Annotated[str | None, Header()] = None,
         db: Session = Depends(get_db),
@@ -384,6 +442,8 @@ def create_app() -> FastAPI:
         return {
             "phone_e164": user.phone_e164,
             "email_norm": user.email_norm,
+            "telegram_id": user.telegram_id,
+            "telegram_username": user.telegram_username,
             "name": user.name,
         }
 

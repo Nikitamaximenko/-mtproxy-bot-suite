@@ -27,7 +27,10 @@ cd logika && pnpm build
 ## Деплой на Vercel
 
 1. Создай проект, **Root Directory** = `logika`, пресет **Vite** (или Static: `pnpm install`, `pnpm build`, выходная папка `dist`).
-2. В **Environment Variables** добавь `VITE_LOGIKA_API_URL` = публичный URL API на Railway (без `/` в конце), например `https://logika-api.up.railway.app`. Переменная **должна быть доступна на этапе сборки** (Production и при необходимости Preview): Vite подставляет её в бандл при `pnpm build`.
+2. В **Environment Variables** добавь:
+   - `VITE_LOGIKA_API_URL` = публичный URL API на Railway (без `/` в конце), например `https://logika-api.up.railway.app`
+   - `VITE_TELEGRAM_LOGIN_BOT` = username Telegram-бота для входа (без `@`), например `frostytg_bot`
+   Переменные **должны быть доступны на этапе сборки** (Production и при необходимости Preview): Vite подставляет их в бандл при `pnpm build`.
 3. Если фронт открыт с **своего домена** (не `*.vercel.app`), в Railway у бэкенда в `CORS_ORIGINS` добавь этот URL через запятую вместе с `http://localhost:5173`.
 4. Файл `vercel.json` отдаёт `index.html` для клиентских маршрутов. Статика из `public/` (`design-system.html`, `pdf-preview.html`) работает как отдельные файлы.
 

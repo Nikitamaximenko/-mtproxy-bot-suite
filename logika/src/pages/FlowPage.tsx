@@ -23,6 +23,8 @@ import {
   requestCode,
   requestEmailCode,
   startSession,
+  type TelegramLoginPayload,
+  verifyTelegramAuth,
   verifyCode,
 } from '../lib/logika-api'
 
@@ -100,11 +102,13 @@ function normalizeApiThread(
 
 function FlowPage() {
   const apiMode = hasApi()
+  const telegramBotUsername = (import.meta.env.VITE_TELEGRAM_LOGIN_BOT as string | undefined)?.trim() || ''
+  const telegramLoginEnabled = apiMode && telegramBotUsername.length > 0
   const [authBootstrapping, setAuthBootstrapping] = useState(
     () => Boolean(apiMode && getToken()),
   )
   const [phase, setPhase] = useState<Phase>('phone')
-  const [authChannel, setAuthChannel] = useState<'phone' | 'email'>('phone')
+  const [authChannel, setAuthChannel] = useState<'phone' | 'email' | 'telegram'>('phone')
   const [phone, setPhone] = useState('')
   const [email, setEmail] = useState('')
   const [code, setCode] = useState('')
@@ -121,6 +125,8 @@ function FlowPage() {
   const [meProfile, setMeProfile] = useState<{
     phone_e164: string | null
     email_norm: string | null
+    telegram_id?: string | null
+    telegram_username?: string | null
     name: string | null
   } | null>(null)
   const [flowError, setFlowError] = useState<string | null>(null)
@@ -133,6 +139,54 @@ function FlowPage() {
   const [apiSessionId, setApiSessionId] = useState<string | null>(null)
   const [apiThread, setApiThread] = useState<Array<{ role: 'user' | 'assistant'; content: string }>>([])
   const [apiReport, setApiReport] = useState<Record<string, unknown> | null>(null)
+
+  useEffect(() => {
+    if (phase !== 'phone' || authChannel !== 'telegram' || !telegramLoginEnabled) return
+    const container = document.getElementById('tg-login-widget')
+    if (!container) return
+    container.innerHTML = ''
+    const callbackName = 'logikaTelegramLoginCallback'
+    const win = window as unknown as Record<string, unknown>
+    win[callbackName] = (user: TelegramLoginPayload) => {
+      void (async () => {
+        setFlowError(null)
+        setBusy(true)
+        try {
+          await verifyTelegramAuth({
+            id: String(user.id),
+            auth_date: String(user.auth_date),
+            hash: String(user.hash),
+            first_name: user.first_name,
+            last_name: user.last_name,
+            username: user.username,
+            photo_url: user.photo_url,
+          })
+          setEntryFromCabinetNewQuestion(false)
+          setPhase('onb1')
+        } catch (e) {
+          setFlowError(e instanceof Error ? e.message : 'Не удалось войти через Telegram')
+        } finally {
+          setBusy(false)
+        }
+      })()
+    }
+
+    const script = document.createElement('script')
+    script.async = true
+    script.src = 'https://telegram.org/js/telegram-widget.js?22'
+    script.setAttribute('data-telegram-login', telegramBotUsername)
+    script.setAttribute('data-size', 'large')
+    script.setAttribute('data-radius', '8')
+    script.setAttribute('data-userpic', 'false')
+    script.setAttribute('data-request-access', 'write')
+    script.setAttribute('data-onauth', `${callbackName}(user)`)
+    container.appendChild(script)
+
+    return () => {
+      container.innerHTML = ''
+      delete win[callbackName]
+    }
+  }, [phase, authChannel, telegramBotUsername, telegramLoginEnabled])
 
   useEffect(() => {
     if (!apiMode) {
@@ -546,6 +600,23 @@ function FlowPage() {
                     >
                       Почта
                     </button>
+                    {telegramLoginEnabled && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setAuthChannel('telegram')
+                          setFlowError(null)
+                        }}
+                        className={clsx(
+                          'rounded-[4px] px-4 py-2 font-mono text-xs uppercase tracking-[0.08em] transition-colors',
+                          authChannel === 'telegram'
+                            ? 'bg-accent text-background'
+                            : 'text-muted hover:text-foreground border-border border',
+                        )}
+                      >
+                        Telegram
+                      </button>
+                    )}
                   </div>
                   {authChannel === 'phone' ? (
                     <label className="mt-8 block">
@@ -557,7 +628,7 @@ function FlowPage() {
                         className="border-border bg-elevated focus:border-accent focus:ring-accent/30 mt-2 w-full rounded-[4px] border px-4 py-3 text-lg outline-none transition-all duration-300 focus:ring-2"
                       />
                     </label>
-                  ) : (
+                  ) : authChannel === 'email' ? (
                     <label className="mt-8 block">
                       <span className="text-dim font-mono text-xs uppercase tracking-[0.08em]">Email</span>
                       <input
@@ -569,24 +640,43 @@ function FlowPage() {
                         className="border-border bg-elevated focus:border-accent focus:ring-accent/30 mt-2 w-full rounded-[4px] border px-4 py-3 text-lg outline-none transition-all duration-300 focus:ring-2"
                       />
                     </label>
+                  ) : (
+                    <div className="mt-8">
+                      <p className="text-muted text-sm leading-relaxed">
+                        Быстрый вход без кода: Telegram подтвердит аккаунт в один шаг.
+                      </p>
+                      <div className="border-border bg-elevated mt-4 flex min-h-[56px] items-center justify-center rounded-[8px] border p-2">
+                        <div id="tg-login-widget" />
+                      </div>
+                    </div>
                   )}
-                  <button
-                    type="button"
-                    onClick={() => void sendPhone()}
-                    disabled={
-                      busy ||
-                      (authChannel === 'phone'
-                        ? phone.replace(/\D/g, '').length < 10
-                        : !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim()))
-                    }
-                    className="ease-brand bg-accent text-background hover:bg-accent-hover mt-8 w-full rounded-[4px] py-3 font-medium transition-all duration-300 disabled:opacity-40"
-                  >
-                    Получить код
-                    <span className="ml-1">→</span>
-                  </button>
-                  <p className="text-dim mt-8 text-sm leading-relaxed">
-                    Нажимая, ты соглашаешься с офертой. Новый пользователь — аккаунт создаётся сам.
-                  </p>
+                  {authChannel !== 'telegram' && (
+                    <>
+                      <button
+                        type="button"
+                        onClick={() => void sendPhone()}
+                        disabled={
+                          busy ||
+                          (authChannel === 'phone'
+                            ? phone.replace(/\D/g, '').length < 10
+                            : !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim()))
+                        }
+                        className="ease-brand bg-accent text-background hover:bg-accent-hover mt-8 w-full rounded-[4px] py-3 font-medium transition-all duration-300 disabled:opacity-40"
+                      >
+                        Получить код
+                        <span className="ml-1">→</span>
+                      </button>
+                      <p className="text-dim mt-8 text-sm leading-relaxed">
+                        Нажимая, ты соглашаешься с офертой. Новый пользователь — аккаунт создаётся сам.
+                      </p>
+                    </>
+                  )}
+                  {authChannel === 'telegram' && (
+                    <p className="text-dim mt-6 text-sm leading-relaxed">
+                      Не видите кнопку? Проверьте, что в Vercel задан{' '}
+                      <span className="font-mono">VITE_TELEGRAM_LOGIN_BOT</span>.
+                    </p>
+                  )}
                 </>
               )}
               {phase === 'code' && (
@@ -1141,6 +1231,20 @@ function FlowPage() {
                       readOnly
                       value={
                         meProfile?.email_norm ? maskEmailNorm(meProfile.email_norm) : '—'
+                      }
+                      className="border-border bg-elevated mt-2 w-full cursor-not-allowed rounded-[4px] border px-3 py-2 text-foreground"
+                    />
+                  </label>
+                  <label className="mt-6 block text-sm text-muted">
+                    Telegram
+                    <input
+                      readOnly
+                      value={
+                        meProfile?.telegram_username
+                          ? `@${meProfile.telegram_username}`
+                          : meProfile?.telegram_id
+                            ? `id ${meProfile.telegram_id}`
+                            : '—'
                       }
                       className="border-border bg-elevated mt-2 w-full cursor-not-allowed rounded-[4px] border px-3 py-2 text-foreground"
                     />

@@ -142,6 +142,25 @@ export async function verifyCode(
   return data
 }
 
+export type TelegramLoginPayload = {
+  id: string
+  auth_date: string
+  hash: string
+  first_name?: string
+  last_name?: string
+  username?: string
+  photo_url?: string
+}
+
+export async function verifyTelegramAuth(payload: TelegramLoginPayload) {
+  const data = await req<{ access_token: string; token_type: string }>('/v1/auth/telegram', {
+    method: 'POST',
+    json: payload,
+  })
+  setToken(data.access_token)
+  return data
+}
+
 export async function startSession(dilemma: string) {
   return req<{ session_id: string; bot_message: string }>('/v1/sessions/start', {
     method: 'POST',
@@ -209,6 +228,8 @@ export async function fetchCabinet(): Promise<CabinetResponse> {
 export async function fetchMe(): Promise<{
   phone_e164: string | null
   email_norm: string | null
+  telegram_id?: string | null
+  telegram_username?: string | null
   name: string | null
 }> {
   return req('/v1/me')

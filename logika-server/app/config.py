@@ -35,6 +35,8 @@ class Settings(BaseSettings):
     smtp_use_ssl: bool = False
     # Локально без SMTP: true — код в логах uvicorn
     email_allow_log_only: bool = False
+    # Telegram Login Widget (https://core.telegram.org/widgets/login): токен бота для проверки hash.
+    telegram_bot_token: str = ""
 
     anthropic_api_key: str = ""
     # Локально true — шаблонные ответы без Claude. На Railway prod держи false и задай ANTHROPIC_API_KEY.
