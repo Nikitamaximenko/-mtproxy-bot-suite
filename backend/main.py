@@ -4690,6 +4690,28 @@ def _latest_subquery_for_telegram_ids(telegram_id_filter):
     return stmt.subquery()
 
 
+def _pick_effective_subscription_for_admin(rows: list[Subscription], now: datetime) -> Subscription:
+    """Выбрать строку подписки для админ-таблицы так же, как реально считается доступ."""
+    active_rows = [
+        s for s in rows
+        if s.payment_status in SUBSCRIPTION_ACCESS_STATUSES
+        and s.expires_at is not None
+        and s.expires_at > now
+    ]
+    if active_rows:
+        active_rows.sort(
+            key=lambda s: (
+                1 if s.payment_status == "paid" else 0,
+                s.expires_at or now,
+                s.created_at,
+            ),
+            reverse=True,
+        )
+        return active_rows[0]
+    rows.sort(key=lambda s: s.created_at, reverse=True)
+    return rows[0]
+
+
 @app.get("/admin/users", response_model=AdminSubsResponse)
 def admin_users(req: Request, db: Session = Depends(get_db)) -> AdminSubsResponse:
     """Unique users with their latest subscription status (one row per telegram_id)."""
@@ -4775,26 +4797,39 @@ def admin_users_overview(
     )
 
     paid_ids_subq = paid_telegram_ids.subquery()
-    latest_subq = _latest_subquery_for_telegram_ids(select(paid_ids_subq.c.telegram_id))
+    paid_tg_ids = [
+        int(tg) for (tg,) in db.execute(select(paid_ids_subq.c.telegram_id)).all()
+    ]
+    subscribers_total = len(paid_tg_ids)
 
-    sub_rows = db.execute(
-        select(Subscription, User.username)
-        .join(
-            latest_subq,
-            and_(
-                Subscription.telegram_id == latest_subq.c.tg_id,
-                Subscription.created_at == latest_subq.c.max_created,
-            ),
-        )
-        .outerjoin(User, User.telegram_id == Subscription.telegram_id)
-        .order_by(Subscription.created_at.desc())
-        .limit(limit)
-    ).all()
-    vpn_map = _vpn_state_map([int(s.telegram_id) for s, _ in sub_rows], db)
+    effective_rows: list[Subscription] = []
+    username_map: dict[int, str | None] = {}
+    if paid_tg_ids:
+        users_rows = db.execute(
+            select(User.telegram_id, User.username).where(User.telegram_id.in_(paid_tg_ids))
+        ).all()
+        username_map = {int(tg): uname for tg, uname in users_rows}
 
-    subscribers = [_sub_info(s, uname, vpn_map) for s, uname in sub_rows]
+        all_subs = db.execute(
+            select(Subscription)
+            .where(Subscription.telegram_id.in_(paid_tg_ids))
+            .order_by(Subscription.telegram_id.asc(), Subscription.created_at.desc())
+        ).scalars().all()
 
-    subscribers_total = db.execute(select(func.count()).select_from(paid_ids_subq)).scalar() or 0
+        grouped: dict[int, list[Subscription]] = {}
+        for s in all_subs:
+            grouped.setdefault(int(s.telegram_id), []).append(s)
+
+        for tg in paid_tg_ids:
+            rows = grouped.get(int(tg)) or []
+            if not rows:
+                continue
+            effective_rows.append(_pick_effective_subscription_for_admin(rows, utcnow()))
+
+    effective_rows.sort(key=lambda s: s.created_at, reverse=True)
+    effective_rows = effective_rows[:limit]
+    vpn_map = _vpn_state_map([int(s.telegram_id) for s in effective_rows], db)
+    subscribers = [_sub_info(s, username_map.get(int(s.telegram_id)), vpn_map) for s in effective_rows]
 
     return AdminUsersOverviewResponse(
         new_users=[
