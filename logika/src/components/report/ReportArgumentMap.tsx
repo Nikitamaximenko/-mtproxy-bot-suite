@@ -40,7 +40,6 @@ type MapNode = {
   sub?: string
   x: number
   y: number
-  anchor: 'center' | 'left' | 'right'
   delay: number
 }
 
@@ -72,18 +71,11 @@ function titleCase(s: string): string {
   return t[0].toUpperCase() + t.slice(1)
 }
 
-function distributeX(count: number): { x: number; anchor: MapNode['anchor'] }[] {
+function distributeX(count: number): number[] {
   if (count <= 0) return []
-  if (count === 1) return [{ x: 50, anchor: 'center' }]
-  if (count === 2) return [
-    { x: 5, anchor: 'left' },
-    { x: 95, anchor: 'right' },
-  ]
-  return [
-    { x: 5, anchor: 'left' },
-    { x: 50, anchor: 'center' },
-    { x: 95, anchor: 'right' },
-  ]
+  if (count === 1) return [50]
+  if (count === 2) return [20, 80]
+  return [15, 50, 85]
 }
 
 function buildGraph(report: Record<string, unknown> | null, dilemma: string | undefined): Graph {
@@ -112,8 +104,7 @@ function buildGraph(report: Record<string, unknown> | null, dilemma: string | un
     kind: 'claim',
     label: claimText,
     x: 50,
-    y: 13,
-    anchor: 'center',
+    y: 14,
     delay: 0.05,
   })
 
@@ -124,9 +115,8 @@ function buildGraph(report: Record<string, unknown> | null, dilemma: string | un
       kind: 'premise',
       label: clipLabel(titleCase(l.name || 'Посылка'), 28),
       sub: l.comment ? clipLabel(l.comment, 52) : undefined,
-      x: premiseSlots[i].x,
+      x: premiseSlots[i],
       y: 40,
-      anchor: premiseSlots[i].anchor,
       delay: 0.25 + i * 0.08,
     })
   })
@@ -138,8 +128,7 @@ function buildGraph(report: Record<string, unknown> | null, dilemma: string | un
       label: clipLabel(titleCase(primaryBias.name), 32),
       sub: primaryBias.hint ? clipLabel(primaryBias.hint, 60) : undefined,
       x: 50,
-      y: 63,
-      anchor: 'center',
+      y: 58,
       delay: 0.55,
     })
   }
@@ -151,9 +140,8 @@ function buildGraph(report: Record<string, unknown> | null, dilemma: string | un
       kind: 'conflict',
       label: clipLabel(titleCase(l.name || 'Трещина'), 28),
       sub: l.comment ? clipLabel(l.comment, 52) : undefined,
-      x: conflictSlots[i].x,
-      y: 87,
-      anchor: conflictSlots[i].anchor,
+      x: conflictSlots[i],
+      y: 86,
       delay: 0.8 + i * 0.08,
     })
   })
@@ -261,30 +249,16 @@ function kindTag(kind: NodeKind): string {
   }
 }
 
-function shortenEdge(
-  from: MapNode,
-  to: MapNode,
-  pullStart = 5,
-  pullEnd = 5,
-): { x1: number; y1: number; x2: number; y2: number } {
-  const dx = to.x - from.x
-  const dy = to.y - from.y
+/** Curve conflict edges around the motive node so they don't slice through it. */
+function conflictEdgePath(ax: number, ay: number, bx: number, by: number): string {
+  const midx = (ax + bx) / 2
+  const midy = (ay + by) / 2
+  const dx = bx - ax
+  const dy = by - ay
   const len = Math.hypot(dx, dy) || 1
-  const ux = dx / len
-  const uy = dy / len
-  return {
-    x1: from.x + ux * pullStart,
-    y1: from.y + uy * pullStart,
-    x2: to.x - ux * pullEnd,
-    y2: to.y - uy * pullEnd,
-  }
-}
-
-function anchorStyle(n: MapNode): React.CSSProperties {
-  const base: React.CSSProperties = { left: `${n.x}%`, top: `${n.y}%` }
-  if (n.anchor === 'center') return { ...base, transform: 'translate(-50%, -50%)' }
-  if (n.anchor === 'left') return { ...base, transform: 'translate(0, -50%)' }
-  return { ...base, transform: 'translate(-100%, -50%)' }
+  const ox = (-dy / len) * 14
+  const oy = (dx / len) * 14
+  return `M ${ax} ${ay} Q ${midx + ox} ${midy + oy} ${bx} ${by}`
 }
 
 // ----- Component ---------------------------------------------------------
@@ -306,7 +280,7 @@ export function ReportArgumentMap({ report, dilemma }: ReportArgumentMapProps) {
   return (
     <section
       aria-labelledby="report-argmap-heading"
-      className="border-border bg-card/60 overflow-hidden rounded-2xl border"
+      className="border-border bg-card/60 relative overflow-visible rounded-2xl border"
     >
       <div className="border-border/80 flex flex-wrap items-center justify-between gap-2 border-b px-5 py-4 sm:px-7">
         <div>
@@ -331,7 +305,7 @@ export function ReportArgumentMap({ report, dilemma }: ReportArgumentMapProps) {
         </div>
       </div>
 
-      <div className="relative aspect-[4/3] w-full">
+      <div className="relative aspect-[4/3] w-full overflow-visible px-1 sm:px-2">
         <svg
           viewBox="0 0 100 100"
           className="absolute inset-0 h-full w-full"
@@ -353,21 +327,22 @@ export function ReportArgumentMap({ report, dilemma }: ReportArgumentMapProps) {
             const from = graph.nodes.find((n) => n.id === edge.from)!
             const to = graph.nodes.find((n) => n.id === edge.to)!
             if (!from || !to) return null
-            const { x1, y1, x2, y2 } = shortenEdge(from, to)
             const stroke = edge.relation === 'conflicts' ? '#ff4d4d' : '#c4f542'
+            const isConflict = edge.relation === 'conflicts'
+            const d = isConflict
+              ? conflictEdgePath(from.x, from.y, to.x, to.y)
+              : `M ${from.x} ${from.y} L ${to.x} ${to.y}`
             return (
-              <motion.line
+              <motion.path
                 key={`${edge.from}->${edge.to}`}
-                x1={x1}
-                y1={y1}
-                x2={x2}
-                y2={y2}
+                d={d}
+                fill="none"
                 stroke={stroke}
-                strokeWidth={edge.relation === 'conflicts' ? 0.4 : 0.28}
-                strokeDasharray={edge.relation === 'conflicts' ? '1.2 0.8' : undefined}
-                strokeLinecap="butt"
+                strokeWidth={isConflict ? 0.45 : 0.3}
+                strokeDasharray={isConflict ? '1.2 0.8' : undefined}
+                strokeLinecap="round"
                 initial={{ pathLength: 0, opacity: 0 }}
-                whileInView={{ pathLength: 1, opacity: 0.7 }}
+                whileInView={{ pathLength: 1, opacity: 0.78 }}
                 viewport={{ once: true, margin: '-10%' }}
                 transition={{ duration: 0.8, ease, delay: edge.delay }}
               />
@@ -375,27 +350,42 @@ export function ReportArgumentMap({ report, dilemma }: ReportArgumentMapProps) {
           })}
         </svg>
 
-        {graph.nodes.map((n) => (
-          <motion.div
-            key={n.id}
-            initial={{ opacity: 0, y: 6, scale: 0.95 }}
-            whileInView={{ opacity: 1, y: 0, scale: 1 }}
-            viewport={{ once: true, margin: '-10%' }}
-            transition={{ duration: 0.5, ease, delay: n.delay }}
-            className="pointer-events-none absolute"
-            style={anchorStyle(n)}
-          >
+        {graph.nodes.map((n) => {
+          const isCenter = n.kind === 'claim' || n.kind === 'motive'
+          return (
             <div
-              className={`${nodeClass(n.kind)} inline-flex items-center gap-2 whitespace-nowrap rounded-[8px] px-2.5 py-1.5 text-[10px] font-medium shadow-[0_4px_18px_rgba(0,0,0,0.55)] sm:px-3 sm:text-xs`}
-              title={n.sub}
+              key={n.id}
+              className="pointer-events-none absolute z-10 flex h-0 w-0 items-center justify-center"
+              style={{ left: `${n.x}%`, top: `${n.y}%` }}
             >
-              <span className="font-mono text-[8px] uppercase tracking-[0.08em] opacity-70 sm:text-[9px]">
-                {kindTag(n.kind)}
-              </span>
-              <span>{n.label}</span>
+              <motion.div
+                className="[backface-visibility:hidden]"
+                initial={{ opacity: 0, y: 10 }}
+                whileInView={{ opacity: 1, y: 0 }}
+                viewport={{ once: true, margin: '-10%' }}
+                transition={{ duration: 0.42, ease, delay: n.delay }}
+              >
+                <div
+                  className={[
+                    nodeClass(n.kind),
+                    'min-w-0 max-w-[min(14.5rem,42vw)] shadow-[0_4px_20px_rgba(0,0,0,0.55)]',
+                    'rounded-[10px] px-3 py-2 sm:max-w-[min(16rem,40vw)]',
+                    'flex flex-col gap-1 font-medium antialiased',
+                    isCenter ? 'items-center text-center' : 'text-left',
+                  ].join(' ')}
+                  title={n.sub}
+                >
+                  <span className="font-mono text-[9px] uppercase leading-tight tracking-[0.07em] opacity-75">
+                    {kindTag(n.kind)}
+                  </span>
+                  <span className="text-[12px] leading-[1.42] [overflow-wrap:anywhere] text-balance sm:text-[13px] sm:leading-[1.48]">
+                    {n.label}
+                  </span>
+                </div>
+              </motion.div>
             </div>
-          </motion.div>
-        ))}
+          )
+        })}
       </div>
 
       <div className="border-border/80 flex flex-col gap-3 border-t px-5 py-5 sm:flex-row sm:gap-6 sm:px-7 sm:py-6">
