@@ -1,5 +1,6 @@
 import { motion } from 'framer-motion'
 import { Logo } from '../Logo'
+import { ReportArgumentMap } from './ReportArgumentMap'
 
 export function reportScoreColor(score: number): string {
   if (score < 40) return '#ff4d4d'
@@ -184,6 +185,8 @@ export function ReportView({
           </div>
         </div>
       </section>
+
+      <ReportArgumentMap report={report} dilemma={dilemma} />
 
       <div className="mt-12 grid gap-5 sm:grid-cols-2 sm:gap-6">
         {laws.map((row, idx) => (
