@@ -188,15 +188,15 @@ export function ArgumentMap() {
             transition={{ duration: 0.6, ease }}
             className="border-border bg-card relative overflow-visible rounded-[16px] border"
           >
-            <div className="border-border text-dim flex items-center justify-between overflow-hidden rounded-t-[15px] border-b px-4 py-3 font-mono text-[11px] uppercase tracking-[0.08em]">
+            <div className="border-border text-dim flex items-center justify-between overflow-hidden rounded-t-[15px] border-b px-3 py-2.5 font-mono text-[10px] uppercase tracking-[0.08em] sm:px-4 sm:py-3 sm:text-[11px]">
               <span>Карта аргумента — цикл #{cycle + 1}</span>
-              <span>
+              <span className="hidden sm:inline">
                 {visibleNodes.length} узлов · {visibleEdges.length} рёбер ·{' '}
                 <span className="text-[#ff4d4d]">{conflictCount}</span> конфликтов
               </span>
             </div>
 
-            <div className="relative aspect-[4/3] w-full overflow-visible px-1 sm:px-2">
+            <div className="relative aspect-[1/1.1] w-full overflow-visible px-1 sm:aspect-[4/3] sm:px-2">
               <svg
                 viewBox="0 0 100 100"
                 className="absolute inset-0 h-full w-full"
@@ -260,18 +260,18 @@ export function ArgumentMap() {
                         className={[
                           nodeBg(n.kind),
                           isCenter
-                            ? 'w-[11.5rem] max-w-[min(22rem,62vw)]'
-                            : 'w-[9.5rem] max-w-[min(18rem,48vw)]',
+                            ? 'w-[8.8rem] sm:w-[11.5rem] max-w-[min(22rem,62vw)]'
+                            : 'w-[7.3rem] sm:w-[9.5rem] max-w-[min(18rem,48vw)]',
                           'shrink-0 shadow-[0_4px_20px_rgba(0,0,0,0.52)]',
-                          'rounded-[10px] px-3 py-2 sm:max-w-[min(20rem,46vw)]',
+                          'rounded-[10px] px-2.5 py-2 sm:px-3 sm:max-w-[min(20rem,46vw)]',
                           'flex flex-col gap-1 font-medium antialiased',
                           isCenter ? 'items-center text-center' : 'text-left',
                         ].join(' ')}
                       >
-                        <span className="font-mono text-[9px] uppercase tracking-[0.07em] opacity-75 leading-tight">
+                        <span className="font-mono text-[8px] uppercase tracking-[0.07em] opacity-75 leading-tight sm:text-[9px]">
                           {kindLabel(n.kind)}
                         </span>
-                        <span className="text-[12px] leading-[1.42] break-words [word-break:normal] sm:text-[13px] sm:leading-[1.48]">
+                        <span className="text-[11px] leading-[1.35] break-words [word-break:normal] sm:text-[13px] sm:leading-[1.48]">
                           {n.label}
                         </span>
                       </div>

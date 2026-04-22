@@ -282,7 +282,7 @@ export function ReportArgumentMap({ report, dilemma }: ReportArgumentMapProps) {
       aria-labelledby="report-argmap-heading"
       className="border-border bg-card/60 relative overflow-visible rounded-2xl border"
     >
-      <div className="border-border/80 flex flex-wrap items-center justify-between gap-2 border-b px-5 py-4 sm:px-7">
+      <div className="border-border/80 flex flex-wrap items-center justify-between gap-2 border-b px-4 py-3.5 sm:px-7 sm:py-4">
         <div>
           <p
             id="report-argmap-heading"
@@ -294,7 +294,7 @@ export function ReportArgumentMap({ report, dilemma }: ReportArgumentMapProps) {
             Твоё рассуждение — в узлах и рёбрах
           </p>
         </div>
-        <div className="text-dim flex items-center gap-3 font-mono text-[10px] uppercase tracking-[0.12em]">
+        <div className="text-dim hidden items-center gap-3 font-mono text-[10px] uppercase tracking-[0.12em] sm:flex">
           <span>
             <span className="text-accent">{graph.stats.premises}</span> опор
           </span>
@@ -305,7 +305,7 @@ export function ReportArgumentMap({ report, dilemma }: ReportArgumentMapProps) {
         </div>
       </div>
 
-      <div className="relative aspect-[4/3] w-full overflow-visible px-1 sm:px-2">
+      <div className="relative aspect-[1/1.1] w-full overflow-visible px-1 sm:aspect-[4/3] sm:px-2">
         <svg
           viewBox="0 0 100 100"
           className="absolute inset-0 h-full w-full"
@@ -342,8 +342,7 @@ export function ReportArgumentMap({ report, dilemma }: ReportArgumentMapProps) {
                 strokeDasharray={isConflict ? '1.2 0.8' : undefined}
                 strokeLinecap="round"
                 initial={{ pathLength: 0, opacity: 0 }}
-                whileInView={{ pathLength: 1, opacity: 0.78 }}
-                viewport={{ once: true, margin: '-10%' }}
+                animate={{ pathLength: 1, opacity: 0.78 }}
                 transition={{ duration: 0.8, ease, delay: edge.delay }}
               />
             )
@@ -361,27 +360,26 @@ export function ReportArgumentMap({ report, dilemma }: ReportArgumentMapProps) {
               <motion.div
                 className="[backface-visibility:hidden]"
                 initial={{ opacity: 0, y: 10 }}
-                whileInView={{ opacity: 1, y: 0 }}
-                viewport={{ once: true, margin: '-10%' }}
+                animate={{ opacity: 1, y: 0 }}
                 transition={{ duration: 0.42, ease, delay: n.delay }}
               >
                 <div
                   className={[
                     nodeClass(n.kind),
                     isCenter
-                      ? 'w-[11.5rem] max-w-[min(22rem,62vw)]'
-                      : 'w-[9.5rem] max-w-[min(18rem,48vw)]',
+                      ? 'w-[8.8rem] sm:w-[11.5rem] max-w-[min(22rem,62vw)]'
+                      : 'w-[7.3rem] sm:w-[9.5rem] max-w-[min(18rem,48vw)]',
                     'shrink-0 shadow-[0_4px_20px_rgba(0,0,0,0.55)]',
-                    'rounded-[10px] px-3 py-2 sm:max-w-[min(20rem,46vw)]',
+                    'rounded-[10px] px-2.5 py-2 sm:px-3 sm:max-w-[min(20rem,46vw)]',
                     'flex flex-col gap-1 font-medium antialiased',
                     isCenter ? 'items-center text-center' : 'text-left',
                   ].join(' ')}
                   title={n.sub}
                 >
-                  <span className="font-mono text-[9px] uppercase leading-tight tracking-[0.07em] opacity-75">
+                  <span className="font-mono text-[8px] uppercase leading-tight tracking-[0.07em] opacity-75 sm:text-[9px]">
                     {kindTag(n.kind)}
                   </span>
-                  <span className="text-[12px] leading-[1.42] break-words [word-break:normal] sm:text-[13px] sm:leading-[1.48]">
+                  <span className="text-[11px] leading-[1.35] break-words [word-break:normal] sm:text-[13px] sm:leading-[1.48]">
                     {n.label}
                   </span>
                 </div>
@@ -389,6 +387,21 @@ export function ReportArgumentMap({ report, dilemma }: ReportArgumentMapProps) {
             </div>
           )
         })}
+      </div>
+
+      <div className="border-border/80 text-dim grid grid-cols-3 border-t font-mono text-[10px] uppercase tracking-[0.1em] sm:hidden">
+        <div className="border-border/80 border-r px-3 py-2.5">
+          <div className="text-accent">{graph.stats.premises}</div>
+          <div>Опор</div>
+        </div>
+        <div className="border-border/80 border-r px-3 py-2.5">
+          <div className="text-foreground">{graph.stats.edges}</div>
+          <div>Рёбер</div>
+        </div>
+        <div className="px-3 py-2.5">
+          <div className="text-[#ff6b6b]">{graph.stats.conflicts}</div>
+          <div>Трещин</div>
+        </div>
       </div>
 
       <div className="border-border/80 flex flex-col gap-3 border-t px-5 py-5 sm:flex-row sm:gap-6 sm:px-7 sm:py-6">
