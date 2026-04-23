@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react"
 import { Check, Copy, ExternalLink, RefreshCw, Shield, X } from "lucide-react"
-import { getTelegramInitData, getTelegramInitDataAsync, getTelegramUser, openPaymentLink, openTelegramLink } from "@/lib/telegram"
+import { getTelegramInitData, getTelegramInitDataAsync, getTelegramUser, normalizePaymentUrl, openPaymentLink, openTelegramLink } from "@/lib/telegram"
 
 type SubscriptionData = {
   active: boolean
@@ -19,9 +19,9 @@ type VpnData = {
   uuid: string | null
 }
 
-function FrostIcon({ className }: { className?: string }) {
+function FrostIcon({ className, style }: { className?: string; style?: React.CSSProperties }) {
   return (
-    <svg viewBox="0 0 100 100" className={className} fill="none" xmlns="http://www.w3.org/2000/svg">
+    <svg viewBox="0 0 100 100" className={className} style={style} fill="none" xmlns="http://www.w3.org/2000/svg">
       <path d="M50 5L50 95M5 50L95 50M20 20L80 80M80 20L20 80" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
       <circle cx="50" cy="50" r="8" fill="currentColor" />
       <circle cx="50" cy="20" r="4" fill="currentColor" />
@@ -550,7 +550,7 @@ export default function MiniAppPage() {
       const payUrl = String(data.payment_url)
       if (isWeb) {
         localStorage.setItem("frosty_email", email)
-        window.location.href = payUrl
+        window.location.href = normalizePaymentUrl(payUrl)
         return
       }
       // В Telegram Mini App оплату открываем прямо внутри WebView мини-аппа (навигация самой страницы),

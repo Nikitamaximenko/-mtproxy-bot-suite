@@ -170,6 +170,45 @@ type SupportAiStats = {
   top_users_7d: SupportAiTopUser[]
 }
 
+type CheckoutLogItem = {
+  id: number
+  source: string
+  stage: string
+  provider: string | null
+  telegram_id: number | null
+  username: string | null
+  email: string | null
+  customer_email: string | null
+  payment_token: string | null
+  ok: boolean
+  payment_url: string | null
+  error: string | null
+  details: string | null
+  created_at: string
+}
+
+type CheckoutLogsData = {
+  logs: CheckoutLogItem[]
+  total: number
+}
+
+type CheckoutStageBucket = {
+  stage: string
+  total: number
+  errors: number
+}
+
+type CheckoutStats = {
+  total: number
+  last_24h: number
+  errors_total: number
+  errors_24h: number
+  fallback_24h: number
+  last_error_at: string | null
+  last_success_at: string | null
+  stage_24h: CheckoutStageBucket[]
+}
+
 type FunnelStats = {
   // TG funnel (unique users, tg_id > 0)
   tg_users: number
@@ -313,6 +352,23 @@ function safeFunnel(raw: unknown): FunnelStats | null {
   }
 }
 
+function checkoutStageLabel(stage: string): string {
+  const labels: Record<string, string> = {
+    backend_checkout_received: "Backend принял checkout",
+    backend_lava_invoice_ready: "Lava вернула ссылку",
+    backend_lava_fallback: "Lava упала, включился fallback",
+    backend_lava_legacy_url: "Использована legacy/fallback ссылка",
+    backend_yookassa_ready: "ЮKassa вернула ссылку",
+    backend_yookassa_failed: "ЮKassa не создала платёж",
+    backend_checkout_response: "Backend отдал payment_url",
+    frontend_backend_unreachable: "Frontend не достучался до backend",
+    frontend_backend_error: "Frontend получил ошибку backend",
+    frontend_missing_payment_url: "Frontend не получил payment_url",
+    frontend_checkout_ok: "Frontend получил ссылку и отдал пользователю",
+  }
+  return labels[stage] || stage
+}
+
 export default function AdminPage() {
   const [key, setKey] = useState("")
   const [authed, setAuthed] = useState(false)
@@ -354,6 +410,11 @@ export default function AdminPage() {
   const [supportOnlyErrors, setSupportOnlyErrors] = useState(false)
   const [supportTgFilter, setSupportTgFilter] = useState("")
   const [supportExpandedId, setSupportExpandedId] = useState<number | null>(null)
+  const [checkoutStats, setCheckoutStats] = useState<CheckoutStats | null>(null)
+  const [checkoutLogs, setCheckoutLogs] = useState<CheckoutLogsData | null>(null)
+  const [checkoutOnlyErrors, setCheckoutOnlyErrors] = useState(true)
+  const [checkoutTgFilter, setCheckoutTgFilter] = useState("")
+  const [checkoutExpandedId, setCheckoutExpandedId] = useState<number | null>(null)
   const [purgeResult, setPurgeResult] = useState<{
     deleted_users: number
     deleted_subscriptions: number
@@ -399,7 +460,7 @@ export default function AdminPage() {
       setLoading(true)
       setError("")
       try {
-        const [sRes, pRes, ovRes, fRes, vRes, vcRes, ssRes, smRes] = await Promise.all([
+        const [sRes, pRes, ovRes, fRes, vRes, vcRes, ssRes, smRes, csRes, clRes] = await Promise.all([
           fetch("/api/admin/stats", { headers: headers(activeKey), cache: "no-store" }),
           fetch("/api/admin/proxy-status", { headers: headers(activeKey), cache: "no-store" }),
           fetch("/api/admin/users-overview", { headers: headers(activeKey), cache: "no-store" }),
@@ -408,12 +469,16 @@ export default function AdminPage() {
           fetch("/api/admin/vpn-clients", { headers: headers(activeKey), cache: "no-store" }),
           fetch("/api/admin/support/stats", { headers: headers(activeKey), cache: "no-store" }),
           fetch("/api/admin/support/messages?limit=100", { headers: headers(activeKey), cache: "no-store" }),
+          fetch("/api/admin/checkout/stats", { headers: headers(activeKey), cache: "no-store" }),
+          fetch("/api/admin/checkout/logs?limit=100&only_errors=true", { headers: headers(activeKey), cache: "no-store" }),
         ])
 
         if (sRes.status === 403 || ovRes.status === 403) {
           setAuthed(false)
           setOverview(null)
           setFunnel(null)
+          setCheckoutStats(null)
+          setCheckoutLogs(null)
           setError("Неверный ключ")
           try {
             localStorage.removeItem(STORAGE_KEY)
@@ -423,7 +488,7 @@ export default function AdminPage() {
           return
         }
 
-        const [sData, pData, ovData, fData, vData, vcData, ssData, smData] = await Promise.all([
+        const [sData, pData, ovData, fData, vData, vcData, ssData, smData, csData, clData] = await Promise.all([
           sRes.json(),
           pRes.json(),
           ovRes.json(),
@@ -432,6 +497,8 @@ export default function AdminPage() {
           vcRes.ok ? vcRes.json() : Promise.resolve(null),
           ssRes.ok ? ssRes.json() : Promise.resolve(null),
           smRes.ok ? smRes.json() : Promise.resolve(null),
+          csRes.ok ? csRes.json() : Promise.resolve(null),
+          clRes.ok ? clRes.json() : Promise.resolve(null),
         ])
         const rawStats = sData as Stats & { marketing_opt_out_users?: number }
         setStats({
@@ -446,6 +513,8 @@ export default function AdminPage() {
         setFunnel(funnelNorm)
         setSupportStats(ssData as SupportAiStats | null)
         setSupportMessages(smData as SupportAiMessagesData | null)
+        setCheckoutStats(csData as CheckoutStats | null)
+        setCheckoutLogs(clData as CheckoutLogsData | null)
         setAuthed(true)
         persistKey(activeKey)
       } catch (e) {
@@ -685,6 +754,41 @@ export default function AdminPage() {
       }
     },
     [headers, supportOnlyErrors, supportTgFilter],
+  )
+
+  const fetchCheckoutLogs = useCallback(
+    async (opts?: { tgId?: string; onlyErrors?: boolean }) => {
+      const q = new URLSearchParams({ limit: "100" })
+      const tgRaw = (opts?.tgId ?? checkoutTgFilter).trim()
+      if (tgRaw) {
+        const asNum = Number(tgRaw)
+        if (Number.isFinite(asNum) && asNum > 0) q.set("tg_id", String(asNum))
+      }
+      if (opts?.onlyErrors ?? checkoutOnlyErrors) q.set("only_errors", "true")
+      try {
+        const [logsRes, statsRes] = await Promise.all([
+          fetch(`/api/admin/checkout/logs?${q.toString()}`, {
+            headers: headers(),
+            cache: "no-store",
+          }),
+          fetch("/api/admin/checkout/stats", {
+            headers: headers(),
+            cache: "no-store",
+          }),
+        ])
+        if (logsRes.ok) {
+          const logsData = (await logsRes.json()) as CheckoutLogsData
+          setCheckoutLogs(logsData)
+        }
+        if (statsRes.ok) {
+          const statsData = (await statsRes.json()) as CheckoutStats
+          setCheckoutStats(statsData)
+        }
+      } catch {
+        /* ignore */
+      }
+    },
+    [checkoutOnlyErrors, checkoutTgFilter, headers],
   )
 
   const runSelfTest = useCallback(async () => {
@@ -1811,6 +1915,236 @@ export default function AdminPage() {
             </div>
           </section>
         )}
+
+        <section>
+          <h2 className="text-lg font-semibold mb-1 text-gray-300">Checkout / платежи</h2>
+          <p className="text-xs text-gray-500 mb-4">
+            Живые логи создания оплат. Здесь видно, где именно ломается checkout: backend, Lava, fallback
+            или фронт, который не получил <code className="font-mono">payment_url</code>.
+          </p>
+
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-4">
+            {[
+              {
+                label: "Событий всего",
+                value: checkoutStats?.total ?? "—",
+                sub: checkoutStats?.last_success_at
+                  ? `последний успех ${formatDate(checkoutStats.last_success_at)}`
+                  : "успехов пока нет",
+                color: "text-blue-400",
+              },
+              {
+                label: "За 24 часа",
+                value: checkoutStats?.last_24h ?? "—",
+                sub: checkoutStats ? `ошибок: ${checkoutStats.errors_24h}` : undefined,
+                color: "text-emerald-400",
+              },
+              {
+                label: "Ошибок всего",
+                value: checkoutStats?.errors_total ?? "—",
+                sub: checkoutStats?.last_error_at
+                  ? `последняя ${formatDate(checkoutStats.last_error_at)}`
+                  : "ошибок нет",
+                color:
+                  checkoutStats && checkoutStats.errors_total > 0
+                    ? "text-red-400"
+                    : "text-gray-400",
+              },
+              {
+                label: "Fallback за 24ч",
+                value: checkoutStats?.fallback_24h ?? "—",
+                sub: "Lava не дала нормальную ссылку",
+                color:
+                  checkoutStats && checkoutStats.fallback_24h > 0
+                    ? "text-amber-400"
+                    : "text-gray-400",
+              },
+            ].map((c) => (
+              <div
+                key={c.label}
+                className="bg-gray-900 border border-gray-800 rounded-2xl p-4"
+              >
+                <div className="text-xs text-gray-500 mb-1">{c.label}</div>
+                <div className={`text-2xl font-bold ${c.color}`}>{c.value}</div>
+                {c.sub && <div className="text-xs text-gray-500 mt-1">{c.sub}</div>}
+              </div>
+            ))}
+          </div>
+
+          {checkoutStats && checkoutStats.stage_24h.length > 0 && (
+            <div className="bg-gray-900 border border-gray-800 rounded-2xl p-4 mb-4">
+              <div className="text-xs text-gray-500 mb-3 font-medium">Этапы checkout за 24 часа</div>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                {checkoutStats.stage_24h.map((stage) => (
+                  <div
+                    key={stage.stage}
+                    className="rounded-xl border border-gray-800 bg-gray-950/60 px-4 py-3"
+                  >
+                    <div className="text-sm text-gray-200">{checkoutStageLabel(stage.stage)}</div>
+                    <div className="text-xs text-gray-500 mt-1 font-mono">{stage.stage}</div>
+                    <div className="mt-2 text-sm text-gray-400">
+                      всего <span className="text-white font-semibold">{stage.total}</span>
+                      {" · "}
+                      ошибок <span className={stage.errors > 0 ? "text-red-400 font-semibold" : "text-gray-500"}>
+                        {stage.errors}
+                      </span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          <div className="flex flex-wrap items-center gap-2 mb-3">
+            <input
+              type="text"
+              inputMode="numeric"
+              value={checkoutTgFilter}
+              onChange={(e) => setCheckoutTgFilter(e.target.value.replace(/[^\d-]/g, ""))}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") void fetchCheckoutLogs()
+              }}
+              placeholder="Фильтр по Telegram ID…"
+              className="px-3 py-2 text-sm bg-gray-900 border border-gray-700 rounded-lg text-white placeholder:text-gray-500 outline-none focus:border-blue-500 w-56"
+            />
+            <button
+              type="button"
+              onClick={() => void fetchCheckoutLogs()}
+              className="px-3 py-2 text-sm bg-gray-800 rounded-lg hover:bg-gray-700 transition-colors"
+            >
+              Применить
+            </button>
+            {checkoutTgFilter && (
+              <button
+                type="button"
+                onClick={() => {
+                  setCheckoutTgFilter("")
+                  void fetchCheckoutLogs({ tgId: "" })
+                }}
+                className="px-3 py-2 text-sm bg-gray-800 rounded-lg hover:bg-gray-700 transition-colors"
+              >
+                Сбросить
+              </button>
+            )}
+            <label className="flex items-center gap-2 text-sm text-gray-300 select-none ml-auto">
+              <input
+                type="checkbox"
+                checked={checkoutOnlyErrors}
+                onChange={(e) => {
+                  setCheckoutOnlyErrors(e.target.checked)
+                  void fetchCheckoutLogs({ onlyErrors: e.target.checked })
+                }}
+                className="w-4 h-4"
+              />
+              Только ошибки
+            </label>
+          </div>
+
+          <div className="bg-gray-900 border border-gray-800 rounded-2xl overflow-hidden">
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b border-gray-800 text-gray-400 text-left">
+                    <th className="px-4 py-3 font-medium">Когда</th>
+                    <th className="px-4 py-3 font-medium">Этап</th>
+                    <th className="px-4 py-3 font-medium">Пользователь</th>
+                    <th className="px-4 py-3 font-medium">Ошибка / ссылка</th>
+                    <th className="px-4 py-3 font-medium text-right">Источник</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {(checkoutLogs?.logs ?? []).map((log) => {
+                    const expanded = checkoutExpandedId === log.id
+                    const shorten = (s: string, n: number) =>
+                      !expanded && s.length > n ? `${s.slice(0, n)}…` : s
+                    return (
+                      <tr
+                        key={log.id}
+                        className={`border-b border-gray-800/50 align-top transition-colors ${
+                          expanded ? "bg-gray-800/30" : "hover:bg-gray-800/20"
+                        } ${!log.ok ? "bg-red-950/10" : ""}`}
+                        onClick={() => setCheckoutExpandedId(expanded ? null : log.id)}
+                      >
+                        <td className="px-4 py-3 text-gray-400 text-xs whitespace-nowrap">
+                          {formatDate(log.created_at)}
+                        </td>
+                        <td className="px-4 py-3">
+                          <div className="text-sm text-gray-200">{checkoutStageLabel(log.stage)}</div>
+                          <div className="text-xs text-gray-500 font-mono mt-1">{log.stage}</div>
+                          {log.provider && (
+                            <div className="text-xs text-gray-500 mt-1">{log.provider}</div>
+                          )}
+                        </td>
+                        <td className="px-4 py-3 whitespace-nowrap">
+                          <div className="font-mono text-xs">{log.telegram_id ?? "—"}</div>
+                          {log.username && (
+                            <div className="text-xs text-gray-500">@{log.username}</div>
+                          )}
+                          {(log.email || log.customer_email) && (
+                            <div className="text-xs text-gray-500 mt-1">
+                              {log.customer_email || log.email}
+                            </div>
+                          )}
+                        </td>
+                        <td className="px-4 py-3 text-gray-300 whitespace-pre-wrap max-w-xl">
+                          {log.error ? (
+                            <div className="text-red-400 font-mono text-xs mb-1">{log.error}</div>
+                          ) : null}
+                          {log.payment_url ? (
+                            <a
+                              href={log.payment_url}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="text-blue-400 underline break-all"
+                              onClick={(e) => e.stopPropagation()}
+                            >
+                              {shorten(log.payment_url, 160)}
+                            </a>
+                          ) : null}
+                          {log.details ? (
+                            <div className="mt-2 text-xs text-gray-500 whitespace-pre-wrap break-words">
+                              {shorten(log.details, 260)}
+                            </div>
+                          ) : null}
+                          {!log.error && !log.payment_url && !log.details && (
+                            <span className="text-gray-600">—</span>
+                          )}
+                        </td>
+                        <td className="px-4 py-3 text-xs text-gray-500 text-right whitespace-nowrap">
+                          <div className="font-mono">{log.source}</div>
+                          {log.payment_token && (
+                            <div className="text-gray-600 mt-1 font-mono">
+                              {log.payment_token.slice(0, 8)}…
+                            </div>
+                          )}
+                          <span
+                            className={`inline-block mt-1 px-2 py-0.5 rounded-full text-[10px] font-medium ${
+                              log.ok ? "bg-emerald-100 text-emerald-800" : "bg-red-100 text-red-800"
+                            }`}
+                          >
+                            {log.ok ? "ok" : "error"}
+                          </span>
+                        </td>
+                      </tr>
+                    )
+                  })}
+                  {(!checkoutLogs || checkoutLogs.logs.length === 0) && (
+                    <tr>
+                      <td colSpan={5} className="px-4 py-8 text-center text-gray-500">
+                        Checkout-логов пока нет
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+            {checkoutLogs && checkoutLogs.total > checkoutLogs.logs.length && (
+              <div className="px-4 py-2 text-xs text-gray-500 border-t border-gray-800">
+                Показаны последние {checkoutLogs.logs.length} из {checkoutLogs.total}.
+              </div>
+            )}
+          </div>
+        </section>
 
         <section>
           <h2 className="text-lg font-semibold mb-1 text-gray-300">ИИ-поддержка</h2>

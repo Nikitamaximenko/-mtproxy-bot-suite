@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react"
 import { Check, MessageCircle, Shield, Zap } from "lucide-react"
+import { normalizePaymentUrl } from "@/lib/telegram"
 
 const TELEGRAM_BOT = "https://t.me/frostytg_bot?start=site"
 const TELEGRAM_SITE_OFFER_BOT = "https://t.me/frostytg_bot?start=siteoffer"
@@ -79,7 +80,7 @@ function PaymentCard({ ping }: { ping: VpnPing | null }) {
         if (data.details) setDetail(String(data.details).slice(0, 300))
         return
       }
-      window.location.href = data.payment_url
+      window.location.href = normalizePaymentUrl(data.payment_url)
     } catch (e) {
       setError(e instanceof Error ? e.message : "Что-то пошло не так. Попробуйте ещё раз.")
     } finally {

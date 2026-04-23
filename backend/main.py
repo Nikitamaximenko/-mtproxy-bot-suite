@@ -14,7 +14,7 @@ import socket
 import time
 import urllib.error
 import urllib.request
-from urllib.parse import parse_qsl, quote, urljoin
+from urllib.parse import parse_qsl, quote, urljoin, urlsplit, urlunsplit
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
 from typing import Any, AsyncGenerator, Generator, Literal
@@ -303,6 +303,28 @@ class SupportAiMessage(Base):
     )
 
 
+class CheckoutLog(Base):
+    """Audit trail for payment-link generation and checkout failures."""
+    __tablename__ = "checkout_logs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    source: Mapped[str] = mapped_column(String(16), nullable=False, default="backend")
+    stage: Mapped[str] = mapped_column(String(64), index=True, nullable=False)
+    provider: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    telegram_id: Mapped[int | None] = mapped_column(BigInteger, index=True, nullable=True)
+    username: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    email: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    customer_email: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    payment_token: Mapped[str | None] = mapped_column(String(36), index=True, nullable=True)
+    ok: Mapped[bool] = mapped_column(Boolean, default=False, server_default=sa_false(), nullable=False)
+    payment_url: Mapped[str | None] = mapped_column(String(1024), nullable=True)
+    error: Mapped[str | None] = mapped_column(String(1000), nullable=True)
+    details: Mapped[str | None] = mapped_column(String(4000), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, index=True, nullable=False
+    )
+
+
 connect_args = {"check_same_thread": False} if DATABASE_URL.startswith("sqlite:") else {}
 engine = create_engine(DATABASE_URL, future=True, connect_args=connect_args)
 SessionLocal = sessionmaker(bind=engine, class_=Session, autocommit=False, autoflush=False, future=True)
@@ -314,6 +336,62 @@ def get_db() -> Generator[Session, None, None]:
         yield db
     finally:
         db.close()
+
+
+def _stringify_checkout_details(value: Any, limit: int = 4000) -> str | None:
+    if value is None:
+        return None
+    if isinstance(value, (dict, list, tuple)):
+        try:
+            text_value = json.dumps(value, ensure_ascii=False, default=str)
+        except Exception:
+            text_value = str(value)
+    else:
+        text_value = str(value)
+    text_value = text_value.strip()
+    return text_value[:limit] if text_value else None
+
+
+def _record_checkout_log(
+    *,
+    source: str,
+    stage: str,
+    provider: str | None = None,
+    telegram_id: int | None = None,
+    username: str | None = None,
+    email: str | None = None,
+    customer_email: str | None = None,
+    payment_token: str | None = None,
+    ok: bool,
+    payment_url: str | None = None,
+    error: str | None = None,
+    details: Any = None,
+) -> None:
+    """Persist checkout telemetry without affecting the main business transaction."""
+    log_db = SessionLocal()
+    try:
+        log_db.add(
+            CheckoutLog(
+                source=(source or "backend").strip()[:16],
+                stage=(stage or "unknown").strip()[:64],
+                provider=(provider or None),
+                telegram_id=int(telegram_id) if telegram_id is not None else None,
+                username=(username or None),
+                email=(email or None),
+                customer_email=(customer_email or None),
+                payment_token=(payment_token or None),
+                ok=bool(ok),
+                payment_url=_stringify_checkout_details(payment_url, limit=1024),
+                error=_stringify_checkout_details(error, limit=1000),
+                details=_stringify_checkout_details(details, limit=4000),
+            )
+        )
+        log_db.commit()
+    except Exception:
+        log_db.rollback()
+        logger.exception("Failed to persist checkout log stage=%s source=%s", stage, source)
+    finally:
+        log_db.close()
 
 
 def _migrate() -> None:
@@ -751,6 +829,19 @@ class CheckoutCreateResponse(BaseModel):
     payment_token: UUID
 
 
+def _lava_api_root() -> str:
+    """Normalize env base like gate.lava.top, gate.lava.top/api, .../api/v3 -> https://gate.lava.top."""
+    raw = (LAVA_TOP_API_BASE_URL or "").strip() or "https://gate.lava.top"
+    if not re.match(r"^https?://", raw, re.IGNORECASE):
+        raw = f"https://{raw.lstrip('/')}"
+    raw = raw.rstrip("/")
+    for suffix in ("/api/v3", "/api/v2", "/api/v1", "/api"):
+        if raw.lower().endswith(suffix):
+            raw = raw[: -len(suffix)].rstrip("/")
+            break
+    return raw or "https://gate.lava.top"
+
+
 def _normalize_payment_url(url: str) -> str:
     """
     Lava иногда возвращает paymentUrl без схемы или как путь (/pay/...).
@@ -762,9 +853,24 @@ def _normalize_payment_url(url: str) -> str:
     if u.startswith("//"):
         return "https:" + u
     low = u.lower()
+    rel = u.lstrip("/")
+    if rel.lower().startswith("pay/") or rel.lower().startswith("pay?"):
+        return f"https://lava.top/{rel}"
+    if low.startswith("lava.top/") or low.startswith("www.lava.top/") or low.startswith("gate.lava.top/"):
+        return f"https://{u.lstrip('/')}"
     if low.startswith("http://") or low.startswith("https://"):
+        try:
+            parts = urlsplit(u)
+            host = (parts.netloc or "").lower()
+            path = (parts.path or "").lstrip("/")
+            if host == "gate.lava.top" and (path.lower().startswith("pay/") or path.lower() == "pay"):
+                return urlunsplit((parts.scheme or "https", "lava.top", parts.path, parts.query, parts.fragment))
+        except Exception:
+            return u
         return u
-    base = f"{LAVA_TOP_API_BASE_URL}/"
+    if low.startswith("tg:"):
+        return u
+    base = f"{_lava_api_root()}/"
     return urljoin(base, u)
 
 
@@ -801,7 +907,7 @@ def _create_lava_top_invoice(
         payload["successUrl"] = success_url
 
     req = urllib.request.Request(
-        f"{LAVA_TOP_API_BASE_URL}/api/v3/invoice",
+        f"{_lava_api_root()}/api/v3/invoice",
         data=json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode("utf-8"),
         headers={
             "Accept": "application/json",
@@ -846,7 +952,7 @@ def _lava_cancel_subscription_api(contract_id: str, email: str) -> None:
     if not cid or not em:
         raise RuntimeError("contract_id и email обязательны для отмены Lava")
     q = urlencode({"contractId": cid, "email": em})
-    url = f"{LAVA_TOP_API_BASE_URL}/api/v1/subscriptions?{q}"
+    url = f"{_lava_api_root()}/api/v1/subscriptions?{q}"
     req = urllib.request.Request(
         url,
         method="DELETE",
@@ -1250,16 +1356,46 @@ def _checkout_fallback_payment_url(payment_token: str) -> str:
 @app.post("/checkout/create", response_model=CheckoutCreateResponse)
 def checkout_create(payload: CheckoutCreateRequest, db: Session = Depends(get_db)) -> CheckoutCreateResponse:
     import random
-    tg_id = int(payload.telegram_id)
-    if tg_id == 0:
-        tg_id = -random.randint(100000, 999999999)
     username = payload.username.strip() if payload.username else None
     email = payload.email.strip().lower() if payload.email else None
     customer_email = payload.customer_email.strip().lower() if payload.customer_email else None
     effective_email = email or customer_email
+    tg_id = int(payload.telegram_id)
+    reusable_web_user: User | None = None
+    if tg_id == 0:
+        if effective_email:
+            reusable_web_user = db.execute(
+                select(User)
+                .where(
+                    User.telegram_id < 0,
+                    or_(func.lower(User.email) == effective_email, func.lower(User.username) == effective_email),
+                )
+                .order_by(User.created_at.desc())
+                .limit(1)
+            ).scalar_one_or_none()
+        if reusable_web_user is not None:
+            tg_id = int(reusable_web_user.telegram_id)
+        else:
+            tg_id = -random.randint(100000, 999999999)
     logger.info("Checkout create: tg_id=%s email=%s", tg_id, effective_email or "(none)")
 
-    existing_user = db.execute(select(User).where(User.telegram_id == tg_id)).scalar_one_or_none()
+    prov = (payload.payment_provider or "lava").strip().lower()
+    if prov not in ("lava", "yookassa"):
+        prov = "lava"
+
+    _record_checkout_log(
+        source="backend",
+        stage="backend_checkout_received",
+        provider=prov,
+        telegram_id=tg_id,
+        username=username,
+        email=email,
+        customer_email=customer_email,
+        ok=True,
+        details={"reused_web_user": bool(reusable_web_user)},
+    )
+
+    existing_user = reusable_web_user or db.execute(select(User).where(User.telegram_id == tg_id)).scalar_one_or_none()
     is_new_user = existing_user is None
     if is_new_user:
         web_username = username or customer_email
@@ -1300,10 +1436,6 @@ def checkout_create(payload: CheckoutCreateRequest, db: Session = Depends(get_db
                 db.add(User(telegram_id=tg_id, username=web_username, email=effective_email))
         db.commit()
 
-    prov = (payload.payment_provider or "lava").strip().lower()
-    if prov not in ("lava", "yookassa"):
-        prov = "lava"
-
     if prov == "yookassa":
         if not _yookassa_configured():
             raise HTTPException(
@@ -1328,8 +1460,32 @@ def checkout_create(payload: CheckoutCreateRequest, db: Session = Depends(get_db
                 return_url=return_url,
             )
         except RuntimeError as e:
+            _record_checkout_log(
+                source="backend",
+                stage="backend_yookassa_failed",
+                provider="yookassa",
+                telegram_id=tg_id,
+                username=username,
+                email=email,
+                customer_email=customer_email,
+                payment_token=str(token),
+                ok=False,
+                error=str(e),
+            )
             raise HTTPException(status_code=503, detail=str(e)) from e
         payment_url = _normalize_payment_url(payment_url_yk)
+        _record_checkout_log(
+            source="backend",
+            stage="backend_yookassa_ready",
+            provider="yookassa",
+            telegram_id=tg_id,
+            username=username,
+            email=email,
+            customer_email=customer_email,
+            payment_token=str(token),
+            ok=True,
+            payment_url=payment_url,
+        )
         logger.info("Checkout YooKassa: tg_id=%s token=%s", tg_id, token)
         return CheckoutCreateResponse(payment_url=payment_url, payment_token=token)
 
@@ -1343,9 +1499,37 @@ def checkout_create(payload: CheckoutCreateRequest, db: Session = Depends(get_db
                 buyer_email=customer_email,
                 success_url=success_url,
             )
+            payment_url = _normalize_payment_url(payment_url)
+            _record_checkout_log(
+                source="backend",
+                stage="backend_lava_invoice_ready",
+                provider="lava",
+                telegram_id=tg_id,
+                username=username,
+                email=email,
+                customer_email=customer_email,
+                payment_token=str(token),
+                ok=True,
+                payment_url=payment_url,
+                details={"contract_id": lava_contract_id},
+            )
         except Exception as e:
             logger.error("lava.top invoice failed tg_id=%s, using fallback URL: %s", tg_id, e)
             payment_url = _checkout_fallback_payment_url(str(token))
+            _record_checkout_log(
+                source="backend",
+                stage="backend_lava_fallback",
+                provider="lava",
+                telegram_id=tg_id,
+                username=username,
+                email=email,
+                customer_email=customer_email,
+                payment_token=str(token),
+                ok=False,
+                payment_url=payment_url,
+                error=str(e),
+                details="invoice_failed_using_fallback",
+            )
     else:
         try:
             payment_url = LAVA_PAY_URL_TEMPLATE.format(payment_token=str(token))
@@ -1353,12 +1537,41 @@ def checkout_create(payload: CheckoutCreateRequest, db: Session = Depends(get_db
             payment_url = _checkout_fallback_payment_url(str(token))
         if "YOUR_ID" in payment_url:
             payment_url = _checkout_fallback_payment_url(str(token))
+        _record_checkout_log(
+            source="backend",
+            stage="backend_lava_legacy_url",
+            provider="lava",
+            telegram_id=tg_id,
+            username=username,
+            email=email,
+            customer_email=customer_email,
+            payment_token=str(token),
+            ok=True,
+            payment_url=_normalize_payment_url(payment_url),
+            details={
+                "lava_top_configured": lava_top_configured,
+                "has_effective_email": bool(effective_email),
+            },
+        )
 
     if lava_contract_id:
         sub.lava_contract_id = lava_contract_id
         db.commit()
 
     payment_url = _normalize_payment_url(payment_url)
+    _record_checkout_log(
+        source="backend",
+        stage="backend_checkout_response",
+        provider="lava",
+        telegram_id=tg_id,
+        username=username,
+        email=email,
+        customer_email=customer_email,
+        payment_token=str(token),
+        ok=True,
+        payment_url=payment_url,
+        details={"contract_id": lava_contract_id},
+    )
     return CheckoutCreateResponse(payment_url=payment_url, payment_token=token)
 
 
@@ -2825,20 +3038,19 @@ def claim_web_subscription(
 def subscription_by_email(email: str, db: Session = Depends(get_db)):
     """Look up active subscription by the email stored at checkout time."""
     clean = email.strip().lower()
-    # Match on User.email (preferred) or User.username when username was set to email for web users
-    user = db.execute(
-        select(User).where(
-            (func.lower(User.email) == clean) | (func.lower(User.username) == clean)
-        ).limit(1)
-    ).scalar_one_or_none()
-    if not user:
+    user_tg_ids = db.execute(
+        select(User.telegram_id)
+        .where((func.lower(User.email) == clean) | (func.lower(User.username) == clean))
+        .order_by(User.created_at.desc())
+    ).scalars().all()
+    if not user_tg_ids:
         return {"active": False}
 
     now = utcnow()
     sub = db.execute(
         select(Subscription)
         .where(
-            Subscription.telegram_id == user.telegram_id,
+            Subscription.telegram_id.in_(list(user_tg_ids)),
             Subscription.payment_status.in_(SUBSCRIPTION_ACCESS_STATUSES),
             Subscription.expires_at.is_not(None),
             Subscription.expires_at > now,
@@ -2853,13 +3065,8 @@ def subscription_by_email(email: str, db: Session = Depends(get_db)):
     if sub.access_suspended or sub.access_blocked_reason:
         return {"active": False, "suspended": True, "expires_at": sub.expires_at}
 
-    proxy_link: str | None = None
-    if sub.proxy_server and sub.proxy_port and sub.proxy_secret:
-        proxy_link = f"tg://proxy?server={sub.proxy_server}&port={sub.proxy_port}&secret={sub.proxy_secret}"
-
     return {
         "active": True,
-        "proxy_link": proxy_link,
         "expires_at": sub.expires_at,
         "is_trial": sub.payment_status == "trial",
     }
@@ -3310,6 +3517,40 @@ def _has_valid_internal_token(req: Request) -> bool:
         return True
     got = (req.headers.get("X-Internal-Token") or "").strip()
     return bool(got) and hmac.compare_digest(got, INTERNAL_API_TOKEN)
+
+
+class InternalCheckoutLogRequest(BaseModel):
+    stage: str
+    provider: str | None = None
+    telegram_id: int | None = None
+    username: str | None = None
+    email: str | None = None
+    customer_email: str | None = None
+    payment_token: str | None = None
+    ok: bool = False
+    payment_url: str | None = None
+    error: str | None = None
+    details: Any = None
+
+
+@app.post("/internal/checkout-log", response_model=OkResponse)
+def internal_checkout_log(body: InternalCheckoutLogRequest, req: Request) -> OkResponse:
+    _require_internal_token(req)
+    _record_checkout_log(
+        source="frontend",
+        stage=body.stage,
+        provider=body.provider,
+        telegram_id=body.telegram_id,
+        username=body.username,
+        email=body.email,
+        customer_email=body.customer_email,
+        payment_token=body.payment_token,
+        ok=bool(body.ok),
+        payment_url=body.payment_url,
+        error=body.error,
+        details=body.details,
+    )
+    return OkResponse(ok=True)
 
 
 def _verify_telegram_webapp_init_data(init_data_raw: str, expected_telegram_id: int) -> bool:
@@ -5026,6 +5267,172 @@ def admin_vpn_client_deactivate(telegram_id: int, req: Request, db: Session = De
     _require_admin(req)
     deactivate_vpn_client(telegram_id, db)
     return OkResponse(ok=True)
+
+
+# ── Checkout / payment logs in admin ────────────────────────────────────────
+
+
+class CheckoutLogItem(BaseModel):
+    id: int
+    source: str
+    stage: str
+    provider: str | None
+    telegram_id: int | None
+    username: str | None
+    email: str | None
+    customer_email: str | None
+    payment_token: str | None
+    ok: bool
+    payment_url: str | None
+    error: str | None
+    details: str | None
+    created_at: datetime
+
+
+class CheckoutLogsResponse(BaseModel):
+    logs: list[CheckoutLogItem]
+    total: int
+
+
+class CheckoutStageBucket(BaseModel):
+    stage: str
+    total: int
+    errors: int
+
+
+class CheckoutStatsResponse(BaseModel):
+    total: int
+    last_24h: int
+    errors_total: int
+    errors_24h: int
+    fallback_24h: int
+    last_error_at: datetime | None
+    last_success_at: datetime | None
+    stage_24h: list[CheckoutStageBucket]
+
+
+@app.get("/admin/checkout/logs", response_model=CheckoutLogsResponse)
+def admin_checkout_logs(
+    req: Request,
+    db: Session = Depends(get_db),
+    limit: int = 100,
+    offset: int = 0,
+    tg_id: int | None = None,
+    only_errors: bool = False,
+    provider: str | None = None,
+) -> CheckoutLogsResponse:
+    _require_admin(req)
+    limit = max(1, min(int(limit or 100), 500))
+    offset = max(0, int(offset or 0))
+
+    total_q = select(func.count(CheckoutLog.id))
+    list_q = select(CheckoutLog)
+
+    if tg_id is not None:
+        total_q = total_q.where(CheckoutLog.telegram_id == int(tg_id))
+        list_q = list_q.where(CheckoutLog.telegram_id == int(tg_id))
+    if only_errors:
+        total_q = total_q.where(CheckoutLog.ok.is_(False))
+        list_q = list_q.where(CheckoutLog.ok.is_(False))
+    if provider:
+        clean_provider = provider.strip().lower()
+        total_q = total_q.where(func.lower(CheckoutLog.provider) == clean_provider)
+        list_q = list_q.where(func.lower(CheckoutLog.provider) == clean_provider)
+
+    total = int(db.execute(total_q).scalar() or 0)
+    rows = (
+        db.execute(
+            list_q.order_by(CheckoutLog.created_at.desc()).offset(offset).limit(limit)
+        )
+        .scalars()
+        .all()
+    )
+    items = [
+        CheckoutLogItem(
+            id=row.id,
+            source=row.source,
+            stage=row.stage,
+            provider=row.provider,
+            telegram_id=row.telegram_id,
+            username=row.username,
+            email=row.email,
+            customer_email=row.customer_email,
+            payment_token=row.payment_token,
+            ok=bool(row.ok),
+            payment_url=row.payment_url,
+            error=row.error,
+            details=row.details,
+            created_at=row.created_at,
+        )
+        for row in rows
+    ]
+    return CheckoutLogsResponse(logs=items, total=total)
+
+
+@app.get("/admin/checkout/stats", response_model=CheckoutStatsResponse)
+def admin_checkout_stats(req: Request, db: Session = Depends(get_db)) -> CheckoutStatsResponse:
+    _require_admin(req)
+    since_24h = utcnow() - timedelta(days=1)
+
+    total = int(db.execute(select(func.count(CheckoutLog.id))).scalar() or 0)
+    last_24h = int(
+        db.execute(
+            select(func.count(CheckoutLog.id)).where(CheckoutLog.created_at >= since_24h)
+        ).scalar()
+        or 0
+    )
+    errors_total = int(
+        db.execute(select(func.count(CheckoutLog.id)).where(CheckoutLog.ok.is_(False))).scalar() or 0
+    )
+    errors_24h = int(
+        db.execute(
+            select(func.count(CheckoutLog.id)).where(
+                CheckoutLog.created_at >= since_24h,
+                CheckoutLog.ok.is_(False),
+            )
+        ).scalar()
+        or 0
+    )
+    fallback_24h = int(
+        db.execute(
+            select(func.count(CheckoutLog.id)).where(
+                CheckoutLog.created_at >= since_24h,
+                CheckoutLog.stage.like("%fallback%"),
+            )
+        ).scalar()
+        or 0
+    )
+    last_error_at = db.execute(
+        select(func.max(CheckoutLog.created_at)).where(CheckoutLog.ok.is_(False))
+    ).scalar_one_or_none()
+    last_success_at = db.execute(
+        select(func.max(CheckoutLog.created_at)).where(CheckoutLog.ok.is_(True))
+    ).scalar_one_or_none()
+
+    stage_rows = db.execute(
+        select(
+            CheckoutLog.stage,
+            func.count(CheckoutLog.id).label("total"),
+            func.sum(case((CheckoutLog.ok.is_(False), 1), else_=0)).label("errors"),
+        )
+        .where(CheckoutLog.created_at >= since_24h)
+        .group_by(CheckoutLog.stage)
+        .order_by(func.count(CheckoutLog.id).desc(), CheckoutLog.stage.asc())
+    ).all()
+
+    return CheckoutStatsResponse(
+        total=total,
+        last_24h=last_24h,
+        errors_total=errors_total,
+        errors_24h=errors_24h,
+        fallback_24h=fallback_24h,
+        last_error_at=last_error_at,
+        last_success_at=last_success_at,
+        stage_24h=[
+            CheckoutStageBucket(stage=row[0], total=int(row[1] or 0), errors=int(row[2] or 0))
+            for row in stage_rows
+        ],
+    )
 
 
 # ── ИИ-поддержка: просмотр логов и статистика в админ-панели ────────────────

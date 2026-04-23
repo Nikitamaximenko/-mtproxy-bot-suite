@@ -29,8 +29,16 @@ export function normalizePaymentUrl(url: string): string {
   const u = url.trim()
   if (!u) return u
   if (u.startsWith("//")) return `https:${u}`
-  if (/^https?:\/\//i.test(u)) return u
   if (/^tg:/i.test(u)) return u
+  const rel = u.replace(/^\/+/, "")
+  if (/^pay(?:\/|\?)/i.test(rel)) return `https://lava.top/${rel}`
+  if (/^(?:https?:\/\/)?gate\.lava\.top\/pay(?:\/|\?)/i.test(u)) {
+    return u.replace(/^(https?:\/\/)?gate\.lava\.top/i, "https://lava.top")
+  }
+  if (/^(?:https?:\/\/)?(?:www\.)?lava\.top\//i.test(u) && !/^https?:\/\//i.test(u)) {
+    return `https://${u.replace(/^\/+/, "")}`
+  }
+  if (/^https?:\/\//i.test(u)) return u
   const base = "https://gate.lava.top/"
   try {
     return new URL(u, base).href
@@ -271,4 +279,3 @@ export function openTelegramLink(url: string): boolean {
   window.location.assign(resolved)
   return true
 }
-
