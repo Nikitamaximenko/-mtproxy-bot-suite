@@ -1212,12 +1212,17 @@ def _yookassa_payment_amount_ok(payment: dict[str, Any]) -> bool:
 
 
 def _yookassa_method_supports_recurring(payment_method: dict[str, Any] | None) -> bool:
-    """Для автосписаний используем только методы, которые стабильно дают payment_method_id для повторов."""
+    """ЮKassa разрешает сохранять для автосписаний больше методов, чем только карты/кошелек."""
     if not isinstance(payment_method, dict):
         return False
     pm_type = str(payment_method.get("type") or "").strip().lower()
-    # Для нашей подписки поддерживаем только карту и ЮMoney-кошелёк.
-    return pm_type in {"bank_card", "yoo_money"}
+    return pm_type in {"bank_card", "yoo_money", "mir_pay", "sberbank", "sbp", "tinkoff_bank"}
+
+
+def _yookassa_payment_method_saved(payment_method: dict[str, Any] | None) -> bool:
+    if not isinstance(payment_method, dict):
+        return False
+    return bool(payment_method.get("saved") is True)
 
 
 def _apply_yookassa_payment_object(db: Session, payment: dict[str, Any]) -> None:
@@ -1246,13 +1251,15 @@ def _apply_yookassa_payment_object(db: Session, payment: dict[str, Any]) -> None
     pm = payment.get("payment_method")
     pm_id: str | None = None
     pm_type = ""
+    pm_saved = False
     if isinstance(pm, dict):
         pm_id = str(pm.get("id") or "").strip() or None
         pm_type = str(pm.get("type") or "").strip().lower()
+        pm_saved = _yookassa_payment_method_saved(pm)
     is_renewal = str(meta.get("renewal") or "").strip() == "1"
     recurring_supported = _yookassa_method_supports_recurring(pm if isinstance(pm, dict) else None)
     recurring_ready_initial = False
-    if not is_renewal and pm_id and recurring_supported:
+    if not is_renewal and pm_id and pm_saved and recurring_supported:
         sub.yookassa_payment_method_id = pm_id
         sub.billing_provider = "yookassa"
         recurring_ready_initial = True
@@ -1261,10 +1268,12 @@ def _apply_yookassa_payment_object(db: Session, payment: dict[str, Any]) -> None
         sub.yookassa_payment_method_id = None
         sub.billing_provider = "yookassa"
         logger.warning(
-            "YooKassa initial payment without recurring-ready method: tg_id=%s pm_type=%s pm_id_present=%s",
+            "YooKassa initial payment without recurring-ready method: tg_id=%s pm_type=%s pm_id_present=%s pm_saved=%s supported=%s",
             sub.telegram_id,
             pm_type or "(empty)",
             bool(pm_id),
+            pm_saved,
+            recurring_supported,
         )
     if sub.payment_status == "pending":
         activate_subscription(sub, recurring=False)
@@ -1281,6 +1290,22 @@ def _apply_yookassa_payment_object(db: Session, payment: dict[str, Any]) -> None
     if pay_id:
         sub.yookassa_last_applied_payment_id = pay_id
     db.commit()
+    if not is_renewal:
+        _record_checkout_log(
+            source="backend",
+            stage="backend_yookassa_recurring_saved" if recurring_ready_initial else "backend_yookassa_recurring_missing",
+            provider="yookassa",
+            telegram_id=int(sub.telegram_id),
+            payment_token=sub.payment_token,
+            ok=recurring_ready_initial,
+            details={
+                "payment_id": pay_id or None,
+                "payment_method_type": pm_type or None,
+                "payment_method_id_present": bool(pm_id),
+                "payment_method_saved": pm_saved,
+                "supported_for_recurring": recurring_supported,
+            },
+        )
     logger.info("YooKassa payment applied tg_id=%s renewal=%s", sub.telegram_id, is_renewal)
     _provision_vpn_after_payment(int(sub.telegram_id), db)
     if sub.proxy_server and sub.proxy_port and sub.proxy_secret:
@@ -1291,9 +1316,9 @@ def _apply_yookassa_payment_object(db: Session, payment: dict[str, Any]) -> None
             int(sub.telegram_id),
             (
                 "✅ Платёж прошёл, доступ активирован.\n\n"
-                "⚠️ Автопродление для ЮKassa не подключилось: выбранный способ оплаты "
-                "не подходит для повторных списаний.\n"
-                "Для автопродления используйте карту или кошелёк ЮMoney при следующей оплате."
+                "⚠️ Автопродление пока не подключилось: ЮKassa не вернула сохранённый способ оплаты "
+                "для повторных списаний.\n"
+                "Если автопродление важно, напишите в поддержку — мы быстро проверим платёж."
             ),
         )
     _notify_admin_payment(sub.telegram_id)

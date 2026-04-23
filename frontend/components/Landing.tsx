@@ -2,7 +2,12 @@
 
 import { useCallback, useEffect, useRef, useState } from "react"
 import { Check, MessageCircle, Shield, Zap } from "lucide-react"
-import { normalizePaymentUrl } from "@/lib/telegram"
+import {
+  type CheckoutProvider,
+  getCheckoutProviderPresentation,
+  getPreferredCheckoutProvider,
+  normalizePaymentUrl,
+} from "@/lib/telegram"
 
 const TELEGRAM_BOT = "https://t.me/frostytg_bot?start=site"
 const TELEGRAM_SITE_OFFER_BOT = "https://t.me/frostytg_bot?start=siteoffer"
@@ -45,9 +50,15 @@ function PaymentCard({ ping }: { ping: VpnPing | null }) {
   const [paying, setPaying] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [detail, setDetail] = useState<string | null>(null)
+  const [paymentProvider, setPaymentProvider] = useState<CheckoutProvider>("lava")
 
   const valid = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())
   const showErr = touched && email.length > 0 && !valid
+  const providerMeta = getCheckoutProviderPresentation(paymentProvider)
+
+  useEffect(() => {
+    setPaymentProvider(getPreferredCheckoutProvider())
+  }, [])
 
   const pay = useCallback(async () => {
     if (!valid) return
@@ -67,7 +78,7 @@ function PaymentCard({ ping }: { ping: VpnPing | null }) {
           telegram_id: "0",
           username: null,
           customer_email: email.trim(),
-          payment_provider: "lava",
+          payment_provider: paymentProvider,
         }),
       })
       const data = (await res.json().catch(() => ({}))) as {
@@ -86,7 +97,7 @@ function PaymentCard({ ping }: { ping: VpnPing | null }) {
     } finally {
       setPaying(false)
     }
-  }, [email, valid])
+  }, [email, paymentProvider, valid])
 
   return (
     <div
@@ -142,9 +153,9 @@ function PaymentCard({ ping }: { ping: VpnPing | null }) {
             color: "#111827",
           }}
         >
-          Банковская карта
+          {providerMeta.title}
           <span className="block font-normal mt-0.5" style={{ color: "#6B7280", fontSize: 10 }}>
-            lava.top
+            {providerMeta.subtitle}
           </span>
         </div>
       </div>
@@ -202,7 +213,7 @@ function PaymentCard({ ping }: { ping: VpnPing | null }) {
           <path d="M12 2L4 6v6c0 5 3.5 9.5 8 10 4.5-.5 8-5 8-10V6l-8-4z" stroke="currentColor" strokeWidth="1.7" strokeLinejoin="round" />
           <path d="M9 12l2 2 4-4" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" />
         </svg>
-        {"Карта через lava.top · подписка с автопродлением"}
+        {providerMeta.hint}
       </div>
 
       {error && (
@@ -766,7 +777,7 @@ export function Landing() {
             />
             <Faq
               q="Какие способы оплаты?"
-              a="Сейчас оплата доступна банковской картой через lava.top и в мини-приложении, и на сайте. Подписка — 299 ₽/мес с автопродлением; отключить можно в боте."
+              a="Оплата работает онлайн и на сайте, и в мини-приложении. Подписка — 299 ₽/мес, отключить можно в боте."
             />
             <Faq
               q="Можно сначала попробовать бесплатно?"

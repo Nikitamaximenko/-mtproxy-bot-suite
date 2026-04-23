@@ -2,7 +2,17 @@
 
 import { useCallback, useEffect, useRef, useState } from "react"
 import { Check, Copy, ExternalLink, RefreshCw, Shield, X } from "lucide-react"
-import { getTelegramInitData, getTelegramInitDataAsync, getTelegramUser, normalizePaymentUrl, openPaymentLink, openTelegramLink } from "@/lib/telegram"
+import {
+  type CheckoutProvider,
+  getCheckoutProviderPresentation,
+  getPreferredCheckoutProvider,
+  getTelegramInitData,
+  getTelegramInitDataAsync,
+  getTelegramUser,
+  normalizePaymentUrl,
+  openPaymentLink,
+  openTelegramLink,
+} from "@/lib/telegram"
 
 type SubscriptionData = {
   active: boolean
@@ -289,6 +299,7 @@ export default function MiniAppPage() {
   const [justPaid, setJustPaid] = useState(false)
   const [isWeb, setIsWeb] = useState<boolean | null>(null)
   const [webEmail, setWebEmail] = useState<string | null>(null)
+  const [paymentProvider, setPaymentProvider] = useState<CheckoutProvider>("lava")
 
   // VPN state
   // Дефолтный таб = VPN: это главный продукт. MTProxy — приятный бонус,
@@ -303,6 +314,7 @@ export default function MiniAppPage() {
 
   // VPN server ping
   const [vpnPing, setVpnPing] = useState<{ online: boolean; latency_ms: number | null } | null>(null)
+  const providerMeta = getCheckoutProviderPresentation(paymentProvider)
 
   useEffect(() => {
     const checkPing = async () => {
@@ -317,6 +329,10 @@ export default function MiniAppPage() {
     checkPing()
     const interval = setInterval(checkPing, 30000)
     return () => clearInterval(interval)
+  }, [])
+
+  useEffect(() => {
+    setPaymentProvider(getPreferredCheckoutProvider())
   }, [])
 
   useEffect(() => {
@@ -539,7 +555,7 @@ export default function MiniAppPage() {
           telegram_id: tgId ? String(tgId) : "0",
           username: tgUser?.username || null,
           customer_email: email,
-          payment_provider: "lava",
+          payment_provider: paymentProvider,
         }),
       })
       const data = (await res.json()) as { error?: string; payment_url?: string; details?: string }
@@ -1147,8 +1163,8 @@ export default function MiniAppPage() {
                 color: "#111827",
               }}
             >
-              Банковская карта
-              <span className="block font-normal mt-0.5" style={{ color: "#6B7280", fontSize: 10 }}>lava.top</span>
+              {providerMeta.title}
+              <span className="block font-normal mt-0.5" style={{ color: "#6B7280", fontSize: 10 }}>{providerMeta.subtitle}</span>
             </div>
           </div>
 
@@ -1224,7 +1240,7 @@ export default function MiniAppPage() {
 
           {/* Payment note */}
           <p className="text-center text-xs mt-3" style={{ color: "#6B7280" }}>
-            {"Карта через lava.top · прокси сразу после оплаты · VPN — после установки Happ"}
+            {providerMeta.hint}
           </p>
           <p className="text-center text-xs mt-1" style={{ color: "#9CA3AF" }}>
             Отмена в любой момент — напишите в поддержку

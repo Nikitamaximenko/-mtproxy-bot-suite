@@ -360,6 +360,8 @@ function checkoutStageLabel(stage: string): string {
     backend_lava_legacy_url: "Использована legacy/fallback ссылка",
     backend_yookassa_ready: "ЮKassa вернула ссылку",
     backend_yookassa_failed: "ЮKassa не создала платёж",
+    backend_yookassa_recurring_saved: "ЮKassa сохранила метод для рекурентов",
+    backend_yookassa_recurring_missing: "ЮKassa не сохранила метод для рекурентов",
     backend_checkout_response: "Backend отдал payment_url",
     frontend_backend_unreachable: "Frontend не достучался до backend",
     frontend_backend_error: "Frontend получил ошибку backend",

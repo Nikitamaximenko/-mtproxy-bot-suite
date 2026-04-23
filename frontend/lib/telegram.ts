@@ -3,6 +3,61 @@ export type TelegramWebAppUser = {
   username?: string
 }
 
+export type CheckoutProvider = "lava" | "yookassa"
+
+const CHECKOUT_PROVIDER_STORAGE_KEY = "frosty_checkout_provider"
+
+function normalizeCheckoutProvider(raw: string | null | undefined): CheckoutProvider | null {
+  const value = String(raw || "").trim().toLowerCase()
+  if (value === "lava" || value === "yookassa") return value
+  return null
+}
+
+function envDefaultCheckoutProvider(): CheckoutProvider {
+  return normalizeCheckoutProvider(process.env.NEXT_PUBLIC_DEFAULT_PAYMENT_PROVIDER) ?? "lava"
+}
+
+export function getPreferredCheckoutProvider(): CheckoutProvider {
+  const fallback = envDefaultCheckoutProvider()
+  if (typeof window === "undefined") return fallback
+  try {
+    const params = new URLSearchParams(window.location.search)
+    const fromUrl = normalizeCheckoutProvider(params.get("pay") || params.get("provider"))
+    if (fromUrl) {
+      localStorage.setItem(CHECKOUT_PROVIDER_STORAGE_KEY, fromUrl)
+      return fromUrl
+    }
+  } catch {
+    /* ignore */
+  }
+  try {
+    const stored = normalizeCheckoutProvider(localStorage.getItem(CHECKOUT_PROVIDER_STORAGE_KEY))
+    if (stored) return stored
+  } catch {
+    /* ignore */
+  }
+  return fallback
+}
+
+export function getCheckoutProviderPresentation(provider: CheckoutProvider): {
+  title: string
+  subtitle: string
+  hint: string
+} {
+  if (provider === "yookassa") {
+    return {
+      title: "Карта, СБП, SberPay",
+      subtitle: "YooKassa",
+      hint: "YooKassa · карта, СБП, SberPay, T-Pay",
+    }
+  }
+  return {
+    title: "Банковская карта",
+    subtitle: "lava.top",
+    hint: "Карта через lava.top · подписка с автопродлением",
+  }
+}
+
 /* Минимальный глобальный тип Telegram WebApp SDK. Подгружается через
  * <Script src="https://telegram.org/js/telegram-web-app.js"> в layout.tsx.
  * Объявляем только те поля, которые реально используем. */
