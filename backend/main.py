@@ -755,13 +755,9 @@ def bot_cancel_recurring(
             errors.append(f"Lava: {e}")
 
     if had_yk and (sub.yookassa_payment_method_id or "").strip():
-        try:
-            _yookassa_delete_payment_method(sub.yookassa_payment_method_id or "")
-            sub.yookassa_payment_method_id = None
-            any_cleared = True
-            logger.info("YooKassa payment_method removed tg_id=%s", tg_id)
-        except Exception as e:
-            errors.append(f"ЮKassa: {e}")
+        sub.yookassa_payment_method_id = None
+        any_cleared = True
+        logger.info("YooKassa recurring disabled locally tg_id=%s", tg_id)
 
     if any_cleared:
         db.commit()
@@ -981,35 +977,6 @@ def _lava_cancel_subscription_api(contract_id: str, email: str) -> None:
                 logger.info("Lava cancel subscription: HTTP 400 idempotent (%s)", err_msg[:120])
                 return
         raise RuntimeError(f"Lava HTTP {e.code}: {body}") from e
-
-
-def _yookassa_delete_payment_method(payment_method_id: str) -> None:
-    """Удалить сохранённый способ оплаты — рекуррентные списания ЮKassa прекратятся."""
-    if not _yookassa_configured():
-        raise RuntimeError("ЮKassa не настроена")
-    pmid = (payment_method_id or "").strip()
-    if not pmid:
-        raise RuntimeError("Пустой payment_method_id")
-    idem = str(uuid4())
-    req = urllib.request.Request(
-        f"{YOOKASSA_API_BASE}/payment_methods/{pmid}",
-        method="DELETE",
-        headers={
-            "Authorization": f"Basic {_yookassa_auth_b64()}",
-            "Idempotence-Key": idem,
-        },
-    )
-    try:
-        with urllib.request.urlopen(req, timeout=25) as resp:
-            resp.read()
-    except urllib.error.HTTPError as e:
-        if e.code == 404:
-            logger.info("YooKassa delete payment_method: 404 (уже удалён)")
-            return
-        body = e.read().decode("utf-8", errors="replace")[:1500]
-        raise RuntimeError(f"ЮKassa HTTP {e.code}: {body}") from e
-
-
 def _subscription_with_recurring_to_cancel(db: Session, tg_id: int) -> Subscription | None:
     """Активная paid-подписка с рекуррентом (Lava contract или сохранённый метод ЮKassa)."""
     now = utcnow()
