@@ -5,7 +5,6 @@ import { Check, MessageCircle, Shield, Zap } from "lucide-react"
 import {
   type CheckoutProvider,
   getCheckoutProviderPresentation,
-  getPreferredCheckoutProvider,
   normalizePaymentUrl,
 } from "@/lib/telegram"
 
@@ -55,10 +54,6 @@ function PaymentCard({ ping }: { ping: VpnPing | null }) {
   const valid = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())
   const showErr = touched && email.length > 0 && !valid
   const providerMeta = getCheckoutProviderPresentation(paymentProvider)
-
-  useEffect(() => {
-    setPaymentProvider(getPreferredCheckoutProvider())
-  }, [])
 
   const pay = useCallback(async () => {
     if (!valid) return
@@ -144,20 +139,49 @@ function PaymentCard({ ping }: { ping: VpnPing | null }) {
         <span className="block text-xs font-medium mb-1.5" style={{ color: "#6B7280" }}>
           Способ оплаты
         </span>
-        <div
-          className="text-left px-3 py-2.5 text-xs font-semibold"
-          style={{
-            borderRadius: 12,
-            border: "2px solid #2AABEE",
-            background: "#EFF6FF",
-            color: "#111827",
-          }}
-        >
-          {providerMeta.title}
-          <span className="block font-normal mt-0.5" style={{ color: "#6B7280", fontSize: 10 }}>
-            {providerMeta.subtitle}
-          </span>
+        <div className="grid grid-cols-2 gap-2">
+          {([
+            { key: "lava" as const, label: "Основная", test: false },
+            { key: "yookassa" as const, label: "Тест", test: true },
+          ]).map((option) => {
+            const meta = getCheckoutProviderPresentation(option.key)
+            const active = paymentProvider === option.key
+            return (
+              <button
+                key={option.key}
+                type="button"
+                onClick={() => setPaymentProvider(option.key)}
+                className="text-left px-3 py-2.5 text-xs font-semibold transition-all"
+                style={{
+                  borderRadius: 12,
+                  border: active ? "2px solid #2AABEE" : "1px solid #E5E7EB",
+                  background: active ? "#EFF6FF" : "#F9FAFB",
+                  color: "#111827",
+                }}
+              >
+                <span className="flex items-center justify-between gap-2">
+                  <span>{meta.subtitle}</span>
+                  <span
+                    className="text-[10px] px-2 py-0.5"
+                    style={{
+                      borderRadius: 999,
+                      background: option.test ? "#FEF3C7" : "#E5E7EB",
+                      color: option.test ? "#92400E" : "#4B5563",
+                    }}
+                  >
+                    {option.label}
+                  </span>
+                </span>
+                <span className="block font-normal mt-1 leading-relaxed" style={{ color: "#6B7280", fontSize: 10 }}>
+                  {meta.title}
+                </span>
+              </button>
+            )
+          })}
         </div>
+        <p className="text-[11px] mt-2" style={{ color: "#6B7280" }}>
+          Обычная оплата работает как раньше. YooKassa пока включена только как тестовая вторая ветка на сайте.
+        </p>
       </div>
 
       <label className="block text-xs font-medium mb-1.5" style={{ color: "#6B7280" }}>
@@ -205,7 +229,7 @@ function PaymentCard({ ping }: { ping: VpnPing | null }) {
           marginTop: 12,
         }}
       >
-        {paying ? "Готовим оплату…" : `Оплатить ${PRICE_RUB} ₽`}
+        {paying ? "Готовим оплату…" : paymentProvider === "yookassa" ? `Оплатить через YooKassa` : `Оплатить ${PRICE_RUB} ₽`}
       </button>
 
       <div className="flex items-center justify-center gap-2 mt-3 text-[11px]" style={{ color: "#9CA3AF" }}>
