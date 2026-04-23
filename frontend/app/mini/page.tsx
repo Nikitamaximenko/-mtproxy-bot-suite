@@ -3,6 +3,8 @@
 import { useCallback, useEffect, useRef, useState } from "react"
 import { Check, Copy, ExternalLink, RefreshCw, Shield, X } from "lucide-react"
 import {
+  type CheckoutProvider,
+  getCheckoutProviderPresentation,
   getTelegramInitData,
   getTelegramInitDataAsync,
   getTelegramUser,
@@ -296,6 +298,7 @@ export default function MiniAppPage() {
   const [justPaid, setJustPaid] = useState(false)
   const [isWeb, setIsWeb] = useState<boolean | null>(null)
   const [webEmail, setWebEmail] = useState<string | null>(null)
+  const [paymentProvider, setPaymentProvider] = useState<CheckoutProvider>("lava")
 
   // VPN state
   // Дефолтный таб = VPN: это главный продукт. MTProxy — приятный бонус,
@@ -310,6 +313,7 @@ export default function MiniAppPage() {
 
   // VPN server ping
   const [vpnPing, setVpnPing] = useState<{ online: boolean; latency_ms: number | null } | null>(null)
+  const providerMeta = getCheckoutProviderPresentation(paymentProvider)
 
   useEffect(() => {
     const checkPing = async () => {
@@ -546,7 +550,7 @@ export default function MiniAppPage() {
           telegram_id: tgId ? String(tgId) : "0",
           username: tgUser?.username || null,
           customer_email: email,
-          payment_provider: "lava",
+          payment_provider: paymentProvider,
         }),
       })
       const data = (await res.json()) as { error?: string; payment_url?: string; details?: string }
@@ -1145,18 +1149,49 @@ export default function MiniAppPage() {
           {/* Способ оплаты */}
           <div className="mb-3">
             <span className="block text-xs font-medium mb-1.5" style={{ color: "#6B7280" }}>Способ оплаты</span>
-            <div
-              className="text-left px-3 py-2.5 text-xs font-semibold"
-              style={{
-                borderRadius: 12,
-                border: "2px solid #2AABEE",
-                background: "#EFF6FF",
-                color: "#111827",
-              }}
-            >
-              Банковская карта
-              <span className="block font-normal mt-0.5" style={{ color: "#6B7280", fontSize: 10 }}>lava.top</span>
+            <div className="grid grid-cols-2 gap-2">
+              {([
+                { key: "lava" as const, label: "Карта", tone: "neutral" as const },
+                { key: "yookassa" as const, label: "СБП и карты", tone: "brand" as const },
+              ]).map((option) => {
+                const meta = getCheckoutProviderPresentation(option.key)
+                const active = paymentProvider === option.key
+                return (
+                  <button
+                    key={option.key}
+                    type="button"
+                    onClick={() => setPaymentProvider(option.key)}
+                    className="text-left px-3 py-2.5 text-xs font-semibold transition-all"
+                    style={{
+                      borderRadius: 12,
+                      border: active ? "2px solid #2AABEE" : "1px solid #E5E7EB",
+                      background: active ? "#EFF6FF" : "#F9FAFB",
+                      color: "#111827",
+                    }}
+                  >
+                    <span className="flex items-center justify-between gap-2">
+                      <span>{meta.subtitle}</span>
+                      <span
+                        className="text-[10px] px-2 py-0.5"
+                        style={{
+                          borderRadius: 999,
+                          background: option.tone === "brand" ? "#DBEAFE" : "#E5E7EB",
+                          color: option.tone === "brand" ? "#1D4ED8" : "#4B5563",
+                        }}
+                      >
+                        {option.label}
+                      </span>
+                    </span>
+                    <span className="block font-normal mt-1 leading-relaxed" style={{ color: "#6B7280", fontSize: 10 }}>
+                      {meta.title}
+                    </span>
+                  </button>
+                )
+              })}
             </div>
+            <p className="text-[11px] mt-2" style={{ color: "#6B7280" }}>
+              Выбери удобный способ оплаты: стандартный checkout или YooKassa.
+            </p>
           </div>
 
           {/* Email */}
@@ -1217,7 +1252,7 @@ export default function MiniAppPage() {
               fontSize: "17px",
             }}
           >
-            {paying ? "Готовим оплату…" : "Оплатить 299 ₽ →"}
+            {paying ? "Готовим оплату…" : paymentProvider === "yookassa" ? "Оплатить через YooKassa" : "Оплатить 299 ₽ →"}
           </button>
 
           {error && (
@@ -1231,7 +1266,7 @@ export default function MiniAppPage() {
 
           {/* Payment note */}
           <p className="text-center text-xs mt-3" style={{ color: "#6B7280" }}>
-            {"Карта через lava.top · прокси сразу после оплаты · VPN — после установки Happ"}
+            {providerMeta.hint}
           </p>
           <p className="text-center text-xs mt-1" style={{ color: "#9CA3AF" }}>
             Отмена в любой момент — напишите в поддержку

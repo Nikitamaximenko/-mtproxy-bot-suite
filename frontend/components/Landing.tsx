@@ -141,8 +141,8 @@ function PaymentCard({ ping }: { ping: VpnPing | null }) {
         </span>
         <div className="grid grid-cols-2 gap-2">
           {([
-            { key: "lava" as const, label: "Основная", test: false },
-            { key: "yookassa" as const, label: "Тест", test: true },
+            { key: "lava" as const, label: "Карта", tone: "neutral" as const },
+            { key: "yookassa" as const, label: "СБП и карты", tone: "brand" as const },
           ]).map((option) => {
             const meta = getCheckoutProviderPresentation(option.key)
             const active = paymentProvider === option.key
@@ -165,8 +165,8 @@ function PaymentCard({ ping }: { ping: VpnPing | null }) {
                     className="text-[10px] px-2 py-0.5"
                     style={{
                       borderRadius: 999,
-                      background: option.test ? "#FEF3C7" : "#E5E7EB",
-                      color: option.test ? "#92400E" : "#4B5563",
+                      background: option.tone === "brand" ? "#DBEAFE" : "#E5E7EB",
+                      color: option.tone === "brand" ? "#1D4ED8" : "#4B5563",
                     }}
                   >
                     {option.label}
@@ -180,7 +180,7 @@ function PaymentCard({ ping }: { ping: VpnPing | null }) {
           })}
         </div>
         <p className="text-[11px] mt-2" style={{ color: "#6B7280" }}>
-          Обычная оплата работает как раньше. YooKassa пока включена только как тестовая вторая ветка на сайте.
+          Выбери удобный способ оплаты: стандартный checkout или YooKassa.
         </p>
       </div>
 
