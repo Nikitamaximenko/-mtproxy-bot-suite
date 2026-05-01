@@ -298,7 +298,7 @@ export default function MiniAppPage() {
   const [justPaid, setJustPaid] = useState(false)
   const [isWeb, setIsWeb] = useState<boolean | null>(null)
   const [webEmail, setWebEmail] = useState<string | null>(null)
-  const [paymentProvider, setPaymentProvider] = useState<CheckoutProvider>("lava")
+  const [paymentProvider, setPaymentProvider] = useState<CheckoutProvider>("yookassa")
 
   // VPN state
   // Дефолтный таб = VPN: это главный продукт. MTProxy — приятный бонус,
@@ -1151,8 +1151,8 @@ export default function MiniAppPage() {
             <span className="block text-xs font-medium mb-1.5" style={{ color: "#6B7280" }}>Способ оплаты</span>
             <div className="grid grid-cols-2 gap-2">
               {([
-                { key: "lava" as const, label: "Карта", tone: "neutral" as const },
                 { key: "yookassa" as const, label: "СБП и карты", tone: "brand" as const },
+                { key: "lava" as const, label: "Карта", tone: "neutral" as const },
               ]).map((option) => {
                 const meta = getCheckoutProviderPresentation(option.key)
                 const active = paymentProvider === option.key
@@ -1190,7 +1190,7 @@ export default function MiniAppPage() {
               })}
             </div>
             <p className="text-[11px] mt-2" style={{ color: "#6B7280" }}>
-              Выбери удобный способ оплаты: стандартный checkout или YooKassa.
+              По умолчанию включена ЮKassa: СБП, SberPay, T-Pay и карты.
             </p>
           </div>
 

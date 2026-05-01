@@ -49,7 +49,7 @@ function PaymentCard({ ping }: { ping: VpnPing | null }) {
   const [paying, setPaying] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [detail, setDetail] = useState<string | null>(null)
-  const [paymentProvider, setPaymentProvider] = useState<CheckoutProvider>("lava")
+  const [paymentProvider, setPaymentProvider] = useState<CheckoutProvider>("yookassa")
 
   const valid = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())
   const showErr = touched && email.length > 0 && !valid
@@ -141,8 +141,8 @@ function PaymentCard({ ping }: { ping: VpnPing | null }) {
         </span>
         <div className="grid grid-cols-2 gap-2">
           {([
-            { key: "lava" as const, label: "Карта", tone: "neutral" as const },
             { key: "yookassa" as const, label: "СБП и карты", tone: "brand" as const },
+            { key: "lava" as const, label: "Карта", tone: "neutral" as const },
           ]).map((option) => {
             const meta = getCheckoutProviderPresentation(option.key)
             const active = paymentProvider === option.key
@@ -180,7 +180,7 @@ function PaymentCard({ ping }: { ping: VpnPing | null }) {
           })}
         </div>
         <p className="text-[11px] mt-2" style={{ color: "#6B7280" }}>
-          Выбери удобный способ оплаты: стандартный checkout или YooKassa.
+          По умолчанию включена ЮKassa: СБП, SberPay, T-Pay и карты.
         </p>
       </div>
 

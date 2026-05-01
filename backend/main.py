@@ -205,6 +205,10 @@ class User(Base):
     nudge_3_sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     # Один бесплатный триал на telegram_id (выдаётся только из бота); не сбрасывается после истечения
     trial_consumed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # Пост-trial догрев: считаем только от реального момента окончания пробного дня.
+    trial_nudge_1_sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    trial_nudge_2_sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    trial_nudge_3_sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
 # FIX: "expired" added — it was missing from the original type
@@ -230,6 +234,9 @@ class Subscription(Base):
 
     payment_token: Mapped[str] = mapped_column(String(36), unique=True, index=True, nullable=False)
     payment_status: Mapped[str] = mapped_column(String(16), default="pending", index=True, nullable=False)
+    # Сохраняем происхождение строки навсегда: trial-строка после истечения становится expired,
+    # но не должна считаться как оплаченная подписка.
+    is_trial_offer: Mapped[bool] = mapped_column(Boolean, default=False, server_default=sa_false(), nullable=False)
     lava_contract_id: Mapped[str | None] = mapped_column(String(36), unique=True, index=True, nullable=True)
     # ЮKassa: id сохранённого способа оплаты для рекуррентных списаний; billing_provider = lava | yookassa
     yookassa_payment_method_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
@@ -394,6 +401,80 @@ def _record_checkout_log(
         log_db.close()
 
 
+def _real_paid_subscription_clause(model: type[Subscription] = Subscription):
+    return and_(
+        model.payment_status.in_(["paid", "expired"]),
+        or_(model.is_trial_offer == False, model.is_trial_offer.is_(None)),  # noqa: E712
+    )
+
+
+def _backfill_trial_offer_rows() -> None:
+    """
+    Исторические trial-строки раньше никак не помечались.
+    Восстанавливаем маркер для текущих trial и для уже истекших trial по ближайшей
+    к users.trial_consumed_at строке подписки без признаков платёжного провайдера.
+    """
+    db = SessionLocal()
+    try:
+        dirty = False
+
+        active_trial_rows = db.execute(
+            select(Subscription).where(
+                Subscription.payment_status == "trial",
+                or_(Subscription.is_trial_offer == False, Subscription.is_trial_offer.is_(None)),  # noqa: E712
+            )
+        ).scalars().all()
+        for sub in active_trial_rows:
+            sub.is_trial_offer = True
+            dirty = True
+
+        users = db.execute(
+            select(User).where(User.trial_consumed_at.is_not(None), User.telegram_id > 0)
+        ).scalars().all()
+        for user in users:
+            subs = db.execute(
+                select(Subscription)
+                .where(Subscription.telegram_id == int(user.telegram_id))
+                .order_by(Subscription.created_at.asc(), Subscription.id.asc())
+            ).scalars().all()
+            if not subs or any(bool(s.is_trial_offer) for s in subs):
+                continue
+
+            candidates = [
+                s for s in subs
+                if s.payment_status in ("trial", "expired")
+                and not (s.lava_contract_id or "").strip()
+                and not (s.yookassa_payment_method_id or "").strip()
+                and not (s.billing_provider or "").strip()
+            ]
+            if not candidates:
+                continue
+
+            trial_anchor = user.trial_consumed_at or utcnow()
+            best: Subscription | None = None
+            best_delta: float | None = None
+            for sub in candidates:
+                delta = abs((sub.created_at - trial_anchor).total_seconds())
+                if best is None or best_delta is None or delta < best_delta:
+                    best = sub
+                    best_delta = delta
+
+            if best is None:
+                continue
+            if best_delta is not None and best_delta > 36 * 3600 and len(candidates) != 1:
+                continue
+            best.is_trial_offer = True
+            dirty = True
+
+        if dirty:
+            db.commit()
+    except Exception:
+        db.rollback()
+        logger.exception("Failed to backfill is_trial_offer markers")
+    finally:
+        db.close()
+
+
 def _migrate() -> None:
     """Add columns that create_all won't add to existing tables."""
     from sqlalchemy import inspect as sa_inspect
@@ -406,6 +487,13 @@ def _migrate() -> None:
                 conn.execute(text("ALTER TABLE subscriptions ADD COLUMN notified_expiring BOOLEAN NOT NULL DEFAULT FALSE"))
             if "notified_expired" not in existing:
                 conn.execute(text("ALTER TABLE subscriptions ADD COLUMN notified_expired BOOLEAN NOT NULL DEFAULT FALSE"))
+            if "is_trial_offer" not in existing:
+                if engine.dialect.name == "postgresql":
+                    conn.execute(
+                        text("ALTER TABLE subscriptions ADD COLUMN is_trial_offer BOOLEAN NOT NULL DEFAULT FALSE")
+                    )
+                else:
+                    conn.execute(text("ALTER TABLE subscriptions ADD COLUMN is_trial_offer BOOLEAN NOT NULL DEFAULT 0"))
             if "access_suspended" not in existing:
                 if engine.dialect.name == "postgresql":
                     conn.execute(
@@ -485,6 +573,21 @@ def _migrate() -> None:
                     conn.execute(text("ALTER TABLE users ADD COLUMN trial_consumed_at TIMESTAMPTZ"))
                 else:
                     conn.execute(text("ALTER TABLE users ADD COLUMN trial_consumed_at DATETIME"))
+            if "trial_nudge_1_sent_at" not in existing:
+                if engine.dialect.name == "postgresql":
+                    conn.execute(text("ALTER TABLE users ADD COLUMN trial_nudge_1_sent_at TIMESTAMPTZ"))
+                else:
+                    conn.execute(text("ALTER TABLE users ADD COLUMN trial_nudge_1_sent_at DATETIME"))
+            if "trial_nudge_2_sent_at" not in existing:
+                if engine.dialect.name == "postgresql":
+                    conn.execute(text("ALTER TABLE users ADD COLUMN trial_nudge_2_sent_at TIMESTAMPTZ"))
+                else:
+                    conn.execute(text("ALTER TABLE users ADD COLUMN trial_nudge_2_sent_at DATETIME"))
+            if "trial_nudge_3_sent_at" not in existing:
+                if engine.dialect.name == "postgresql":
+                    conn.execute(text("ALTER TABLE users ADD COLUMN trial_nudge_3_sent_at TIMESTAMPTZ"))
+                else:
+                    conn.execute(text("ALTER TABLE users ADD COLUMN trial_nudge_3_sent_at DATETIME"))
 
     # vpn_peers: new table, created by create_all on first run; no ALTER needed for existing columns.
 
@@ -531,6 +634,7 @@ def _migrate() -> None:
                 conn.commit()
         except Exception:
             pass
+    _backfill_trial_offer_rows()
 
 
 @asynccontextmanager
@@ -687,7 +791,21 @@ def bot_grant_trial(payload: GrantTrialRequest, req: Request, db: Session = Depe
     user.trial_consumed_at = now
     db.commit()
 
-    _provision_vpn_after_payment(tg_id, db)
+    trial_vpn_ok, trial_vpn_reason = _provision_vpn_after_payment(tg_id, db, source="trial")
+    _record_checkout_log(
+        source="trial",
+        stage="trial_vpn_ready" if trial_vpn_ok else "trial_vpn_failed",
+        provider="trial",
+        telegram_id=tg_id,
+        username=payload.username,
+        payment_token=sub.payment_token,
+        ok=trial_vpn_ok,
+        error=None if trial_vpn_ok else trial_vpn_reason,
+        details={
+            "trial_expires_at": sub.expires_at.isoformat() if sub.expires_at else None,
+            "already_active": False,
+        },
+    )
     return GrantTrialResponse(ok=True, expires_at=sub.expires_at, already_active=False)
 
 
@@ -1627,6 +1745,7 @@ def activate_trial_subscription(sub: Subscription) -> None:
     """Один раз из бота: MTProxy + срок TRIAL_DAYS, статус trial (не путать с оплатой Lava)."""
     now = utcnow()
     _apply_proxy_credentials(sub)
+    sub.is_trial_offer = True
     sub.payment_status = "trial"
     sub.expires_at = now + timedelta(days=TRIAL_DAYS)
     sub.access_suspended = False
@@ -1703,6 +1822,29 @@ def _sales_nudge_message(step: int, user: User) -> str:
     )
 
 
+def _trial_followup_message(step: int, user: User) -> str:
+    g = _sales_greeting(user)
+    price = PAYMENT_AMOUNT_RUB
+    if step == 1:
+        return (
+            f"{g}, пробный день закончился, и доступ к Telegram/VPN уже остановлен.\n\n"
+            "Если по скорости и качеству всё подошло — просто верните доступ одной оплатой.\n\n"
+            f"<b>{price} ₽/мес</b> · MTProxy + VPN в одной подписке."
+        )
+    if step == 2:
+        return (
+            f"{g}, напомню: в <b>Frosty</b> работает не только Telegram.\n\n"
+            "Одна подписка возвращает и MTProxy, и VPN для Instagram, TikTok, YouTube и сайтов.\n\n"
+            f"<b>{price} ₽/мес</b> · подключение за пару минут."
+        )
+    return (
+        f"{g}, последний мягкий пинг после пробного дня.\n\n"
+        "Если хотите вернуть доступ без ручной возни — откройте мини-приложение и оплатите подписку.\n\n"
+        f"<b>{price} ₽/мес</b> · без лимита трафика.\n\n"
+        "<i>/stop — больше не пришлём</i>"
+    )
+
+
 def _process_sales_nudges() -> None:
     """Отложенные напоминания неплатящим (раз в час вместе с expiration loop)."""
     if not BOT_TOKEN or not FRONTEND_URL:
@@ -1712,19 +1854,54 @@ def _process_sales_nudges() -> None:
         now = utcnow()
         paid_rows = db.execute(
             select(Subscription.telegram_id)
-            .where(Subscription.payment_status.in_(["paid", "expired", "trial"]))
+            .where(_real_paid_subscription_clause())
             .distinct()
         ).scalars().all()
         paid_set = set(paid_rows)
 
+        trial_rows = db.execute(
+            select(Subscription).where(
+                Subscription.telegram_id > 0,
+                Subscription.is_trial_offer == True,  # noqa: E712
+                Subscription.expires_at.is_not(None),
+            )
+        ).scalars().all()
+        trial_by_user: dict[int, Subscription] = {}
+        for sub in trial_rows:
+            tg = int(sub.telegram_id)
+            prev = trial_by_user.get(tg)
+            if prev is None or ((sub.expires_at or now) > (prev.expires_at or now)):
+                trial_by_user[tg] = sub
+
         users = db.execute(
-            select(User).where(User.marketing_opt_out == False)  # noqa: E712
+            select(User).where(User.marketing_opt_out == False, User.telegram_id > 0)  # noqa: E712
         ).scalars().all()
 
         for user in users:
-            if user.telegram_id in paid_set:
-                continue
             tg = int(user.telegram_id)
+            if tg in paid_set:
+                continue
+
+            trial_sub = trial_by_user.get(tg)
+            if user.trial_consumed_at is not None:
+                trial_expires_at = trial_sub.expires_at if trial_sub and trial_sub.expires_at else (user.trial_consumed_at + timedelta(days=TRIAL_DAYS))
+                if trial_expires_at > now:
+                    continue
+                mini_kb = _sales_subscribe_keyboard(tg)
+                if user.trial_nudge_1_sent_at is None and trial_expires_at + timedelta(minutes=30) <= now:
+                    if _send_tg(tg, _trial_followup_message(1, user), mini_kb):
+                        user.trial_nudge_1_sent_at = now
+                        logger.info("Trial follow-up 1 sent tg_id=%s", tg)
+                elif user.trial_nudge_2_sent_at is None and trial_expires_at + timedelta(hours=24) <= now:
+                    if _send_tg(tg, _trial_followup_message(2, user), mini_kb):
+                        user.trial_nudge_2_sent_at = now
+                        logger.info("Trial follow-up 2 sent tg_id=%s", tg)
+                elif user.trial_nudge_3_sent_at is None and trial_expires_at + timedelta(hours=72) <= now:
+                    if _send_tg(tg, _trial_followup_message(3, user), mini_kb):
+                        user.trial_nudge_3_sent_at = now
+                        logger.info("Trial follow-up 3 sent tg_id=%s", tg)
+                continue
+
             mini_kb = _sales_subscribe_keyboard(tg)
             if user.nudge_1_sent_at is None and user.created_at + timedelta(hours=2) <= now:
                 if _send_tg(tg, _sales_nudge_message(1, user), mini_kb):
@@ -1825,12 +2002,14 @@ def _notify_admin_payment(tg_id: int) -> None:
     _send_tg(chat_id, f"💰 Оплата получена от пользователя <code>{tg_id}</code>")
 
 
-def _notify_admin_vpn_provisioning_failed(tg_id: int, reason: str) -> None:
+def _notify_admin_vpn_provisioning_failed(tg_id: int, reason: str, *, source: str = "paid") -> None:
     """Оплата прошла, но создать VPN-клиента в 3X-UI не удалось — админ должен увидеть это сразу,
     иначе пользователь платит, а VPN у него не работает, и никто об этом не знает."""
     logger.error(
-        "VPN provisioning FAILED for paid tg_id=%s: %s — manual intervention required",
-        tg_id, reason,
+        "VPN provisioning FAILED for source=%s tg_id=%s: %s — manual intervention required",
+        source,
+        tg_id,
+        reason,
     )
     if not ADMIN_NOTIFY_CHAT_ID or not BOT_TOKEN:
         return
@@ -1838,10 +2017,15 @@ def _notify_admin_vpn_provisioning_failed(tg_id: int, reason: str) -> None:
         chat_id = int(ADMIN_NOTIFY_CHAT_ID)
     except ValueError:
         return
+    title = (
+        "⚠️ <b>Пробный день выдан, но VPN не провижился</b>\n"
+        if source == "trial"
+        else "⚠️ <b>Оплата прошла, но VPN не провижился</b>\n"
+    )
     _send_tg(
         chat_id,
         (
-            "⚠️ <b>Оплата прошла, но VPN не провижился</b>\n"
+            title +
             f"tg_id: <code>{tg_id}</code>\n"
             f"Причина: <code>{reason[:300]}</code>\n\n"
             "Открой админку → «Пользователи из БД» → жми тумблер доступа (он пересоздаст клиента в 3X-UI)."
@@ -1849,19 +2033,26 @@ def _notify_admin_vpn_provisioning_failed(tg_id: int, reason: str) -> None:
     )
 
 
-def _provision_vpn_after_payment(tg_id: int, db: Session) -> None:
+def _provision_vpn_after_payment(tg_id: int, db: Session, *, source: str = "paid") -> tuple[bool, str | None]:
     """Создать/восстановить VLESS-клиента после успешной оплаты. Если не получилось —
     громко логируем и стреляем в админа в Telegram. Не кидаем исключение наверх,
     чтобы провайдер платежей получил 200 OK и не ретраил webhook."""
-    if not XRAY_API_URL or int(tg_id) <= 0:
-        return
+    if not XRAY_API_URL:
+        return False, "xray_not_configured"
+    if int(tg_id) <= 0:
+        return False, "invalid_telegram_id"
     try:
         result = _ensure_xray_client(int(tg_id), db)
         if result is None:
-            _notify_admin_vpn_provisioning_failed(int(tg_id), "_ensure_xray_client returned None (3X-UI addClient failed)")
+            reason = "_ensure_xray_client returned None (3X-UI addClient failed)"
+            _notify_admin_vpn_provisioning_failed(int(tg_id), reason, source=source)
+            return False, reason
+        return True, None
     except Exception as e:
         logger.exception("VPN provisioning crashed for tg_id=%s", tg_id)
-        _notify_admin_vpn_provisioning_failed(int(tg_id), f"{type(e).__name__}: {e}")
+        reason = f"{type(e).__name__}: {e}"
+        _notify_admin_vpn_provisioning_failed(int(tg_id), reason, source=source)
+        return False, reason
 
 
 def _notify_expiring(tg_id: int, expires_at: datetime) -> None:
@@ -1899,7 +2090,7 @@ def _notify_trial_expired(tg_id: int) -> None:
         (
             "\u23f0 <b>\u041f\u0440\u043e\u0431\u043d\u044b\u0439 \u0434\u0435\u043d\u044c \u0437\u0430\u043a\u043e\u043d\u0447\u0438\u043b\u0441\u044f</b>\n\n"
             "\u0414\u043e\u0441\u0442\u0443\u043f \u043a MTProxy \u0438 VPN \u043f\u0440\u0438\u043e\u0441\u0442\u0430\u043d\u043e\u0432\u043b\u0435\u043d.\n\n"
-            "\u041e\u0444\u043e\u0440\u043c\u0438\u0442\u0435 \u043f\u043e\u0434\u043f\u0438\u0441\u043a\u0443 \u2014 \u0447\u0442\u043e\u0431\u044b \u043f\u0440\u043e\u0434\u043e\u043b\u0436\u0438\u0442\u044c \u0431\u0435\u0437 \u043e\u0433\u0440\u0430\u043d\u0438\u0447\u0435\u043d\u0438\u0439."
+            "\u041e\u0444\u043e\u0440\u043c\u0438\u0442\u0435 \u043f\u043e\u0434\u043f\u0438\u0441\u043a\u0443 \u2014 \u0447\u0442\u043e\u0431\u044b \u0441\u0440\u0430\u0437\u0443 \u0432\u0435\u0440\u043d\u0443\u0442\u044c \u0434\u043e\u0441\u0442\u0443\u043f \u043a Telegram \u0438 VPN \u0431\u0435\u0437 \u043d\u043e\u0432\u043e\u0439 \u043d\u0430\u0441\u0442\u0440\u043e\u0439\u043a\u0438."
         ),
         {"inline_keyboard": buttons},
     )
@@ -4343,6 +4534,7 @@ def internal_diag_subscription(
         return {
             "id": s.id,
             "payment_status": s.payment_status,
+            "is_trial_offer": bool(s.is_trial_offer),
             "created_at": s.created_at.isoformat() if s.created_at else None,
             "expires_at": s.expires_at.isoformat() if s.expires_at else None,
             "access_suspended": bool(s.access_suspended),
@@ -4490,7 +4682,7 @@ def admin_stats(req: Request, db: Session = Depends(get_db)) -> AdminStatsRespon
         .where(
             and_(
                 _sub_conds(
-                    Subscription.payment_status.in_(["paid", "expired"]),
+                    _real_paid_subscription_clause(),
                     Subscription.expires_at.is_not(None),
                     Subscription.expires_at <= now,
                 ),
@@ -4514,7 +4706,7 @@ def admin_stats(req: Request, db: Session = Depends(get_db)) -> AdminStatsRespon
     # One row ≈ one completed payment period (renewals = multiple rows); TG bot only
     total_paid = db.execute(
         select(func.count()).select_from(Subscription).where(
-            _sub_conds(Subscription.payment_status.in_(["paid", "expired"]))
+            _sub_conds(_real_paid_subscription_clause())
         )
     ).scalar() or 0
 
@@ -4534,7 +4726,8 @@ def admin_stats(req: Request, db: Session = Depends(get_db)) -> AdminStatsRespon
     _paid_row_for_user = exists(
         select(Subscription.id).where(
             Subscription.telegram_id == User.telegram_id,
-            Subscription.payment_status.in_(["paid", "expired"]),
+            _real_paid_subscription_clause(),
+            Subscription.created_at >= User.trial_consumed_at,
         )
     )
     trial_converted = (
@@ -4569,8 +4762,8 @@ class FunnelStatsResponse(BaseModel):
     # --- TG funnel: unique users (telegram_id > 0) ---
     tg_users: int               # bot users total
     tg_checkout: int            # unique tg users who opened checkout (subscription row created)
-    tg_payment_link: int        # unique tg users who got a payment link (lava_contract_id set)
-    tg_paid: int                # unique tg users who paid (ever, incl expired)
+    tg_payment_link: int        # unique tg users who got a real payment link from any provider
+    tg_paid: int                # unique tg users who paid (ever, excl trial-only rows)
     active_now: int             # paid + not expired + not suspended
 
     # 7-day cohort (same deduplicated logic)
@@ -4629,25 +4822,33 @@ def admin_funnel(req: Request, db: Session = Depends(get_db)) -> FunnelStatsResp
         .where(sub_tg_cond, Subscription.created_at >= week_ago)
     ).scalar() or 0
 
-    # Payment link = lava_contract_id was assigned; deduped
+    # Payment link = backend returned real payment_url to Telegram user (provider-agnostic).
+    payment_link_conds = [
+        CheckoutLog.telegram_id.is_not(None),
+        CheckoutLog.telegram_id > 0,
+        CheckoutLog.stage.in_(["backend_checkout_response", "backend_yookassa_ready"]),
+        CheckoutLog.payment_url.is_not(None),
+    ]
+    if scope is not None:
+        payment_link_conds.append(CheckoutLog.telegram_id.in_(scope))
     tg_payment_link = db.execute(
-        select(func.count(Subscription.telegram_id.distinct()))
-        .select_from(Subscription)
-        .where(sub_tg_cond, Subscription.lava_contract_id.is_not(None))
+        select(func.count(CheckoutLog.telegram_id.distinct()))
+        .select_from(CheckoutLog)
+        .where(and_(*payment_link_conds))
     ).scalar() or 0
 
-    # Paid (ever) = paid or expired; deduped
+    # Paid (ever) = paid or expired; trial-only rows excluded by explicit marker.
     tg_paid = db.execute(
         select(func.count(Subscription.telegram_id.distinct()))
         .select_from(Subscription)
-        .where(sub_tg_cond, Subscription.payment_status.in_(["paid", "expired"]))
+        .where(sub_tg_cond, _real_paid_subscription_clause())
     ).scalar() or 0
     tg_paid_7d = db.execute(
         select(func.count(Subscription.telegram_id.distinct()))
         .select_from(Subscription)
         .where(
             sub_tg_cond,
-            Subscription.payment_status.in_(["paid", "expired"]),
+            _real_paid_subscription_clause(),
             Subscription.created_at >= week_ago,
         )
     ).scalar() or 0
@@ -4681,7 +4882,7 @@ def admin_funnel(req: Request, db: Session = Depends(get_db)) -> FunnelStatsResp
             select(func.count(Subscription.telegram_id.distinct()))
             .select_from(Subscription)
             .where(
-                Subscription.telegram_id < 0, Subscription.payment_status.in_(["paid", "expired"])
+                Subscription.telegram_id < 0, _real_paid_subscription_clause()
             )
         ).scalar() or 0
 
@@ -4697,7 +4898,7 @@ def admin_funnel(req: Request, db: Session = Depends(get_db)) -> FunnelStatsResp
     source_paid_rows = db.execute(
         select(User.ref_source, func.count(User.telegram_id.distinct()).label("cnt"))
         .join(Subscription, Subscription.telegram_id == User.telegram_id)
-        .where(tg_user_cond, Subscription.payment_status.in_(["paid", "expired"]))
+        .where(tg_user_cond, _real_paid_subscription_clause())
         .group_by(User.ref_source)
     ).all()
     paid_by_source: dict[str | None, int] = {r[0]: r[1] for r in source_paid_rows}
@@ -4730,7 +4931,7 @@ def admin_funnel(req: Request, db: Session = Depends(get_db)) -> FunnelStatsResp
         .where(
             _nu(
                 User.nudge_1_sent_at.is_not(None),
-                Subscription.payment_status.in_(["paid", "expired"]),
+                _real_paid_subscription_clause(),
             )
         )
     ).scalar() or 0
@@ -4781,7 +4982,7 @@ def admin_cleanup_web_users(req: Request, db: Session = Depends(get_db)) -> Clea
         select(Subscription.telegram_id)
         .where(
             Subscription.telegram_id.in_(web_tg_ids),
-            Subscription.payment_status.in_(["paid", "expired"]),
+            _real_paid_subscription_clause(),
         )
         .distinct()
     ).scalars().all()
@@ -4790,7 +4991,7 @@ def admin_cleanup_web_users(req: Request, db: Session = Depends(get_db)) -> Clea
     kept = db.execute(
         select(func.count()).select_from(Subscription).where(
             Subscription.telegram_id.in_(web_tg_ids),
-            Subscription.payment_status.in_(["paid", "expired"]),
+            _real_paid_subscription_clause(),
         )
     ).scalar() or 0
 
@@ -5044,7 +5245,7 @@ def admin_users_overview(
         users_table_total = db.execute(select(func.count()).select_from(User)).scalar() or 0
 
     paid_telegram_ids = select(Subscription.telegram_id).where(
-        Subscription.payment_status.in_(["paid", "expired"])
+        _real_paid_subscription_clause()
     )
     if scope is not None:
         paid_telegram_ids = paid_telegram_ids.where(Subscription.telegram_id.in_(scope))

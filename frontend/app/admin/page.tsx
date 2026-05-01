@@ -367,6 +367,8 @@ function checkoutStageLabel(stage: string): string {
     frontend_backend_error: "Frontend получил ошибку backend",
     frontend_missing_payment_url: "Frontend не получил payment_url",
     frontend_checkout_ok: "Frontend получил ссылку и отдал пользователю",
+    trial_vpn_ready: "Пробный день: VPN поднялся успешно",
+    trial_vpn_failed: "Пробный день: VPN не провижился",
   }
   return labels[stage] || stage
 }
