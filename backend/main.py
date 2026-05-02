@@ -92,6 +92,7 @@ LAVA_PAY_URL_TEMPLATE = (os.getenv("LAVA_PAY_URL_TEMPLATE") or "https://lava.top
 LAVA_CHECKOUT_FALLBACK_URL = (os.getenv("LAVA_CHECKOUT_FALLBACK_URL") or "").strip()
 
 ADMIN_API_KEY = (os.getenv("ADMIN_API_KEY") or "").strip()
+EMAIL_RE = re.compile(r"^[A-Z0-9._%+\-]+@[A-Z0-9.\-]+\.[A-Z]{2,63}$", re.IGNORECASE)
 
 
 def _parse_telegram_id_csv(raw: str) -> set[int] | None:
@@ -109,6 +110,16 @@ def _parse_telegram_id_csv(raw: str) -> set[int] | None:
         except ValueError:
             continue
     return out if out else None
+
+
+def _normalize_email(value: str | None) -> str | None:
+    """Lowercase + basic RFC-like validation for payment providers."""
+    if value is None:
+        return None
+    email = value.strip().lower()
+    if not email:
+        return None
+    return email if EMAIL_RE.fullmatch(email) else None
 
 
 # If set, admin analytics (stats, funnel, users-overview) only include these telegram_ids.
@@ -988,6 +999,18 @@ def _normalize_payment_url(url: str) -> str:
     return urljoin(base, u)
 
 
+def _lava_api_root() -> str:
+    """Нормализует базовый URL Lava API даже при env вида .../api/v3."""
+    raw = (LAVA_TOP_API_BASE_URL or "").strip().rstrip("/")
+    if not raw:
+        return "https://gate.lava.top"
+    low = raw.lower()
+    for suffix in ("/api/v3", "/api/v2", "/api/v1", "/api"):
+        if low.endswith(suffix):
+            return raw[: -len(suffix)].rstrip("/") or "https://gate.lava.top"
+    return raw
+
+
 def _create_lava_top_invoice(
     email: str,
     buyer_email: str | None = None,
@@ -1227,8 +1250,11 @@ def _yookassa_create_initial_payment(
             "renewal": "0",
         },
     }
-    if email.strip():
-        body["receipt"] = _yookassa_receipt(email)
+    email_norm = _normalize_email(email)
+    if email and not email_norm:
+        raise RuntimeError("YooKassa: некорректный email покупателя (customer.email)")
+    if email_norm:
+        body["receipt"] = _yookassa_receipt(email_norm)
     pid = str(uuid4())
     data = _yookassa_request("POST", "/payments", body=body, idempotence_key=pid, strict=True)
     if not data:
@@ -1255,7 +1281,8 @@ def _yookassa_create_recurring_payment(sub: Subscription, db: Session, *, idempo
     if not pm_id:
         return False
     user = db.execute(select(User).where(User.telegram_id == sub.telegram_id)).scalar_one_or_none()
-    email = (user.email or "").strip().lower() if user else ""
+    email_raw = (user.email or "").strip().lower() if user else ""
+    email = _normalize_email(email_raw)
     amt = f"{PAYMENT_AMOUNT_RUB}.00"
     body: dict[str, Any] = {
         "amount": {"value": amt, "currency": "RUB"},
@@ -1267,6 +1294,10 @@ def _yookassa_create_recurring_payment(sub: Subscription, db: Session, *, idempo
             "renewal": "1",
         },
     }
+    if email_raw and not email:
+        raise RuntimeError(
+            f"YooKassa recurring: invalid user.email for tg_id={sub.telegram_id}: {email_raw!r}"
+        )
     if email:
         body["receipt"] = _yookassa_receipt(email)
     data = _yookassa_request("POST", "/payments", body=body, idempotence_key=idempotence_key, strict=True)
@@ -1467,8 +1498,10 @@ def _checkout_fallback_payment_url(payment_token: str) -> str:
 def checkout_create(payload: CheckoutCreateRequest, db: Session = Depends(get_db)) -> CheckoutCreateResponse:
     import random
     username = payload.username.strip() if payload.username else None
-    email = payload.email.strip().lower() if payload.email else None
-    customer_email = payload.customer_email.strip().lower() if payload.customer_email else None
+    email_raw = payload.email.strip() if payload.email else None
+    customer_email_raw = payload.customer_email.strip() if payload.customer_email else None
+    email = _normalize_email(email_raw)
+    customer_email = _normalize_email(customer_email_raw)
     effective_email = email or customer_email
     tg_id = int(payload.telegram_id)
     reusable_web_user: User | None = None
@@ -1555,7 +1588,12 @@ def checkout_create(payload: CheckoutCreateRequest, db: Session = Depends(get_db
         if not effective_email:
             raise HTTPException(
                 status_code=400,
-                detail="Для оплаты через СБП / ЮKassa укажите email (нужен для чека).",
+                detail="Для оплаты через СБП / ЮKassa укажите корректный email (нужен для чека).",
+            )
+        if (email_raw and not email) or (customer_email_raw and not customer_email):
+            raise HTTPException(
+                status_code=400,
+                detail="Некорректный email: проверьте формат (например, name@mail.ru).",
             )
         if not FRONTEND_URL:
             raise HTTPException(
