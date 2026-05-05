@@ -19,6 +19,8 @@ type SubscriptionData = {
   proxy_link?: string | null
   suspended?: boolean
   is_trial?: boolean
+  autopay_enabled?: boolean
+  lava_autopay_enabled?: boolean
 }
 
 type VpnData = {
@@ -299,6 +301,7 @@ export default function MiniAppPage() {
   const [isWeb, setIsWeb] = useState<boolean | null>(null)
   const [webEmail, setWebEmail] = useState<string | null>(null)
   const [paymentProvider, setPaymentProvider] = useState<CheckoutProvider>("yookassa")
+  const [renewCheckoutOpen, setRenewCheckoutOpen] = useState(false)
 
   // VPN state
   // Дефолтный таб = VPN: это главный продукт. MTProxy — приятный бонус,
@@ -498,6 +501,7 @@ export default function MiniAppPage() {
   const isTrial = !!sub?.is_trial
   const proxyLink = sub?.proxy_link ?? null
   const expiresAt = sub?.expires_at ?? null
+  const autopayEnabled = !!sub?.autopay_enabled
 
   /** Одна кнопка: открыть tg://proxy или сначала запросить ссылку с подписью Telegram. */
   const handleConnectProxy = useCallback(async () => {
@@ -594,6 +598,7 @@ export default function MiniAppPage() {
     setSub(data)
     setPaymentUrl(null)
     setJustPaid(true)
+    setRenewCheckoutOpen(false)
   }, [])
 
   /* ── Loader на самом первом рендере ──
@@ -693,6 +698,131 @@ export default function MiniAppPage() {
               </span>
             </div>
           </div>
+
+          {/* Manual renewal (cuando рекуррент не привязан) */}
+          {!isTrial && !autopayEnabled && (
+            <div className="mb-5 p-4" style={{ background: "#FFFBEB", borderRadius: "16px", border: "1px solid #FDE68A" }}>
+              <p className="text-sm font-semibold" style={{ color: "#92400E" }}>Автопродление не подключено</p>
+              <p className="text-xs mt-1" style={{ color: "#92400E", lineHeight: 1.5 }}>
+                Чтобы продлить подписку сейчас, оформите оплату повторно — кнопка ниже откроет оплату прямо в мини‑приложении.
+              </p>
+              <button
+                type="button"
+                onClick={() => setRenewCheckoutOpen((v) => !v)}
+                className="w-full mt-3 font-bold touch-manipulation active:scale-[0.98] transition-transform"
+                style={{
+                  background: "#F59E0B",
+                  color: "#FFFFFF",
+                  height: "48px",
+                  borderRadius: "14px",
+                  fontSize: "15px",
+                }}
+              >
+                {renewCheckoutOpen ? "Скрыть оплату" : "Продлить подписку"}
+              </button>
+
+              {renewCheckoutOpen && (
+                <div className="mt-4 space-y-3">
+                  <div>
+                    <span className="block text-xs font-medium mb-1.5" style={{ color: "#6B7280" }}>
+                      Способ оплаты
+                    </span>
+                    <div className="grid grid-cols-2 gap-2">
+                      {([
+                        { key: "yookassa" as const, label: "СБП и карты", tone: "brand" as const },
+                        { key: "lava" as const, label: "Карта", tone: "neutral" as const },
+                      ]).map((option) => {
+                        const meta = getCheckoutProviderPresentation(option.key)
+                        const active = paymentProvider === option.key
+                        return (
+                          <button
+                            key={option.key}
+                            type="button"
+                            onClick={() => setPaymentProvider(option.key)}
+                            className="text-left px-3 py-2.5 text-xs font-semibold transition-all"
+                            style={{
+                              borderRadius: 12,
+                              border: active ? "2px solid #F59E0B" : "1px solid #E5E7EB",
+                              background: active ? "#FFFBEB" : "#F9FAFB",
+                              color: "#111827",
+                            }}
+                          >
+                            <span className="flex items-center justify-between gap-2">
+                              <span>{meta.subtitle}</span>
+                              <span
+                                className="text-[10px] px-2 py-0.5"
+                                style={{
+                                  borderRadius: 999,
+                                  background: option.tone === "brand" ? "#FDE68A" : "#E5E7EB",
+                                  color: option.tone === "brand" ? "#92400E" : "#4B5563",
+                                }}
+                              >
+                                {option.label}
+                              </span>
+                            </span>
+                            <span className="block font-normal mt-1 leading-relaxed" style={{ color: "#6B7280", fontSize: 10 }}>
+                              {meta.title}
+                            </span>
+                          </button>
+                        )
+                      })}
+                    </div>
+                  </div>
+
+                  {/* Email */}
+                  <div>
+                    <label className="block text-xs font-medium mb-1.5" style={{ color: "#6B7280" }}>
+                      Email для чека
+                    </label>
+                    <input
+                      type="text"
+                      inputMode="email"
+                      autoComplete="email"
+                      autoCapitalize="none"
+                      placeholder="your@email.com"
+                      value={email}
+                      onChange={(e) => { setEmail(e.target.value); setEmailTouched(true) }}
+                      onBlur={() => setEmailTouched(true)}
+                      className="w-full h-11 px-4 text-sm outline-none transition-all"
+                      style={{
+                        background: "#F7F8FA",
+                        border: showEmailError ? "1px solid #EF4444" : "1px solid transparent",
+                        borderRadius: "12px",
+                        color: "#111827",
+                      }}
+                    />
+                    {showEmailError && (
+                      <p className="text-xs mt-1.5" style={{ color: "#EF4444" }}>
+                        Введите корректный email (например, you@mail.ru)
+                      </p>
+                    )}
+                  </div>
+
+                  <button
+                    onClick={() => { void handlePay() }}
+                    disabled={!email || !isEmailValid || paying}
+                    className="w-full font-bold touch-manipulation active:scale-[0.98] transition-transform disabled:opacity-50 disabled:active:scale-100"
+                    style={{
+                      background: "#2AABEE",
+                      color: "#FFFFFF",
+                      height: "56px",
+                      borderRadius: "14px",
+                      fontSize: "17px",
+                    }}
+                  >
+                    {paying ? "Готовим оплату…" : paymentProvider === "yookassa" ? "Оплатить через YooKassa" : "Оплатить 299 ₽ →"}
+                  </button>
+
+                  <p className="text-center text-xs" style={{ color: "#6B7280" }}>
+                    {providerMeta.hint}
+                  </p>
+                  <p className="text-center text-xs" style={{ color: "#9CA3AF" }}>
+                    Отмена в любой момент — напишите в поддержку
+                  </p>
+                </div>
+              )}
+            </div>
+          )}
 
           {/* Tabs — VPN и Telegram (2 в 1) */}
           <div className="flex mb-5 p-1" style={{ background: "#F7F8FA", borderRadius: "14px" }}>
