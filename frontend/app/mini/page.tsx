@@ -700,11 +700,15 @@ export default function MiniAppPage() {
           </div>
 
           {/* Manual renewal (cuando рекуррент не привязан) */}
-          {!isTrial && !autopayEnabled && (
+          {(isTrial || !autopayEnabled) && (
             <div className="mb-5 p-4" style={{ background: "#FFFBEB", borderRadius: "16px", border: "1px solid #FDE68A" }}>
-              <p className="text-sm font-semibold" style={{ color: "#92400E" }}>Автопродление не подключено</p>
+              <p className="text-sm font-semibold" style={{ color: "#92400E" }}>
+                {isTrial ? "Тестовый период активен" : "Автопродление не подключено"}
+              </p>
               <p className="text-xs mt-1" style={{ color: "#92400E", lineHeight: 1.5 }}>
-                Чтобы продлить подписку сейчас, оформите оплату повторно — кнопка ниже откроет оплату прямо в мини‑приложении.
+                {isTrial
+                  ? "Чтобы не проходить длинный путь после trial, оплатите подписку сразу — кнопка ниже откроет checkout прямо в мини‑приложении."
+                  : "Чтобы продлить подписку сейчас, оформите оплату повторно — кнопка ниже откроет оплату прямо в мини‑приложении."}
               </p>
               <button
                 type="button"
@@ -718,7 +722,7 @@ export default function MiniAppPage() {
                   fontSize: "15px",
                 }}
               >
-                {renewCheckoutOpen ? "Скрыть оплату" : "Продлить подписку"}
+                {renewCheckoutOpen ? "Скрыть оплату" : (isTrial ? "Оформить подписку сейчас" : "Продлить подписку")}
               </button>
 
               {renewCheckoutOpen && (

@@ -40,6 +40,7 @@ INTERNAL_API_TOKEN = os.getenv("INTERNAL_API_TOKEN", "").strip()
 FRONTEND_URL = (os.getenv("FRONTEND_URL") or "").strip()
 MINIAPP_PATH = (os.getenv("MINIAPP_PATH") or "/mini").strip() or "/mini"
 PRICE_RUB = int(os.getenv("PRICE_RUB", "299") or "299")
+ADMIN_TELEGRAM = "@NikitaNikitt"
 
 
 def _internal_headers() -> dict[str, str]:
@@ -78,10 +79,12 @@ SYSTEM_PROMPT = f"""Ты — служба поддержки сервиса Fros
 Правила:
 - Пиши по-русски, кратко и по делу, без воды и лишних извинений. 2–5 предложений — норма.
 - Не выдумывай факты. Даты подписки и ссылки бери ТОЛЬКО через get_subscription_status.
+- Всегда говори правду: одна подписка работает до 10 устройств.
 - Оплата: мини-приложение Telegram (кнопка «2 в 1 — Прокси + VPN» в боте), карта или СБП. Для ссылки — get_payment_instructions.
+- Если подписка не активна ИЛИ закончился trial — всегда дожимай до оплаты: в ответе должен быть явный CTA «оплатите сейчас» + инструкция/ссылка.
 - Прокси Telegram: в мини-приложении вкладка «Telegram», кнопка подключения MTProxy.
 - VPN: приложение Happ (Android/iOS). Конфиг — в мини-приложении, вкладка «VPN».
-- Если пользователь жалуется, что у него уже есть подписка, но кнопок нет — попроси открыть «Статус» в боте; если всё равно пусто — предложи написать админу.
+- Если пользователь жалуется, что у него уже есть подписка, но кнопок нет — попроси открыть «Статус» в боте; если всё равно пусто — направляй к администратору {ADMIN_TELEGRAM}.
 - grant_complimentary_access вызывай ТОЛЬКО когда пользователь явно описал техническую невозможность оплаты (банк не пропускает, нет карты/СБП/Apple Pay). Запрашивай короткое подтверждение и пиши чёткую причину в reason. Никогда не выдавай доступ «за жалобу» или «на пробу»."""
 
 
@@ -154,12 +157,12 @@ async def _call_tool(
         pay_url = _miniapp_url(tg_id)
         if pay_url:
             text = (
-                f"Цена {PRICE_RUB} ₽/мес. Откройте в боте кнопку «2 в 1 — Прокси + VPN» "
-                f"или мини-приложение по ссылке: {pay_url}"
+                f"Цена {PRICE_RUB} ₽/мес. Оплатите сейчас: откройте в боте кнопку «2 в 1 — Прокси + VPN» "
+                f"или перейдите в мини-приложение по ссылке: {pay_url}"
             )
             return json.dumps({"instructions": text, "mini_app_url": pay_url}, ensure_ascii=False)
         text = (
-            f"Цена {PRICE_RUB} ₽/мес. Откройте в боте кнопку «2 в 1 — Прокси + VPN» — "
+            f"Цена {PRICE_RUB} ₽/мес. Оплатите сейчас: откройте в боте кнопку «2 в 1 — Прокси + VPN» — "
             "откроется мини-приложение Telegram с оплатой по карте или СБП."
         )
         return json.dumps({"instructions": text}, ensure_ascii=False)
@@ -171,7 +174,7 @@ async def _call_tool(
                     "ok": False,
                     "message": (
                         "Автовыдача доступа отключена. Сообщи пользователю, что нужно "
-                        "обратиться к администратору — доступ выдаст человек."
+                        f"обратиться к администратору {ADMIN_TELEGRAM} — доступ выдаст человек."
                     ),
                 },
                 ensure_ascii=False,
@@ -280,7 +283,7 @@ async def run_support_reply(
         return (
             (
                 "Помощник ИИ не настроен: в .env нужен OPENROUTER_API_KEY (OpenRouter) "
-                "или OPENAI_API_KEY. Напишите администратору или попробуйте позже."
+                f"или OPENAI_API_KEY. Напишите администратору {ADMIN_TELEGRAM} или попробуйте позже."
             ),
             list(history or []),
         )
@@ -321,7 +324,7 @@ async def run_support_reply(
                 continue
 
             reply = (
-                f"Не удалось получить ответ ИИ ({status}). Напишите администратору или попробуйте позже."
+                f"Не удалось получить ответ ИИ ({status}). Напишите администратору {ADMIN_TELEGRAM} или попробуйте позже."
             )
             return reply, _append_turn(prev, user_text, reply)
 
@@ -366,7 +369,7 @@ async def run_support_reply(
         if last_tool_result:
             reply = _fallback_from_tool_result(last_tool_result)
             return reply, _append_turn(prev, user_text, reply)
-        reply = "Не удалось сформулировать ответ. Переформулируйте вопрос или напишите администратору."
+        reply = f"Не удалось сформулировать ответ. Переформулируйте вопрос или напишите администратору {ADMIN_TELEGRAM}."
         return reply, _append_turn(prev, user_text, reply)
 
     reply = "Слишком много шагов. Откройте чат заново через /support."
@@ -391,7 +394,7 @@ def _fallback_from_tool_result(raw: str) -> str:
     if not isinstance(data, dict):
         return "Готово. Если остались вопросы — напишите ещё раз."
     if data.get("error"):
-        return "Не удалось получить данные. Попробуйте ещё раз или напишите администратору."
+        return f"Не удалось получить данные. Попробуйте ещё раз или напишите администратору {ADMIN_TELEGRAM}."
     if "active" in data:
         if data.get("active"):
             return (
@@ -399,7 +402,7 @@ def _fallback_from_tool_result(raw: str) -> str:
                 "Ссылки и кнопки — в разделе «Статус» бота."
             )
         if data.get("suspended"):
-            return "Доступ временно приостановлен. Напишите администратору для разблокировки."
+            return f"Доступ временно приостановлен. Напишите администратору {ADMIN_TELEGRAM} для разблокировки."
         return f"Активной подписки нет. Оплатить — кнопка «2 в 1 — Прокси + VPN» в меню бота."
     if data.get("ok") is True:
         return str(data.get("message") or "Готово.")
