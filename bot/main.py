@@ -209,6 +209,15 @@ def support_chat_kb(*, show_cancel_autopay: bool = True) -> InlineKeyboardMarkup
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
+def trial_direct_kb(tg_id: int, *, show_copy_button: bool) -> InlineKeyboardMarkup:
+    rows: list[list[InlineKeyboardButton]] = []
+    if show_copy_button:
+        rows.append([InlineKeyboardButton(text="📋 СКОПИРОВАТЬ КОД", callback_data="menu:trial_copy_vless")])
+    rows.append([InlineKeyboardButton(text="💳 Оформить подписку", web_app=WebAppInfo(url=_miniapp_url(tg_id)))])
+    rows.append([InlineKeyboardButton(text="🏠 Главное меню", callback_data="menu:main")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
 def cancel_recurring_confirm_kb() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
@@ -435,6 +444,59 @@ async def _get_proxy_link(session: aiohttp.ClientSession, tg_id: int) -> str | N
     return data.get("proxy_link") or None
 
 
+async def _get_vless_link(session: aiohttp.ClientSession, tg_id: int) -> str | None:
+    """Пробуем получить vless конфиг напрямую из бэкенда, без mini app."""
+    try:
+        data = await backend_get(session, f"/vpn/config/{tg_id}")
+    except Exception:
+        return None
+    if not data.get("available"):
+        return None
+    vless = data.get("vless_link")
+    if not isinstance(vless, str):
+        return None
+    return vless.strip() or None
+
+
+async def _send_trial_direct_access(
+    message: Message,
+    session: aiohttp.ClientSession,
+    *,
+    tg_id: int,
+    exp_human: str,
+    already_active: bool,
+) -> None:
+    # Иногда XRAY отдаёт конфиг через 1-2 секунды после активации.
+    vless_link = await _get_vless_link(session, tg_id)
+    if not vless_link:
+        await asyncio.sleep(1.5)
+        vless_link = await _get_vless_link(session, tg_id)
+
+    intro = "🎁 <b>Пробный период уже активен</b>" if already_active else "🎁 <b>Пробный день активирован!</b>"
+    if vless_link:
+        await message.answer(
+            f"{intro}\n\n"
+            f"Доступ до: <b>{exp_human}</b>\n\n"
+            "🛡 <b>Подключение VPN без mini app:</b>\n"
+            "1) Установите Happ\n"
+            "2) Нажмите кнопку <b>«СКОПИРОВАТЬ КОД»</b> ниже\n"
+            "3) В Happ: «+» → «Вставить из буфера»\n\n"
+            f"<code>{html.escape(vless_link)}</code>",
+            parse_mode="HTML",
+            reply_markup=trial_direct_kb(tg_id, show_copy_button=True),
+        )
+        return
+
+    await message.answer(
+        f"{intro}\n\n"
+        f"Доступ до: <b>{exp_human}</b>\n\n"
+        "⚠️ Код для Happ ещё создаётся. Нажмите /status через 10–20 секунд.\n"
+        "Если не появится — напишите в поддержку, выдадим вручную.",
+        parse_mode="HTML",
+        reply_markup=trial_direct_kb(tg_id, show_copy_button=False),
+    )
+
+
 async def show_cancel_autopay_button(session: aiohttp.ClientSession, tg_id: int) -> bool:
     """Кнопка отмены в меню/поддержке: для любой активной платной (не trial) подписки."""
     try:
@@ -516,20 +578,20 @@ async def send_grant_trial_result(
     if isinstance(exp_raw, str):
         exp_human = format_dt(exp_raw)
     if data.get("already_active"):
-        await message.answer(
-            f"🎁 <b>Пробный период уже активен</b> до <b>{exp_human}</b>\n\n"
-            "Личный кабинет — кнопка ниже.",
-            parse_mode="HTML",
-            reply_markup=status_active_kb(tg_id, show_cancel_autopay=False),
+        await _send_trial_direct_access(
+            message,
+            session,
+            tg_id=tg_id,
+            exp_human=exp_human,
+            already_active=True,
         )
         return
-    await message.answer(
-        f"🎁 <b>Пробный день активирован!</b>\n\n"
-        f"Доступ до: <b>{exp_human}</b>\n\n"
-        "📡 MTProxy для Telegram и 🛡 VPN — в личном кабинете. "
-        "Когда срок закончится, оформите подписку, чтобы не потерять доступ.",
-        parse_mode="HTML",
-        reply_markup=status_active_kb(tg_id, show_cancel_autopay=False),
+    await _send_trial_direct_access(
+        message,
+        session,
+        tg_id=tg_id,
+        exp_human=exp_human,
+        already_active=False,
     )
 
 
@@ -963,6 +1025,24 @@ async def main() -> None:
                 tg_id=query.from_user.id,
                 username=query.from_user.username if query.from_user else None,
                 first_name=query.from_user.first_name if query.from_user else None,
+            )
+            return
+
+        if action == "trial_copy_vless":
+            await query.answer("Готовлю код…")
+            tg_uid = query.from_user.id
+            vless = await _get_vless_link(session, tg_uid)
+            if not vless:
+                await msg.answer(
+                    "Код ещё не готов. Подождите 10–20 секунд и нажмите кнопку снова или /status.",
+                    reply_markup=trial_direct_kb(tg_uid, show_copy_button=False),
+                )
+                return
+            await msg.answer(
+                "Скопируйте этот код и вставьте в Happ:\n\n"
+                f"<code>{html.escape(vless)}</code>",
+                parse_mode="HTML",
+                reply_markup=trial_direct_kb(tg_uid, show_copy_button=True),
             )
             return
 
