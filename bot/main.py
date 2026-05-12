@@ -98,6 +98,10 @@ class SupportStates(StatesGroup):
     chatting = State()
 
 
+class CheckoutStates(StatesGroup):
+    waiting_email = State()
+
+
 class _TextNotCommand(BaseFilter):
     """Текст не является командой (/...) — чтобы в чате поддержки работали /status и др."""
 
@@ -417,6 +421,7 @@ async def backend_checkout_create(
     *,
     telegram_id: int,
     username: str | None,
+    customer_email: str | None = None,
     payment_provider: str = "lava",
 ) -> tuple[int, dict[str, Any]]:
     """Создать оплату без mini-app: POST /checkout/create."""
@@ -425,6 +430,7 @@ async def backend_checkout_create(
     payload: dict[str, Any] = {
         "telegram_id": telegram_id,
         "username": username,
+        "customer_email": customer_email,
         "payment_provider": payment_provider,
     }
     async with session.post(
@@ -452,6 +458,21 @@ def _parse_proxy_link(link: str) -> tuple[str, str, str]:
         params.get("port", ["—"])[0],
         params.get("secret", ["—"])[0],
     )
+
+
+def _normalize_payment_url_bot(url: str) -> str:
+    u = (url or "").strip()
+    if not u:
+        return u
+    if u.startswith("//"):
+        return "https:" + u
+    low = u.lower()
+    if low.startswith("http://") or low.startswith("https://"):
+        return u
+    rel = u.lstrip("/")
+    if rel.lower().startswith("pay/") or rel.lower().startswith("pay?"):
+        return f"https://lava.top/{rel}"
+    return u
 
 
 def _manual_setup_text(server: str, port: str, secret: str) -> str:
@@ -1097,27 +1118,15 @@ async def main() -> None:
             return
 
         if action == "buy_in_bot":
-            await query.answer("Создаю ссылку оплаты…")
+            await query.answer()
             tg_uid = query.from_user.id
-            status, data = await backend_checkout_create(
-                session,
-                telegram_id=tg_uid,
-                username=query.from_user.username if query.from_user else None,
-                payment_provider="lava",
-            )
-            payment_url = str(data.get("payment_url") or "").strip()
-            if status >= 400 or not payment_url:
-                await msg.answer(
-                    "Не удалось создать оплату в боте. Напишите в поддержку — быстро поможем вручную.",
-                    reply_markup=main_menu_kb(tg_uid, show_cancel_autopay=await show_cancel_autopay_button(session, tg_uid)),
-                )
-                return
+            await state.set_state(CheckoutStates.waiting_email)
+            await state.update_data(checkout_provider="lava")
             await msg.answer(
-                "💳 <b>Оплата в боте готова</b>\n\n"
-                f"Тариф: <b>{PRICE_RUB} ₽/мес</b>\n"
-                "Нажмите кнопку ниже, чтобы открыть оплату.",
+                "💳 <b>Оплата в боте</b>\n\n"
+                "Отправьте email для чека (например: <code>you@mail.ru</code>) — "
+                "я сразу пришлю рабочую ссылку на оплату.",
                 parse_mode="HTML",
-                reply_markup=_buy_direct_kb(payment_url),
             )
             return
 
@@ -1295,6 +1304,49 @@ async def main() -> None:
             parse_mode="HTML",
             reply_markup=support_chat_kb(show_cancel_autopay=sc),
         )
+
+    @dp.message(StateFilter(CheckoutStates.waiting_email), F.text, _TextNotCommand())
+    async def _checkout_email(message: Message, state: FSMContext) -> None:
+        session = _get_session(dp)
+        tg_id = message.from_user.id if message.from_user else 0
+        email = (message.text or "").strip().lower()
+        if not tg_id:
+            await state.clear()
+            return
+        if not email or "@" not in email or "." not in email.split("@")[-1]:
+            await message.answer(
+                "Нужен корректный email для чека. Пример: <code>you@mail.ru</code>",
+                parse_mode="HTML",
+            )
+            return
+        data = await state.get_data()
+        provider = str(data.get("checkout_provider") or "lava")
+        await message.answer("Создаю ссылку оплаты…")
+        status, payload = await backend_checkout_create(
+            session,
+            telegram_id=tg_id,
+            username=message.from_user.username if message.from_user else None,
+            customer_email=email,
+            payment_provider=provider,
+        )
+        payment_url = _normalize_payment_url_bot(str(payload.get("payment_url") or ""))
+        if status >= 400 or not payment_url:
+            detail = str(payload.get("details") or payload.get("detail") or "").strip()
+            await message.answer(
+                "Не удалось создать оплату. Попробуйте ещё раз или напишите в поддержку."
+                + (f"\n\n{detail}" if detail else ""),
+                reply_markup=main_menu_kb(tg_id, show_cancel_autopay=await show_cancel_autopay_button(session, tg_id)),
+            )
+            await state.clear()
+            return
+        await message.answer(
+            "💳 <b>Оплата готова</b>\n\n"
+            f"Тариф: <b>{PRICE_RUB} ₽/мес</b>\n"
+            "Нажмите кнопку ниже, чтобы открыть оплату.",
+            parse_mode="HTML",
+            reply_markup=_buy_direct_kb(payment_url),
+        )
+        await state.clear()
 
     @dp.message(Command("done"), StateFilter(SupportStates.chatting))
     async def _cmd_done(message: Message, state: FSMContext) -> None:
