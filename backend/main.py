@@ -2096,7 +2096,7 @@ def _provision_vpn_after_payment(tg_id: int, db: Session, *, source: str = "paid
 def _notify_expiring(tg_id: int, expires_at: datetime) -> None:
     date_str = expires_at.strftime("%d.%m.%Y")
     buttons: list[list[dict[str, str]]] = [
-        [{"text": "\U0001f4b3 \u041f\u0440\u043e\u0434\u043b\u0438\u0442\u044c \u043f\u043e\u0434\u043f\u0438\u0441\u043a\u0443", "callback_data": "menu:subscribe"}],
+        [{"text": "\U0001f4b3 \u041a\u0443\u043f\u0438\u0442\u044c / \u043f\u0440\u043e\u0434\u043b\u0438\u0442\u044c \u043f\u043e\u0434\u043f\u0438\u0441\u043a\u0443", "callback_data": "menu:buy_in_bot"}],
     ]
     _send_tg(tg_id, (
         f"\u23f3 <b>\u041f\u043e\u0434\u043f\u0438\u0441\u043a\u0430 \u0437\u0430\u043a\u0430\u043d\u0447\u0438\u0432\u0430\u0435\u0442\u0441\u044f {date_str}</b>\n\n"
@@ -2109,7 +2109,7 @@ def _notify_expiring(tg_id: int, expires_at: datetime) -> None:
 
 def _notify_expired(tg_id: int) -> None:
     buttons: list[list[dict[str, str]]] = [
-        [{"text": "\U0001f4b3 \u041e\u0444\u043e\u0440\u043c\u0438\u0442\u044c \u043f\u043e\u0434\u043f\u0438\u0441\u043a\u0443", "callback_data": "menu:subscribe"}],
+        [{"text": "\U0001f4b3 \u041a\u0443\u043f\u0438\u0442\u044c / \u043f\u0440\u043e\u0434\u043b\u0438\u0442\u044c \u043f\u043e\u0434\u043f\u0438\u0441\u043a\u0443", "callback_data": "menu:buy_in_bot"}],
     ]
     _send_tg(tg_id, (
         "\u274c <b>\u041f\u043e\u0434\u043f\u0438\u0441\u043a\u0430 \u0438\u0441\u0442\u0435\u043a\u043b\u0430</b>\n\n"
@@ -2121,7 +2121,7 @@ def _notify_expired(tg_id: int) -> None:
 def _notify_trial_expired(tg_id: int) -> None:
     """Окончание бесплатного дня из бота — тот же CTA, что и после платной подписки."""
     buttons: list[list[dict[str, str]]] = [
-        [{"text": "\U0001f4b3 \u041e\u0444\u043e\u0440\u043c\u0438\u0442\u044c \u043f\u043e\u0434\u043f\u0438\u0441\u043a\u0443", "callback_data": "menu:subscribe"}],
+        [{"text": "\U0001f4b3 \u041a\u0443\u043f\u0438\u0442\u044c / \u043f\u0440\u043e\u0434\u043b\u0438\u0442\u044c \u043f\u043e\u0434\u043f\u0438\u0441\u043a\u0443", "callback_data": "menu:buy_in_bot"}],
     ]
     _send_tg(
         tg_id,

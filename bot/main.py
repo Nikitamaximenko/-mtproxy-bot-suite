@@ -126,75 +126,31 @@ def _miniapp_url(tg_id: int) -> str:
     return f"{base}{path}?tg_id={tg_id}&v={v}"
 
 
-def main_menu_kb(tg_id: int, *, show_cancel_autopay: bool = True) -> InlineKeyboardMarkup:
-    rows: list[list[InlineKeyboardButton]] = [
-        [InlineKeyboardButton(text="💳 Купить / Продлить в боте", callback_data="menu:buy_in_bot")],
-        [InlineKeyboardButton(text="📡 Получить MTProxy", callback_data="menu:get_proxy")],
-        [InlineKeyboardButton(text="🛡 Получить VPN код", callback_data="menu:get_vpn")],
-        [InlineKeyboardButton(text="🧊 Открыть mini-app (если работает)", web_app=WebAppInfo(url=_miniapp_url(tg_id)))],
-        [InlineKeyboardButton(text="🎁 Бесплатный день", callback_data="menu:trial")],
-        [InlineKeyboardButton(text="ℹ️ Инструкция", callback_data="menu:help")],
-        [
-            InlineKeyboardButton(text="✅ Статус", callback_data="menu:status"),
-            InlineKeyboardButton(text="🆘 Поддержка", callback_data="menu:support"),
-        ],
-    ]
-    if show_cancel_autopay:
-        rows.append(
-            [
-                InlineKeyboardButton(
-                    text="🚫 Отменить автопродление",
-                    callback_data="menu:cancel_recurring",
-                ),
-            ]
-        )
-    return InlineKeyboardMarkup(inline_keyboard=rows)
-
-
-def status_active_kb(tg_id: int, *, show_cancel_autopay: bool = True) -> InlineKeyboardMarkup:
-    """Активная подписка: прокси + VPN в мини-приложении."""
-    rows: list[list[InlineKeyboardButton]] = [
-        [InlineKeyboardButton(text="📡 Получить MTProxy", callback_data="menu:get_proxy")],
-        [InlineKeyboardButton(text="🛡 Получить VPN код", callback_data="menu:get_vpn")],
-        [InlineKeyboardButton(text="💳 Купить / Продлить в боте", callback_data="menu:buy_in_bot")],
-        [
-            InlineKeyboardButton(
-                text="🧊 Личный кабинет — 2 в 1 (mini-app)",
-                web_app=WebAppInfo(url=_miniapp_url(tg_id)),
-            )
-        ],
-    ]
-    if show_cancel_autopay:
-        rows.append(
-            [
-                InlineKeyboardButton(
-                    text="🚫 Отменить автопродление",
-                    callback_data="menu:cancel_recurring",
-                )
-            ]
-        )
-    rows.append([InlineKeyboardButton(text="🏠 Главное меню", callback_data="menu:main")])
-    return InlineKeyboardMarkup(inline_keyboard=rows)
-
-
-def status_paid_kb(tg_id: int) -> InlineKeyboardMarkup:
-    """Экран «Статус» для платной подписки: отмена автопродления на видном месте."""
+def main_menu_kb(tg_id: int) -> InlineKeyboardMarkup:
+    """Главное меню: ровно 6 действий — остальное через /help и /support."""
     return InlineKeyboardMarkup(
         inline_keyboard=[
-            [InlineKeyboardButton(text="📡 Получить MTProxy", callback_data="menu:get_proxy")],
-            [InlineKeyboardButton(text="🛡 Получить VPN код", callback_data="menu:get_vpn")],
-            [InlineKeyboardButton(text="💳 Купить / Продлить в боте", callback_data="menu:buy_in_bot")],
+            [InlineKeyboardButton(text="🎁 Бесплатный день", callback_data="menu:trial")],
+            [InlineKeyboardButton(text="💳 Купить / продлить подписку", callback_data="menu:buy_in_bot")],
+            [InlineKeyboardButton(text="📡 Подключить прокси / VPN", callback_data="menu:connect")],
+            [InlineKeyboardButton(text="🧊 Открыть мини-апп", web_app=WebAppInfo(url=_miniapp_url(tg_id)))],
+            [InlineKeyboardButton(text="✅ Статус", callback_data="menu:status")],
             [
                 InlineKeyboardButton(
-                    text="🚫 Отменить автопродление",
+                    text="🚫 Отменить автопродление подписки",
                     callback_data="menu:cancel_recurring",
                 )
             ],
+        ]
+    )
+
+
+def checkout_provider_kb(tg_id: int) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
             [
-                InlineKeyboardButton(
-                    text="🧊 Личный кабинет — 2 в 1 (mini-app)",
-                    web_app=WebAppInfo(url=_miniapp_url(tg_id)),
-                )
+                InlineKeyboardButton(text="Lava.top (карта)", callback_data="checkout:prov:lava"),
+                InlineKeyboardButton(text="ЮKassa (СБП / карта)", callback_data="checkout:prov:yookassa"),
             ],
             [InlineKeyboardButton(text="🏠 Главное меню", callback_data="menu:main")],
         ]
@@ -226,7 +182,8 @@ def trial_direct_kb(tg_id: int, *, show_copy_button: bool) -> InlineKeyboardMark
     rows: list[list[InlineKeyboardButton]] = []
     if show_copy_button:
         rows.append([InlineKeyboardButton(text="📋 СКОПИРОВАТЬ КОД", callback_data="menu:trial_copy_vless")])
-    rows.append([InlineKeyboardButton(text="💳 Оформить подписку", web_app=WebAppInfo(url=_miniapp_url(tg_id)))])
+    rows.append([InlineKeyboardButton(text="💳 Купить / продлить подписку", callback_data="menu:buy_in_bot")])
+    rows.append([InlineKeyboardButton(text="📡 Подключить прокси / VPN", callback_data="menu:connect")])
     rows.append([InlineKeyboardButton(text="🏠 Главное меню", callback_data="menu:main")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
@@ -262,8 +219,8 @@ def support_invite_html() -> str:
     return (
         "✨ <b>Поддержка</b>\n\n"
         "Пишите <b>прямо в этот чат</b>.\n\n"
-        "Автоответ помощника сейчас недоступен — попробуйте чуть позже или проверьте раздел "
-        "<b>«Статус»</b> и мини-приложение для оплаты/настроек.\n\n"
+        "Автоответ помощника сейчас недоступен — попробуйте чуть позже, команда /status "
+        "или кнопка «Подключить прокси / VPN» в главном меню (/start).\n\n"
         "<i>Закончить: кнопка ниже или /done</i>"
     )
 
@@ -282,7 +239,8 @@ HELP_GENERAL = (
     "🛡 <b>Как подключить VPN через Happ</b>\n"
     "\n"
     "<b>Шаг 1 — Доступ</b>\n"
-    "Один раз можно взять <b>бесплатный день</b> (кнопка в меню) или сразу оформить подписку в мини-приложении — оплата банковской картой.\n"
+    "Один раз можно взять <b>бесплатный день</b> (кнопка в меню) или сразу оплатить подписку в боте "
+    "(Lava или ЮKassa) либо через мини-апп.\n"
     "Доступ активируется автоматически.\n"
     "\n"
     "<b>Шаг 2 — Скачай Happ</b>\n"
@@ -291,8 +249,8 @@ HELP_GENERAL = (
     '• Windows/Mac: <a href="https://hiddify.com">Hiddify</a>\n'
     "\n"
     "<b>Шаг 3 — Подключись</b>\n"
-    "1. Открой личный кабинет → вкладка «🛡 VPN»\n"
-    "2. Нажми «Открыть в Happ» или скопируй ссылку\n"
+    "1. В боте нажми «Подключить прокси / VPN» или открой мини-апп\n"
+    "2. Нажми «СКОПИРОВАТЬ VPN КОД» или следуй подсказкам для MTProxy\n"
     "3. В Happ вставь ссылку через «+» → «Из буфера»\n"
     "4. Нажми «Подключить» — готово ✅\n"
     "\n"
@@ -301,18 +259,17 @@ HELP_GENERAL = (
     "\n"
     "<b>Сколько устройств?</b> До 10 на одном аккаунте\n"
     "<b>Лимит трафика?</b> Нет — скорость и трафик не ограничены\n"
-    "<b>Как отменить автопродление?</b> Кнопка «Отменить автопродление» в меню бота или в разделе «Статус» "
-    "(сначала подтверждение, чтобы не нажать случайно)."
+    "<b>Как отменить автопродление?</b> Кнопка в главном меню бота или команда /status "
+    "(сначала подтверждение, чтобы не нажать случайно).\n"
+    "<b>Поддержка:</b> /support"
 )
 
 
 def help_kb() -> InlineKeyboardMarkup:
-    """Клавиатура под инструкцией: кнопка возврата в главное меню + быстрый
-    переход в поддержку. Без них экран help был «тупиком» — юзер не мог
-    вернуться назад из инструкции без ручного ввода команды."""
+    """После /help: главное меню + поддержка (в основном меню кнопки поддержки нет)."""
     return InlineKeyboardMarkup(
         inline_keyboard=[
-            [InlineKeyboardButton(text="🆘 Поддержка", callback_data="menu:support")],
+            [InlineKeyboardButton(text="🆘 Поддержка (/support)", callback_data="menu:support")],
             [InlineKeyboardButton(text="🏠 Главное меню", callback_data="menu:main")],
         ]
     )
@@ -475,6 +432,22 @@ def _normalize_payment_url_bot(url: str) -> str:
     return u
 
 
+def _api_error_detail(payload: dict[str, Any]) -> str:
+    """Текст ошибки из JSON FastAPI (detail: str | list[dict])."""
+    raw = payload.get("detail", payload.get("details"))
+    if isinstance(raw, str):
+        return raw.strip()
+    if isinstance(raw, list):
+        msgs: list[str] = []
+        for item in raw:
+            if isinstance(item, dict):
+                m = item.get("msg")
+                if isinstance(m, str) and m.strip():
+                    msgs.append(m.strip())
+        return "\n".join(msgs).strip()
+    return ""
+
+
 def _manual_setup_text(server: str, port: str, secret: str) -> str:
     return (
         "<b>Настройка подключения в Telegram</b>\n"
@@ -519,20 +492,71 @@ async def _get_vless_link(session: aiohttp.ClientSession, tg_id: int) -> str | N
     return vless.strip() or None
 
 
-def _proxy_direct_kb(tg_id: int, proxy_link: str | None) -> InlineKeyboardMarkup:
+async def _send_proxy_vpn_bundle(message: Message, session: aiohttp.ClientSession, tg_uid: int) -> None:
+    """MTProxy + VPN одним экраном (кнопка «Подключить прокси / VPN»)."""
+    proxy_link = await _get_proxy_link(session, tg_uid)
+    vless = await _get_vless_link(session, tg_uid)
+    if not proxy_link or not vless:
+        await asyncio.sleep(0.8)
+        proxy_link = proxy_link or await _get_proxy_link(session, tg_uid)
+        vless = vless or await _get_vless_link(session, tg_uid)
+
+    if not proxy_link and not vless:
+        await message.answer(
+            "Прокси и VPN пока недоступны. Оформите подписку кнопкой «Купить / продлить подписку» "
+            "или откройте /status через минуту.",
+            reply_markup=main_menu_kb(tg_uid),
+        )
+        return
+
+    lines: list[str] = ["📡 <b>MTProxy</b> для Telegram и 🛡 <b>VPN</b> (Happ) — данные ниже.\n"]
     rows: list[list[InlineKeyboardButton]] = []
+
     if proxy_link:
+        server, port, secret = _parse_proxy_link(proxy_link)
+        lines.append("\n━━ <b>Telegram (MTProxy)</b> ━━\n")
+        lines.append(
+            f"Сервер: <code>{html.escape(server)}</code>\n"
+            f"Порт: <code>{html.escape(port)}</code>\n"
+            f"Секрет: <code>{html.escape(secret)}</code>\n\n"
+            "Настройки Telegram → Данные и память → Прокси → MTProto — или кнопка ниже.\n"
+        )
         rows.append([InlineKeyboardButton(text="🔗 Подключить MTProxy", url=proxy_link)])
-    rows.append([InlineKeyboardButton(text="🛡 Получить VPN код", callback_data="menu:get_vpn")])
+    else:
+        lines.append(
+            "\n⚠️ <b>MTProxy</b> ещё не подгрузился — «Обновить данные» или /status через минуту.\n"
+        )
+
+    if vless:
+        lines.append("\n━━ <b>VPN (Happ)</b> ━━\n")
+        lines.append(
+            "1) Установите Happ\n"
+            "2) Нажмите «СКОПИРОВАТЬ VPN КОД»\n"
+            "3) В Happ: «+» → «Вставить из буфера»\n\n"
+            f"<code>{html.escape(vless)}</code>"
+        )
+        rows.append([InlineKeyboardButton(text="📋 СКОПИРОВАТЬ VPN КОД", callback_data="menu:copy_vpn")])
+    else:
+        lines.append(
+            "\n⚠️ <b>VPN-код</b> ещё готовится — «Обновить данные» или /status через 10–20 секунд.\n"
+        )
+
+    rows.append([InlineKeyboardButton(text="🔄 Обновить данные", callback_data="menu:connect")])
     rows.append([InlineKeyboardButton(text="🏠 Главное меню", callback_data="menu:main")])
-    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+    await message.answer(
+        "".join(lines),
+        parse_mode="HTML",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=rows),
+    )
 
 
 def _vpn_direct_kb(vless: str) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [InlineKeyboardButton(text="📋 СКОПИРОВАТЬ VPN КОД", callback_data="menu:copy_vpn")],
-            [InlineKeyboardButton(text="💳 Купить / Продлить в боте", callback_data="menu:buy_in_bot")],
+            [InlineKeyboardButton(text="💳 Купить / продлить подписку", callback_data="menu:buy_in_bot")],
+            [InlineKeyboardButton(text="📡 Подключить прокси / VPN", callback_data="menu:connect")],
             [InlineKeyboardButton(text="🏠 Главное меню", callback_data="menu:main")],
         ]
     )
@@ -541,7 +565,7 @@ def _vpn_direct_kb(vless: str) -> InlineKeyboardMarkup:
 def _buy_direct_kb(payment_url: str) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
-            [InlineKeyboardButton(text="💳 ОПЛАТИТЬ 299 ₽", url=payment_url)],
+            [InlineKeyboardButton(text=f"💳 Оплатить {PRICE_RUB} ₽", url=payment_url)],
             [InlineKeyboardButton(text="🏠 Главное меню", callback_data="menu:main")],
         ]
     )
@@ -620,11 +644,10 @@ async def send_grant_trial_result(
     if status >= 400:
         detail = data.get("detail") if isinstance(data.get("detail"), str) else None
         _log.warning("grant_trial http %s: %s", status, data)
-        sc = await show_cancel_autopay_button(session, tg_id)
         await message.answer(
             detail
-            or "Сервис временно не смог выдать пробный период. Попробуйте позже или оформите подписку в мини-приложении.",
-            reply_markup=main_menu_kb(tg_id, show_cancel_autopay=sc),
+            or "Сервис временно не смог выдать пробный период. Попробуйте позже или оформите подписку в боте (Lava / ЮKassa).",
+            reply_markup=main_menu_kb(tg_id),
         )
         return
     if not data.get("ok"):
@@ -633,32 +656,21 @@ async def send_grant_trial_result(
             await message.answer(
                 "🎁 <b>Пробный день уже был использован</b>\n\n"
                 "Один бесплатный день на аккаунт Telegram — дальше только полная подписка.\n"
-                "Оформите её в мини-приложении.",
+                "Оформите её в боте: «Купить / продлить подписку» — Lava или ЮKassa.",
                 parse_mode="HTML",
-                reply_markup=InlineKeyboardMarkup(
-                    inline_keyboard=[
-                        [
-                            InlineKeyboardButton(
-                                text="🧊 Оформить подписку",
-                                web_app=WebAppInfo(url=_miniapp_url(tg_id)),
-                            )
-                        ],
-                        [InlineKeyboardButton(text="🏠 Главное меню", callback_data="menu:main")],
-                    ]
-                ),
+                reply_markup=main_menu_kb(tg_id),
             )
             return
         if err == "already_subscribed":
-            sc = await show_cancel_autopay_button(session, tg_id)
             await message.answer(
-                "✅ У вас уже есть активная подписка.\n\nОткройте личный кабинет:",
-                reply_markup=status_active_kb(tg_id, show_cancel_autopay=sc),
+                "✅ У вас уже есть активная подписка.\n\n"
+                "Данные для MTProxy и VPN — кнопка «Подключить прокси / VPN» или мини-апп:",
+                reply_markup=main_menu_kb(tg_id),
             )
             return
-        sc = await show_cancel_autopay_button(session, tg_id)
         await message.answer(
-            "Не получилось активировать пробный период. Попробуйте позже или напишите в поддержку.",
-            reply_markup=main_menu_kb(tg_id, show_cancel_autopay=sc),
+            "Не получилось активировать пробный период. Попробуйте позже или напишите в /support.",
+            reply_markup=main_menu_kb(tg_id),
         )
         return
 
@@ -749,12 +761,11 @@ async def cmd_start(message: Message, session: aiohttp.ClientSession, state: FSM
                 data = {}
 
             if data.get("ok"):
-                sc = await show_cancel_autopay_button(session, tg_id)
                 await message.answer(
                     "🧊 <b>Frosty — подписка 2 в 1 активирована!</b>\n\n"
-                    "✅ Прокси для Telegram и VPN — в личном кабинете (кнопка ниже).",
+                    "✅ Прокси для Telegram и VPN — кнопка «Подключить прокси / VPN» или мини-апп.",
                     parse_mode="HTML",
-                    reply_markup=status_active_kb(tg_id, show_cancel_autopay=sc),
+                    reply_markup=main_menu_kb(tg_id),
                 )
                 return
         # Некорректный или чужой токен — показываем обычный стартовый экран
@@ -768,15 +779,13 @@ async def cmd_start(message: Message, session: aiohttp.ClientSession, state: FSM
 
         if data.get("found"):
             expires_at = format_dt(data.get("expires_at"))
-            sc = await show_cancel_autopay_button(session, tg_id)
             await message.answer(
                 f"✅ Подписка 2 в 1 активна до {expires_at}.\n\n"
-                "📡 Прокси и 🛡 VPN — в личном кабинете, нажми кнопку ниже.",
-                reply_markup=status_active_kb(tg_id, show_cancel_autopay=sc),
+                "📡 Прокси и 🛡 VPN — кнопка «Подключить прокси / VPN» или мини-апп.",
+                reply_markup=main_menu_kb(tg_id),
             )
             return
 
-    sc_menu = await show_cancel_autopay_button(session, tg_id)
     await message.answer(
         f"🧊 <b>Frosty — 2 в 1 за {PRICE_RUB} ₽/мес</b>\n"
         "\n"
@@ -786,9 +795,9 @@ async def cmd_start(message: Message, session: aiohttp.ClientSession, state: FSM
         "<b>Персональный доступ</b> — только ты на своём канале, без чужих пользователей.\n"
         "\n"
         f"<b>10 ₽/день · {PRICE_RUB} ₽/мес · Отмена в любой момент</b>\n\n"
-        f"🎁 Один <b>бесплатный день</b> — кнопка в меню ниже (только здесь, в боте).",
+        f"🎁 Один <b>бесплатный день</b> — в меню ниже. Поддержка: /support",
         parse_mode="HTML",
-        reply_markup=main_menu_kb(tg_id, show_cancel_autopay=sc_menu),
+        reply_markup=main_menu_kb(tg_id),
     )
 
 
@@ -838,14 +847,10 @@ async def cmd_status(message: Message, session: aiohttp.ClientSession, tg_id: in
             "Одна подписка: 📡 Telegram через MTProxy и 🛡 VPN для Instagram, TikTok, YouTube — "
             "персональный канал, без лимита трафика.\n"
             "\n"
-            f"<b>От {PRICE_RUB} ₽/мес</b> · 10 ₽/день · отмена через поддержку",
+            f"<b>От {PRICE_RUB} ₽/мес</b> · 10 ₽/день · отмена автопродления в меню бота\n\n"
+            "Оплата в боте (Lava / ЮKassa) или мини-апп — см. кнопки ниже.",
             parse_mode="HTML",
-            reply_markup=InlineKeyboardMarkup(
-                inline_keyboard=[
-                    [InlineKeyboardButton(text="🧊 Оформить 2 в 1", web_app=WebAppInfo(url=_miniapp_url(tg_id)))],
-                    [InlineKeyboardButton(text="🏠 Главное меню", callback_data="menu:main")],
-                ]
-            ),
+            reply_markup=main_menu_kb(tg_id),
         )
         return
 
@@ -861,7 +866,7 @@ async def cmd_status(message: Message, session: aiohttp.ClientSession, tg_id: in
         renew_line = f"💳 Тариф: {PRICE_RUB} ₽/мес · 10 ₽/день\n"
         autopay_line = (
             "🔄 <b>Lava.top</b>: автопродление <b>включено</b>. Отключить без потери текущего срока — "
-            "первая кнопка ниже (спросим подтверждение).\n"
+            "кнопка «Отменить автопродление подписки» в меню ниже (спросим подтверждение).\n"
         )
     elif autopay_on:
         renew_line = f"💳 Тариф: {PRICE_RUB} ₽/мес · 10 ₽/день\n"
@@ -877,14 +882,13 @@ async def cmd_status(message: Message, session: aiohttp.ClientSession, tg_id: in
     status_text = (
         f"✅ <b>Подписка 2 в 1 активна</b>\n"
         f"\n"
-        f"📡 MTProxy для Telegram — в <b>личном кабинете</b> (вкладка «Telegram»)\n"
-        f"🛡 VPN — там же (вкладка «VPN»), кнопка ниже\n"
+        f"📡 MTProxy и 🛡 VPN — кнопка <b>«Подключить прокси / VPN»</b> в меню или мини-апп\n"
         f"\n"
         f"📅 Действует до: {expires_at}\n"
         f"{renew_line}"
         f"{autopay_line}"
         f"🖥 Устройств: до 10 на аккаунте\n"
-        f"❓ Вопросы по оплате — «Поддержка» в меню"
+        f"❓ Вопросы по оплате — /support"
     )
     if not proxy_link:
         status_text += (
@@ -892,14 +896,10 @@ async def cmd_status(message: Message, session: aiohttp.ClientSession, tg_id: in
             "⚠️ Доступ в кабинете ещё полностью не подгрузился. "
             "Если нет прокси или VPN — напиши в поддержку."
         )
-    if is_trial:
-        status_kb: InlineKeyboardMarkup = status_active_kb(tg_id, show_cancel_autopay=False)
-    else:
-        status_kb = status_paid_kb(tg_id)
     await message.answer(
         status_text,
         parse_mode="HTML",
-        reply_markup=status_kb,
+        reply_markup=main_menu_kb(tg_id),
     )
 
 
@@ -1059,6 +1059,26 @@ async def main() -> None:
         if msg and isinstance(msg, Message):
             await msg.answer("Готово — рассылки отключены. Вернуться можно через /start.")
 
+    @dp.callback_query(lambda c: (c.data or "").startswith("checkout:prov:"))
+    async def _checkout_pick_provider(query: CallbackQuery, state: FSMContext) -> None:
+        msg = query.message
+        if not msg or not isinstance(msg, Message):
+            await query.answer()
+            return
+        raw = (query.data or "").split(":")
+        prov_code = raw[2] if len(raw) > 2 else "lava"
+        prov = "yookassa" if prov_code == "yookassa" else "lava"
+        await state.clear()
+        await state.update_data(checkout_provider=prov)
+        await state.set_state(CheckoutStates.waiting_email)
+        label = "Lava.top" if prov == "lava" else "ЮKassa"
+        await query.answer(f"Выбрано: {label}")
+        await msg.answer(
+            f"Оплата: <b>{label}</b>.\n\n"
+            "Отправьте <b>одним сообщением</b> email для чека, например: <code>you@mail.ru</code>",
+            parse_mode="HTML",
+        )
+
     @dp.callback_query(lambda c: (c.data or "").startswith("menu:"))
     async def _menu(query: CallbackQuery, state: FSMContext) -> None:
         session = _get_session(dp)
@@ -1070,34 +1090,28 @@ async def main() -> None:
 
         if action == "main":
             tg_id = query.from_user.id
-            sc = await show_cancel_autopay_button(session, tg_id)
             await msg.answer(
                 "Выбери действие:",
-                reply_markup=main_menu_kb(tg_id, show_cancel_autopay=sc),
+                reply_markup=main_menu_kb(tg_id),
             )
             await query.answer()
             return
 
-        if action == "subscribe":
-            tg_id = query.from_user.id
+        if action in ("buy_in_bot", "subscribe"):
             await query.answer()
+            tg_uid = query.from_user.id
+            await state.clear()
+            head = (
+                "💳 <b>Оплата в боте</b>\n\n"
+                if action == "buy_in_bot"
+                else "💳 <b>Оформление подписки</b>\n\n"
+            )
             await msg.answer(
-                f"<b>Frosty — 2 в 1</b> — <b>10 ₽/день</b> ({PRICE_RUB} ₽/мес).\n\n"
-                "📡 <b>MTProxy</b> — Telegram без блокировок\n"
-                "🛡 <b>VPN</b> — Instagram, TikTok, YouTube и любые сайты\n\n"
-                "Нажми кнопку — оплата откроется прямо в Telegram.",
+                head
+                + "Выберите способ оплаты — затем отправьте <b>email для чека</b> "
+                "(нужен и для Lava, и для ЮKassa).",
                 parse_mode="HTML",
-                reply_markup=InlineKeyboardMarkup(
-                    inline_keyboard=[
-                        [
-                            InlineKeyboardButton(
-                                text="💳 Оформить 2 в 1",
-                                web_app=WebAppInfo(url=_miniapp_url(tg_id)),
-                            )
-                        ],
-                        [InlineKeyboardButton(text="🏠 Главное меню", callback_data="menu:main")],
-                    ]
-                ),
+                reply_markup=checkout_provider_kb(tg_uid),
             )
             return
 
@@ -1117,61 +1131,11 @@ async def main() -> None:
             )
             return
 
-        if action == "buy_in_bot":
-            await query.answer()
-            tg_uid = query.from_user.id
-            await state.set_state(CheckoutStates.waiting_email)
-            await state.update_data(checkout_provider="lava")
-            await msg.answer(
-                "💳 <b>Оплата в боте</b>\n\n"
-                "Отправьте email для чека (например: <code>you@mail.ru</code>) — "
-                "я сразу пришлю рабочую ссылку на оплату.",
-                parse_mode="HTML",
+        if action in ("connect", "get_proxy", "get_vpn"):
+            await query.answer(
+                "Проверяю доступ…" if action == "connect" else "Открываю подключение…"
             )
-            return
-
-        if action == "get_proxy":
-            await query.answer("Проверяю данные MTProxy…")
-            tg_uid = query.from_user.id
-            proxy_link = await _get_proxy_link(session, tg_uid)
-            if not proxy_link:
-                await msg.answer(
-                    "Прокси пока недоступен. Проверьте /status или оформите подписку кнопкой «Купить / Продлить в боте».",
-                    reply_markup=main_menu_kb(tg_uid, show_cancel_autopay=await show_cancel_autopay_button(session, tg_uid)),
-                )
-                return
-            server, port, secret = _parse_proxy_link(proxy_link)
-            await msg.answer(
-                "📡 <b>Ваш MTProxy готов</b>\n\n"
-                f"Сервер: <code>{html.escape(server)}</code>\n"
-                f"Порт: <code>{html.escape(port)}</code>\n"
-                f"Секрет: <code>{html.escape(secret)}</code>\n\n"
-                "Можно подключить кнопкой ниже или ввести вручную в Telegram:\n"
-                "Настройки → Данные и память → Прокси → Добавить MTProto.",
-                parse_mode="HTML",
-                reply_markup=_proxy_direct_kb(tg_uid, proxy_link),
-            )
-            return
-
-        if action == "get_vpn":
-            await query.answer("Проверяю VPN код…")
-            tg_uid = query.from_user.id
-            vless = await _get_vless_link(session, tg_uid)
-            if not vless:
-                await msg.answer(
-                    "VPN код пока недоступен. Проверьте /status или оформите подписку кнопкой «Купить / Продлить в боте».",
-                    reply_markup=main_menu_kb(tg_uid, show_cancel_autopay=await show_cancel_autopay_button(session, tg_uid)),
-                )
-                return
-            await msg.answer(
-                "🛡 <b>Ваш VPN код для Happ</b>\n\n"
-                "1) Установите Happ\n"
-                "2) Нажмите «СКОПИРОВАТЬ VPN КОД»\n"
-                "3) В Happ: «+» → «Вставить из буфера»\n\n"
-                f"<code>{html.escape(vless)}</code>",
-                parse_mode="HTML",
-                reply_markup=_vpn_direct_kb(vless),
-            )
+            await _send_proxy_vpn_bundle(msg, session, query.from_user.id)
             return
 
         if action == "copy_vpn":
@@ -1180,8 +1144,8 @@ async def main() -> None:
             vless = await _get_vless_link(session, tg_uid)
             if not vless:
                 await msg.answer(
-                    "Код пока не получен. Нажмите «Получить VPN код» ещё раз через 10–20 секунд.",
-                    reply_markup=main_menu_kb(tg_uid, show_cancel_autopay=await show_cancel_autopay_button(session, tg_uid)),
+                    "Код пока не получен. Нажмите «Подключить прокси / VPN» снова через 10–20 секунд.",
+                    reply_markup=main_menu_kb(tg_uid),
                 )
                 return
             await msg.answer(
@@ -1246,10 +1210,9 @@ async def main() -> None:
                 sc = bool(sdata.get("support_show_cancel", True))
                 await msg.answer("Оставляем автопродление как есть.", reply_markup=support_chat_kb(show_cancel_autopay=sc))
             else:
-                sc = await show_cancel_autopay_button(session, tg_uid)
                 await msg.answer(
                     "Оставляем автопродление как есть.",
-                    reply_markup=main_menu_kb(tg_uid, show_cancel_autopay=sc),
+                    reply_markup=main_menu_kb(tg_uid),
                 )
             return
 
@@ -1275,7 +1238,7 @@ async def main() -> None:
                 await state.update_data(support_show_cancel=sc)
                 reply_kb = support_chat_kb(show_cancel_autopay=sc)
             else:
-                reply_kb = main_menu_kb(tg_uid, show_cancel_autopay=sc)
+                reply_kb = main_menu_kb(tg_uid)
             await msg.answer(text, reply_markup=reply_kb)
             return
 
@@ -1283,10 +1246,9 @@ async def main() -> None:
             await state.clear()
             await query.answer("Чат закрыт")
             tg_id = query.from_user.id
-            sc = await show_cancel_autopay_button(session, tg_id)
             await msg.answer(
-                "Диалог закрыт. Поддержка снова — кнопка «Поддержка» или /support.",
-                reply_markup=main_menu_kb(tg_id, show_cancel_autopay=sc),
+                "Диалог закрыт. Снова поддержка: команда /support. Главное меню: /start.",
+                reply_markup=main_menu_kb(tg_id),
             )
             return
 
@@ -1331,11 +1293,19 @@ async def main() -> None:
         )
         payment_url = _normalize_payment_url_bot(str(payload.get("payment_url") or ""))
         if status >= 400 or not payment_url:
-            detail = str(payload.get("details") or payload.get("detail") or "").strip()
+            detail = _api_error_detail(payload)
+            hint = ""
+            if status == 503 and provider == "yookassa":
+                hint = (
+                    "\n\nЕсли ЮKassa на сервере ещё не настроена, выберите оплату через <b>Lava</b> "
+                    "(снова «Купить / продлить подписку»)."
+                )
             await message.answer(
-                "Не удалось создать оплату. Попробуйте ещё раз или напишите в поддержку."
-                + (f"\n\n{detail}" if detail else ""),
-                reply_markup=main_menu_kb(tg_id, show_cancel_autopay=await show_cancel_autopay_button(session, tg_id)),
+                "Не удалось создать оплату. Попробуйте ещё раз или напишите в /support."
+                + (f"\n\n{detail}" if detail else "")
+                + hint,
+                parse_mode="HTML",
+                reply_markup=main_menu_kb(tg_id),
             )
             await state.clear()
             return
@@ -1350,13 +1320,11 @@ async def main() -> None:
 
     @dp.message(Command("done"), StateFilter(SupportStates.chatting))
     async def _cmd_done(message: Message, state: FSMContext) -> None:
-        session = _get_session(dp)
         await state.clear()
         tg_id = message.from_user.id if message.from_user else 0
-        sc = await show_cancel_autopay_button(session, tg_id) if tg_id else True
         await message.answer(
-            "Диалог закрыт. Снова нажмите «Поддержка» в меню или /support — снова напомним, что писать нужно в этот чат.",
-            reply_markup=main_menu_kb(tg_id, show_cancel_autopay=sc),
+            "Диалог закрыт. Поддержка снова: /support. Главное меню: /start.",
+            reply_markup=main_menu_kb(tg_id),
         )
 
     @dp.message(Command("reset"), StateFilter(SupportStates.chatting))
@@ -1437,7 +1405,7 @@ async def main() -> None:
         sc_chat = bool(data.get("support_show_cancel", True))
         await message.answer(
             "Сообщение получено. Автоответ помощника сейчас недоступен — "
-            "попробуйте позже или откройте «Статус» и мини-приложение в меню бота.",
+            "попробуйте позже, /status или «Купить / продлить подписку» в /start.",
             reply_markup=support_chat_kb(show_cancel_autopay=sc_chat),
         )
 
