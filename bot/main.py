@@ -233,8 +233,8 @@ HELP_GENERAL = (
     "🛡 <b>Умный VPN Frosty — как подключить</b>\n"
     "\n"
     "<b>Что умеет Frosty:</b>\n"
-    "• Автоматически включает VPN для заблокированных сайтов (Instagram, TikTok, YouTube)\n"
-    "• Российские сайты (Яндекс, ВКонтакте, Сбер, Госуслуги) — напрямую, без VPN\n"
+    "• Instagram, TikTok, YouTube — через VPN автоматически\n"
+    "• Маркетплейсы (WB, Ozon, Avito), банки (Сбер, Т-Банк, Альфа), Госуслуги, VK — напрямую без VPN\n"
     "• Реклама на YouTube — заблокирована\n"
     "• До 10 устройств на одной подписке\n"
     "• Без лимитов по скорости и трафику\n"
@@ -552,11 +552,12 @@ async def _send_proxy_vpn_bundle(message: Message, session: aiohttp.ClientSessio
         '<a href="https://play.google.com/store/apps/details?id=com.happproxy">Android</a> · '
         '<a href="https://hiddify.com">Windows/Mac (Hiddify)</a>\n\n'
         "⚡ <b>Что умеет Frosty:</b>\n"
-        "• РФ-сайты (Яндекс, Сбер, Госуслуги) — напрямую, без VPN\n"
+        "• Маркетплейсы (WB, Ozon, Avito) — напрямую, без VPN\n"
+        "• Банки (Сбер, Т-Банк, Альфа) — напрямую\n"
+        "• Госуслуги, Яндекс, VK, Mail.ru — напрямую\n"
         "• Instagram, TikTok, YouTube — через VPN автоматически\n"
         "• Реклама на YouTube — заблокирована\n"
-        "• До 10 устройств — один аккаунт\n"
-        "• Без лимитов по скорости и трафику",
+        "• До 10 устройств · без лимитов по скорости и трафику",
         parse_mode="HTML",
         disable_web_page_preview=True,
         reply_markup=InlineKeyboardMarkup(inline_keyboard=rows),
@@ -810,8 +811,8 @@ async def cmd_start(message: Message, session: aiohttp.ClientSession, state: FSM
     await message.answer(
         f"🧊 <b>Frosty — Умный VPN за {PRICE_RUB} ₽/мес</b>\n"
         "\n"
-        "🛡 <b>Белые списки</b> — РФ-сайты (Сбер, Госуслуги, Яндекс) работают напрямую, "
-        "заблокированные (Instagram, TikTok, YouTube) — автоматически через VPN\n"
+        "🛡 <b>Белые списки</b> — WB, Ozon, Avito, Сбер, Госуслуги, Яндекс, VK работают напрямую; "
+        "Instagram, TikTok, YouTube — автоматически через VPN\n"
         "📱 <b>До 10 устройств</b> — телефон, планшет, ноутбук — все на одной подписке\n"
         "⚡ <b>Без лимитов</b> — никаких ограничений по скорости и трафику\n"
         "\n"

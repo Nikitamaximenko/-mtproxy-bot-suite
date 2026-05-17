@@ -832,7 +832,7 @@ export default function MiniAppPage() {
           <div className="mb-4 px-3 py-2.5" style={{ background: "#F0FDF4", borderRadius: "12px", border: "1px solid #BBF7D0" }}>
             <p className="text-xs font-semibold" style={{ color: "#16A34A" }}>⚡ Умный VPN с белыми списками</p>
             <p className="text-[11px] mt-1 leading-relaxed" style={{ color: "#374151" }}>
-              РФ-сайты (Сбер, Госуслуги, Яндекс) — напрямую. Instagram, TikTok, YouTube — через VPN. Реклама на YouTube заблокирована.
+              WB, Ozon, Avito, Сбер, Т-Банк, Госуслуги, Яндекс, VK — напрямую. Instagram, TikTok, YouTube — через VPN. Реклама на YouTube заблокирована.
             </p>
           </div>
 
@@ -1094,7 +1094,7 @@ export default function MiniAppPage() {
 
           {/* 4. Subtitle */}
           <p className="text-center mb-7" style={{ fontSize: "15px", fontWeight: 400, color: "#6B7280", lineHeight: "1.6" }}>
-            Умный VPN с белыми списками: Яндекс, Сбер, Госуслуги напрямую — заблокированные сайты через VPN. Без настроек.
+            WB, Ozon, Avito, Сбер, Т-Банк, Госуслуги, Яндекс, VK — напрямую. Instagram, TikTok, YouTube — через VPN. Без настроек.
           </p>
 
           <div
@@ -1142,11 +1142,12 @@ export default function MiniAppPage() {
           {/* 5. Features */}
           <div className="flex flex-col gap-2 mb-7">
             {[
-              "🔀 Белые списки — РФ напрямую, блокировки через VPN автоматически",
-              "📱 До 10 устройств на одной подписке",
-              "⚡ Без лимитов по скорости и трафику",
+              "🛍 WB, Ozon, Avito, DNS, Ситилинк — напрямую без VPN",
+              "🏦 Сбер, Т-Банк, Альфа, Госуслуги, VK — напрямую",
+              "🔀 Instagram, TikTok, YouTube — через VPN автоматически",
               "🚫 Реклама на YouTube заблокирована",
-              "🔒 Без логов — мы не видим, что ты делаешь в сети",
+              "📱 До 10 устройств · без лимитов по скорости и трафику",
+              "🔒 Без логов трафика",
             ].map((text, i) => (
               <div key={i} className="px-4 py-3 text-sm font-medium" style={{ background: "#F7F8FA", borderRadius: "14px", color: "#374151" }}>
                 {text}

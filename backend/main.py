@@ -3852,21 +3852,151 @@ def _build_smart_xray_config(vless_link: str) -> dict:
     Возвращает полный Xray JSON-конфиг для вставки в Happ / Hiddify.
 
     Логика маршрутизации:
-    - geoip:ru + geoip:private + geosite:ru → напрямую (РФ-сайты без VPN)
+    - Явный список популярных РФ-сервисов (маркетплейсы, банки, госуслуги, CDN) → direct
+    - geosite:ru + geosite:yandex + geosite:category-ru → direct (catch-all для .ru)
+    - geoip:ru + geoip:private → direct
     - Рекламные домены YouTube / Google Ads / DoubleClick → blackhole
-    - Всё остальное → VLESS outbound (Frosty VPN)
+    - Всё остальное → VLESS (Frosty VPN)
 
     DNS:
-    - Доменные запросы к российским сайтам идут в 77.88.8.8 (Яндекс DNS)
-    - Остальные — через AdGuard DNS (94.140.14.14), блокирует рекламу / трекеры
+    - Российские домены → Яндекс DNS (77.88.8.8)
+    - Остальные → AdGuard DNS (94.140.14.14, блокирует рекламу / трекеры)
     """
+    # Популярные РФ-сервисы, которые могут не попасть в geosite:ru
+    # (non-.ru TLDs, CDN-домены, новые домены) — явный whitelist
+    _RU_EXPLICIT_DOMAINS = [
+        # ── Маркетплейсы ──────────────────────────────────────────────────
+        "domain:wildberries.ru", "domain:wbstatic.net", "domain:wbbasket.ru",
+        "domain:wbimg.ru", "domain:wb.ru",
+        "domain:ozon.ru", "domain:ozon.by",
+        "domain:avito.ru", "domain:avito.st",
+        "domain:lamoda.ru",
+        "domain:citilink.ru",
+        "domain:dns-shop.ru", "domain:dns.ru",
+        "domain:mvideo.ru",
+        "domain:eldorado.ru",
+        "domain:sbermegamarket.ru", "domain:megamarket.ru",
+        "domain:ali-tech.ru", "domain:aliexpress.ru",
+        "domain:leroymerlin.ru",
+        "domain:technopark.ru",
+        "domain:samara.ru", "domain:youla.ru",
+        "domain:kuper.ru",
+        # ── Банки и финансы ────────────────────────────────────────────────
+        "domain:sberbank.ru", "domain:sbrf.ru", "domain:sber.ru",
+        "domain:domclick.ru", "domain:sberins.ru", "domain:sberauto.ru",
+        "domain:tbank.ru", "domain:tinkoff.ru",
+        "domain:alfabank.ru", "domain:alfa-bank.ru",
+        "domain:vtb.ru",
+        "domain:raiffeisen.ru", "domain:raiffeisencity.ru",
+        "domain:gazprombank.ru", "domain:gpb.ru",
+        "domain:rshb.ru",
+        "domain:pochtabank.ru",
+        "domain:sovcombank.ru",
+        "domain:rncb.ru",
+        "domain:open.ru", "domain:binbank.ru",
+        "domain:mtsbank.ru",
+        "domain:qiwi.com", "domain:qiwi.ru",
+        "domain:yoomoney.ru", "domain:money.yandex.ru",
+        "domain:nspk.ru", "domain:mirpay.ru",
+        "domain:cloudpayments.ru",
+        # ── Госуслуги и государственные ────────────────────────────────────
+        "domain:gosuslugi.ru", "domain:esia.gosuslugi.ru",
+        "domain:nalog.ru", "domain:nalog.gov.ru", "domain:lkfl.nalog.ru",
+        "domain:mos.ru", "domain:mos.ru",
+        "domain:pfr.ru", "domain:sfr.gov.ru",
+        "domain:rosreestr.gov.ru", "domain:rosreestr.ru",
+        "domain:fssp.gov.ru", "domain:fssprus.ru",
+        "domain:gibdd.ru",
+        "domain:rkn.gov.ru",
+        "domain:government.ru", "domain:kremlin.ru",
+        "domain:mil.ru",
+        "domain:cbr.ru",
+        "domain:fns.ru",
+        # ── Соцсети и почта ────────────────────────────────────────────────
+        "domain:vk.com", "domain:vk.me", "domain:vkontakte.ru",
+        "domain:userapi.com", "domain:vk-cdn.net", "domain:vk.userapi.com",
+        "domain:ok.ru", "domain:odnoklassniki.ru",
+        "domain:mail.ru", "domain:my.mail.ru",
+        "domain:imgsmail.ru", "domain:fileboom.me",
+        # ── Медиа и стриминг ───────────────────────────────────────────────
+        "domain:kinopoisk.ru",
+        "domain:ivi.ru",
+        "domain:rutube.ru",
+        "domain:premier.one",
+        "domain:start.ru",
+        "domain:more.tv",
+        "domain:okko.tv",
+        "domain:kion.ru",
+        "domain:tvzavr.ru",
+        # ── Карты и навигация ──────────────────────────────────────────────
+        "domain:2gis.ru", "domain:2gis.com", "domain:2gis.io",
+        "domain:api.2gis.ru", "domain:tile.maps.2gis.com",
+        # ── Транспорт ──────────────────────────────────────────────────────
+        "domain:rzd.ru", "domain:rzd-online.ru", "domain:ticket.rzd.ru",
+        "domain:aeroflot.ru",
+        "domain:s7.ru",
+        "domain:pobeda.aero",
+        "domain:utair.ru",
+        "domain:rossiya-airlines.com",
+        # ── Телеком ────────────────────────────────────────────────────────
+        "domain:mts.ru",
+        "domain:megafon.ru",
+        "domain:beeline.ru", "domain:veon.com",
+        "domain:tele2.ru",
+        "domain:rt.ru", "domain:rostelecom.ru",
+        "domain:ertelecom.ru",
+        "domain:dom.ru",
+        # ── Доставка и логистика ────────────────────────────────────────────
+        "domain:cdek.ru",
+        "domain:boxberry.ru",
+        "domain:pochta.ru",
+        "domain:dpd.ru",
+        "domain:pickpoint.ru",
+        "domain:nrg.ru",
+        # ── Каршеринг и такси ─────────────────────────────────────────────
+        "domain:delimobil.ru",
+        "domain:rentacar.ru",
+        "domain:cityrent.ru",
+        # ── Авто ──────────────────────────────────────────────────────────
+        "domain:auto.ru",
+        "domain:drom.ru",
+        "domain:cars.ru",
+        "domain:autostat.ru",
+        # ── Здоровье и медицина ────────────────────────────────────────────
+        "domain:gosuslugi.ru",
+        "domain:emias.info",
+        "domain:prodoctorov.ru",
+        "domain:napopravku.ru",
+        "domain:zdravcity.ru",
+        # ── Новости и медиа ────────────────────────────────────────────────
+        "domain:rbc.ru", "domain:rbk.ru",
+        "domain:ria.ru",
+        "domain:kommersant.ru",
+        "domain:gazeta.ru",
+        "domain:lenta.ru",
+        "domain:meduza.io",
+        # ── Прочее популярное ──────────────────────────────────────────────
+        "domain:hh.ru",
+        "domain:superjob.ru",
+        "domain:habr.com",
+        "domain:pikabu.ru",
+        "domain:sportmaster.ru",
+        "domain:letoile.ru",
+        "domain:loveplanet.ru",
+    ]
+
     return {
         "log": {"loglevel": "warning"},
         "dns": {
             "servers": [
                 {
                     "address": "77.88.8.8",
-                    "domains": ["geosite:ru", "geosite:yandex"],
+                    "domains": [
+                        "geosite:ru",
+                        "geosite:yandex",
+                        "vk.com", "ok.ru", "mail.ru",
+                        "2gis.com", "premier.one", "tbank.ru",
+                    ],
                 },
                 "94.140.14.14",
                 "8.8.8.8",
@@ -3917,12 +4047,19 @@ def _build_smart_xray_config(vless_link: str) -> dict:
                     ],
                     "outboundTag": "block",
                 },
-                # РФ-сайты и приватные IP → direct
+                # Явный список популярных РФ-сервисов → direct
+                {
+                    "type": "field",
+                    "domain": _RU_EXPLICIT_DOMAINS,
+                    "outboundTag": "direct",
+                },
+                # geosite catch-all для .ru / Яндекс → direct
                 {
                     "type": "field",
                     "domain": ["geosite:ru", "geosite:yandex", "geosite:category-ru"],
                     "outboundTag": "direct",
                 },
+                # РФ IP-диапазоны и частные сети → direct
                 {
                     "type": "field",
                     "ip": ["geoip:ru", "geoip:private"],
