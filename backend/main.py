@@ -4093,16 +4093,19 @@ def _build_smart_xray_config(vless_link: str) -> dict:
 
 def _build_singbox_config(vless_link: str) -> dict:
     """
-    Sing-box JSON-конфиг для импорта в Happ / Hiddify.
+    Оптимизированный sing-box конфиг — нет загрузок при старте.
 
-    Маршрутизация (split-tunneling):
-    - Российские сайты (geosite-ru + явный список) → direct (без VPN)
-    - Реклама YouTube / Google Ads / трекеры → block
-    - Всё остальное (Instagram, TikTok, YouTube...) → VLESS proxy
+    Ключевые решения:
+    - domain_suffix ".ru"/".рф" вместо geosite-ru.srs (~2 MB) — мгновенно
+    - Явный список non-.ru РФ-доменов вместо geoip-ru.srs (~1 MB) — мгновенно
+    - Нет remote rule_set → нет ожидания загрузки при первом запуске
+    - Plain UDP DNS (77.88.8.8 / 1.1.1.1) вместо DoH → -100–200 мс на запрос
+    - Минимальный лог-уровень "error" → меньше overhead
 
-    DNS:
-    - РФ-домены → Яндекс DNS 77.88.8.8 (direct)
-    - Прочее → AdGuard DNS 94.140.14.14 (через VPN, блокирует рекламу)
+    Маршрутизация:
+    - .ru / .рф / .su + явный список non-.ru → direct (без VPN)
+    - Google Ads / YouTube preroll → block
+    - Всё остальное → VLESS proxy
     """
     from urllib.parse import parse_qs, urlparse
 
@@ -4137,6 +4140,7 @@ def _build_singbox_config(vless_link: str) -> dict:
         "server_port": port,
         "uuid": uuid,
         "tls": tls_block,
+        "domain_strategy": "prefer_ipv4",
     }
     if network == "ws":
         vless_out["transport"] = {
@@ -4150,90 +4154,68 @@ def _build_singbox_config(vless_link: str) -> dict:
             "service_name": q("serviceName", ""),
         }
 
-    # Explicit non-.ru domains or CDN domains that geosite-ru might miss
-    _RU_SINGBOX_EXPLICIT: list[str] = [
-        # ── Яндекс (международные домены и CDN) ──────────────────────────
+    # Суффиксы TLD: покрывают ВСЕ .ru/.рф/.su домены одним правилом, без загрузки
+    _RU_TLD_SUFFIXES: list[str] = [".ru", ".рф", ".su"]
+
+    # Non-.ru домены российских сервисов — только уникальные, которых нет в .ru
+    _RU_EXTRA_SUFFIXES: list[str] = [
+        # Яндекс CDN / международные
         "yandex.com", "yandex.net", "yandex.eu", "yandex.kz",
-        "yastatic.net",            # Yandex static CDN
-        "yandexcloud.net",         # Yandex Cloud
-        "dzen.ru",                 # Яндекс Дзен (отдельный домен)
-        "zen.yandex.ru",
-        # Yandex Taxi / Еда / Лавка используют yandex.ru (покрыто geosite-ru)
-        # но для надёжности добавим явно:
-        "taxi.yandex.ru", "taxi.yandex.com",
-        "eda.yandex.ru", "eda.yandex.com",
-        "lavka.yandex.ru",
-        "delivery.yandex.ru",
-        "market.yandex.ru", "beru.ru",   # Яндекс Маркет
-        "music.yandex.ru", "music.yandex.com",
-        "kinopoisk.ru", "hd.kinopoisk.ru",
-        "maps.yandex.ru", "maps.yandex.com",
-        "navigator.yandex.ru",
-        "drive.yandex.ru",              # Каршеринг
-        "yandex.ru",                    # Основной домен (geosite-ru должен покрыть)
-        "alice.yandex.ru",
-        "plus.yandex.ru",
-        "disk.yandex.ru", "disk.yandex.com",
-        "cloud.yandex.ru",
-        "practicum.yandex.ru",
-        "yandexpay.ru", "pay.yandex.ru",
-        "yoomoney.ru", "money.yandex.ru",
-        # ── VK (non-.ru TLDs и CDN) ──────────────────────────────────────
-        "vk.com", "vk.me", "vkontakte.ru",
-        "userapi.com", "vk-cdn.net",
-        "vkuseraudio.com", "vkvideo.ru",
-        # ── Wildberries CDN ───────────────────────────────────────────────
+        "yastatic.net", "yandexcloud.net",
+        "dzen.ru",          # домен Дзена (технически .ru, но явно для надёжности)
+        # VK non-.ru
+        "vk.com", "vk.me",
+        "userapi.com", "vk-cdn.net", "vkuseraudio.com",
+        # Wildberries CDN
         "wbstatic.net", "wbbasket.ru", "wbimg.ru",
-        # ── 2GIS ──────────────────────────────────────────────────────────
+        # 2GIS
         "2gis.com", "2gis.io",
-        # ── T-Bank ────────────────────────────────────────────────────────
+        # T-Bank
         "tbank.ru",
-        # ── Медиа/стриминг (non-.ru TLDs) ────────────────────────────────
+        # Стриминг non-.ru
         "premier.one",
-        # ── QIWI ──────────────────────────────────────────────────────────
+        # QIWI
         "qiwi.com",
-        # ── Mail.ru CDN ───────────────────────────────────────────────────
-        "imgsmail.ru", "fileboom.me", "mycdn.me",
+        # Mail.ru CDN (non-.ru)
+        "mycdn.me",
+        # Одноклассники CDN
+        "userapi.com",
     ]
 
-    # YouTube preroll + Google Ads домены → block
-    _AD_DOMAINS: list[str] = [
+    # Только самые важные рекламные домены (inline, без загрузки)
+    _AD_SUFFIXES: list[str] = [
         "doubleclick.net",
         "googleadservices.com",
         "googlesyndication.com",
-        "googletagservices.com",
-        "adservice.google.com",
+        "imasdk.googleapis.com",    # YouTube player ads SDK
         "ads.youtube.com",
-        "imasdk.googleapis.com",
-        "s0.2mdn.net",
-        "pagead2.googlesyndication.com",
     ]
 
+    # Все прямые суффиксы в одном списке для DNS и route
+    _ALL_DIRECT_SUFFIXES = _RU_TLD_SUFFIXES + _RU_EXTRA_SUFFIXES
+
     return {
-        "log": {"level": "warn", "timestamp": True},
+        "log": {"level": "error"},
         "dns": {
             "servers": [
                 {
                     "tag": "dns-ru",
-                    "address": "https://77.88.8.8/dns-query",
+                    "address": "77.88.8.8",     # Яндекс DNS, UDP, в России — быстро
                     "detour": "direct",
                 },
                 {
                     "tag": "dns-proxy",
-                    "address": "https://dns.adguard.com/dns-query",
-                },
-                {
-                    "tag": "dns-block",
-                    "address": "rcode://refused",
+                    "address": "1.1.1.1",        # Cloudflare, самый быстрый глобально
+                    "detour": "proxy",
                 },
             ],
             "rules": [
-                {"rule_set": ["geosite-ru"], "server": "dns-ru"},
-                {"domain_suffix": _RU_SINGBOX_EXPLICIT, "server": "dns-ru"},
-                {"domain_suffix": _AD_DOMAINS, "server": "dns-block"},
+                # РФ-домены → Яндекс DNS напрямую (быстро, без прокси-хопа)
+                {"domain_suffix": _ALL_DIRECT_SUFFIXES, "server": "dns-ru"},
             ],
             "final": "dns-proxy",
             "independent_cache": True,
+            "prefer_ipv4": True,
         },
         "outbounds": [
             vless_out,
@@ -4242,44 +4224,16 @@ def _build_singbox_config(vless_link: str) -> dict:
         ],
         "route": {
             "rules": [
-                # Реклама → block
-                {"domain_suffix": _AD_DOMAINS, "outbound": "block"},
-                {"rule_set": ["geosite-ads"], "outbound": "block"},
-                # Явные РФ-домены (CDN / non-.ru TLDs) → direct
-                {"domain_suffix": _RU_SINGBOX_EXPLICIT, "outbound": "direct"},
-                # РФ geosite → direct
-                {"rule_set": ["geosite-ru"], "outbound": "direct"},
-                # РФ geoip → direct
-                {"rule_set": ["geoip-ru"], "outbound": "direct"},
-                # Приватные IP → direct
+                # Рекламные домены → block (первая проверка, список короткий)
+                {"domain_suffix": _AD_SUFFIXES, "outbound": "block"},
+                # РФ TLD (.ru/.рф/.su) → direct
+                {"domain_suffix": _RU_TLD_SUFFIXES, "outbound": "direct"},
+                # Non-.ru РФ домены → direct
+                {"domain_suffix": _RU_EXTRA_SUFFIXES, "outbound": "direct"},
+                # Локальные/приватные адреса → direct
                 {"ip_is_private": True, "outbound": "direct"},
             ],
-            "rule_set": [
-                {
-                    "type": "remote",
-                    "tag": "geosite-ru",
-                    "format": "binary",
-                    "url": "https://cdn.jsdelivr.net/gh/SagerNet/sing-geosite@rule-set/geosite-ru.srs",
-                    "download_detour": "direct",
-                    "update_interval": "7d",
-                },
-                {
-                    "type": "remote",
-                    "tag": "geoip-ru",
-                    "format": "binary",
-                    "url": "https://cdn.jsdelivr.net/gh/SagerNet/sing-geoip@rule-set/geoip-ru.srs",
-                    "download_detour": "direct",
-                    "update_interval": "7d",
-                },
-                {
-                    "type": "remote",
-                    "tag": "geosite-ads",
-                    "format": "binary",
-                    "url": "https://cdn.jsdelivr.net/gh/SagerNet/sing-geosite@rule-set/geosite-category-ads-all.srs",
-                    "download_detour": "direct",
-                    "update_interval": "1d",
-                },
-            ],
+            # rule_set отсутствуют → нет загрузок при старте
             "final": "proxy",
             "auto_detect_interface": True,
         },
