@@ -657,22 +657,22 @@ export default function MiniAppPage() {
           {/* Logo */}
           <div className="flex items-center justify-center gap-2 mb-6">
             <FrostIcon className="w-6 h-6" style={{ color: "#2AABEE" } as React.CSSProperties} />
-            <span className="text-base font-bold" style={{ color: "#111827" }}>Frosty — 2 в 1</span>
+            <span className="text-base font-bold" style={{ color: "#111827" }}>Frosty — умный VPN</span>
           </div>
 
-          {justPaid && (
+            {justPaid && (
             <div className="mb-5 p-4 text-center" style={{ background: "#F0FDF4", borderRadius: "16px" }}>
               <p className="text-sm font-semibold" style={{ color: "#16A34A" }}>✅ Оплата прошла успешно!</p>
-              <p className="text-xs mt-1" style={{ color: "#6B7280" }}>Подключите прокси и VPN ниже</p>
+              <p className="text-xs mt-1" style={{ color: "#6B7280" }}>Нажмите «Подключить VPN» ниже — один клик и готово</p>
             </div>
           )}
 
-          {/* Status card — подписка 2 в 1 */}
+          {/* Status card */}
           <div className="p-4 mb-5" style={{ background: "#F7F8FA", borderRadius: "16px" }}>
             <div className="flex items-center justify-between mb-2">
               <div>
-                <span className="text-sm font-semibold" style={{ color: "#111827" }}>Подписка 2 в 1 активна</span>
-                <p className="text-xs mt-0.5" style={{ color: "#6B7280" }}>Прокси для Telegram и VPN для Instagram, TikTok, YouTube</p>
+                <span className="text-sm font-semibold" style={{ color: "#111827" }}>Умный VPN активен</span>
+                <p className="text-xs mt-0.5" style={{ color: "#6B7280" }}>РФ-сайты напрямую · Instagram, TikTok, YouTube через VPN</p>
               </div>
               <span className="flex items-center gap-1.5 text-sm font-semibold" style={{ color: "#16A34A" }}>
                 <span className="w-2 h-2 rounded-full animate-pulse" style={{ background: "#16A34A" }} />
@@ -828,125 +828,16 @@ export default function MiniAppPage() {
             </div>
           )}
 
-          {/* Tabs — VPN и Telegram (2 в 1) */}
-          <div className="flex mb-5 p-1" style={{ background: "#F7F8FA", borderRadius: "14px" }}>
-            {(["vpn", "proxy"] as const).map((tab) => (
-              <button
-                key={tab}
-                onClick={() => setActiveTab(tab)}
-                className="flex-1 py-2.5 text-sm font-semibold touch-manipulation transition-all"
-                style={{
-                  borderRadius: "11px",
-                  background: activeTab === tab ? "#FFFFFF" : "transparent",
-                  color: activeTab === tab ? "#111827" : "#6B7280",
-                  boxShadow: activeTab === tab ? "0 1px 4px rgba(0,0,0,0.08)" : "none",
-                }}
-              >
-                {tab === "vpn" ? "🛡 VPN" : "📡 Telegram"}
-              </button>
-            ))}
+          {/* VPN header info */}
+          <div className="mb-4 px-3 py-2.5" style={{ background: "#F0FDF4", borderRadius: "12px", border: "1px solid #BBF7D0" }}>
+            <p className="text-xs font-semibold" style={{ color: "#16A34A" }}>⚡ Умный VPN с белыми списками</p>
+            <p className="text-[11px] mt-1 leading-relaxed" style={{ color: "#374151" }}>
+              РФ-сайты (Сбер, Госуслуги, Яндекс) — напрямую. Instagram, TikTok, YouTube — через VPN. Реклама на YouTube заблокирована.
+            </p>
           </div>
 
-          {/* ── Proxy tab — одна кнопка «Подключить прокси» → tg://proxy внутри Telegram */}
-          {activeTab === "proxy" && (
-            <div className="space-y-4">
-              <p className="px-1 text-xs leading-relaxed" style={{ color: "#6B7280" }}>
-                MTProxy работает только внутри Telegram — отдельные приложения не нужны.
-              </p>
-
-              <div
-                className="p-5"
-                style={{
-                  background: "linear-gradient(145deg, #229ED9 0%, #2AABEE 55%, #0088CC 100%)",
-                  borderRadius: "20px",
-                  boxShadow: "0 8px 28px rgba(34,158,217,0.35)",
-                }}
-              >
-                <p className="text-base font-bold" style={{ color: "#FFFFFF" }}>Прокси для Telegram</p>
-                <p className="text-xs mt-1 mb-4" style={{ color: "rgba(255,255,255,0.92)" }}>
-                  Нажмите кнопку — Telegram предложит подключить персональный MTProxy.
-                </p>
-                <button
-                  type="button"
-                  disabled={proxyBusy}
-                  onClick={() => void handleConnectProxy()}
-                  className="w-full font-bold touch-manipulation active:scale-[0.98] transition-all flex items-center justify-center gap-2 disabled:opacity-80"
-                  style={{
-                    background: "#FFFFFF",
-                    color: "#0088CC",
-                    minHeight: "56px",
-                    borderRadius: "16px",
-                    fontSize: "17px",
-                  }}
-                >
-                  {proxyBusy ? <RefreshCw className="w-5 h-5 animate-spin" /> : null}
-                  Подключить прокси
-                </button>
-                {proxyConnectError ? (
-                  <p className="text-xs mt-3 leading-relaxed" style={{ color: "rgba(255,255,255,0.95)" }}>
-                    {proxyConnectError}
-                  </p>
-                ) : null}
-              </div>
-
-              {proxyLink ? (
-                <details className="group">
-                  <summary
-                    className="flex items-center justify-between px-4 py-3 cursor-pointer list-none touch-manipulation"
-                    style={{ background: "#F7F8FA", borderRadius: "14px", color: "#111827" }}
-                  >
-                    <span className="text-sm font-semibold">Ссылка или копирование</span>
-                    <span className="text-xs" style={{ color: "#2AABEE" }}>Открыть ↓</span>
-                  </summary>
-                  <div className="mt-2 p-4 space-y-3" style={{ background: "#F7F8FA", borderRadius: "14px" }}>
-                    <div className="p-3 font-mono text-[11px] break-all leading-relaxed" style={{ background: "#FFFFFF", borderRadius: "10px", color: "#6B7280" }}>
-                      {proxyLink}
-                    </div>
-                    <button
-                      type="button"
-                      onClick={handleCopy}
-                      className="w-full flex items-center justify-center gap-2 text-sm font-semibold touch-manipulation active:scale-95 transition-all"
-                      style={{
-                        background: copied ? "#F0FDF4" : "#FFFFFF",
-                        color: copied ? "#16A34A" : "#374151",
-                        height: "48px",
-                        borderRadius: "12px",
-                        border: "1px solid #E5E7EB",
-                      }}
-                    >
-                      {copied ? <><Check className="w-4 h-4" />Скопировано</> : <><Copy className="w-4 h-4" />Скопировать ссылку</>}
-                    </button>
-                  </div>
-                </details>
-              ) : null}
-
-              <details>
-                <summary
-                  className="flex items-center justify-between px-4 py-3 cursor-pointer list-none touch-manipulation text-sm font-semibold"
-                  style={{ background: "#F7F8FA", borderRadius: "14px", color: "#6B7280" }}
-                >
-                  Почему это безопасно
-                  <span className="text-xs font-normal" style={{ color: "#2AABEE" }}>↓</span>
-                </summary>
-                <div className="mt-2 flex flex-col gap-2 px-1 pb-1">
-                  {[
-                    "⚡ Только Telegram — остальные приложения не затрагивает",
-                    "🔒 Без логов содержимого чатов",
-                    "📡 Персональный сервер",
-                  ].map((t, i) => (
-                    <div key={i} className="px-3 py-2.5 text-xs" style={{ background: "#F7F8FA", borderRadius: "10px", color: "#6B7280" }}>{t}</div>
-                  ))}
-                </div>
-              </details>
-
-              <p className="text-xs text-center px-1" style={{ color: "#9CA3AF" }}>
-                Instagram, TikTok, YouTube — вкладка <strong style={{ color: "#2AABEE" }}>🛡 VPN</strong>
-              </p>
-            </div>
-          )}
-
-          {/* ── VPN tab: пошаговая инструкция + копирование ссылки в Happ */}
-          {activeTab === "vpn" && (
+          {/* ── VPN: пошаговая инструкция + копирование ссылки */}
+          {true && (
             <div className="space-y-4">
               {/* Стейт 1: первичная загрузка */}
               {vpnLoading && !vpn && !vpnError && (
@@ -1054,8 +945,8 @@ export default function MiniAppPage() {
                         <Shield className="w-6 h-6" style={{ color: "#0284C7" }} />
                       </div>
                       <div>
-                        <p className="text-sm font-bold" style={{ color: "#111827" }}>Ваш VPN готов</p>
-                        <p className="text-xs" style={{ color: "#6B7280" }}>Finland · VLESS Reality</p>
+                        <p className="text-sm font-bold" style={{ color: "#111827" }}>Умный VPN готов</p>
+                        <p className="text-xs" style={{ color: "#6B7280" }}>Финляндия · белые списки · без рекламы на YouTube</p>
                       </div>
                     </div>
 
@@ -1154,7 +1045,7 @@ export default function MiniAppPage() {
                   </details>
 
                   <p className="text-xs text-center px-2" style={{ color: "#9CA3AF" }}>
-                    Один конфиг на все ваши устройства. Персональный сервер, без логов трафика.
+                    До 10 устройств на одном аккаунте. Без лимитов по скорости и трафику.
                   </p>
                 </>
               )}
@@ -1176,7 +1067,7 @@ export default function MiniAppPage() {
           {/* 1. Logo */}
           <div className="flex items-center justify-center gap-2 mb-8">
             <FrostIcon className="w-6 h-6" style={{ color: "#2AABEE" } as React.CSSProperties} />
-            <span className="text-base font-bold" style={{ color: "#111827" }}>Frosty — 2 в 1</span>
+            <span className="text-base font-bold" style={{ color: "#111827" }}>Frosty — умный VPN</span>
           </div>
 
           {suspendedButPaid && expiresAt && (
@@ -1184,7 +1075,7 @@ export default function MiniAppPage() {
               className="mb-5 px-4 py-3 text-center text-sm rounded-2xl"
               style={{ background: "#FEF3C7", color: "#92400E" }}
             >
-              Доступ к прокси приостановлен вручную. Оплаченный период до{" "}
+              Доступ приостановлен вручную. Оплаченный период до{" "}
               <strong>{new Date(expiresAt).toLocaleDateString("ru-RU")}</strong>.
             </div>
           )}
@@ -1192,18 +1083,18 @@ export default function MiniAppPage() {
           {/* 2. Badge */}
           <div className="flex justify-center mb-4">
             <span className="text-xs font-bold px-3 py-1.5 tracking-wide" style={{ background: "#EFF6FF", color: "#2563EB", borderRadius: "20px" }}>
-              2 В 1 — ПРОКСИ + VPN
+              УМНЫЙ VPN · ДО 10 УСТРОЙСТВ · БЕЗ ЛИМИТОВ
             </span>
           </div>
 
           {/* 3. Heading */}
           <h1 className="text-center font-bold leading-tight mb-3" style={{ fontSize: "30px", color: "#111827" }}>
-            2 в 1: Telegram и всё остальное<br />— Instagram, TikTok и другие.
+            Один клик — и Instagram,<br />TikTok, YouTube работают.
           </h1>
 
           {/* 4. Subtitle */}
           <p className="text-center mb-7" style={{ fontSize: "15px", fontWeight: 400, color: "#6B7280", lineHeight: "1.6" }}>
-            Одна подписка решает сразу обе проблемы: прокси включает Telegram без лишних действий, а VPN открывает всё остальное.
+            Умный VPN с белыми списками: Яндекс, Сбер, Госуслуги напрямую — заблокированные сайты через VPN. Без настроек.
           </p>
 
           <div
@@ -1248,22 +1139,14 @@ export default function MiniAppPage() {
             </div>
           </div>
 
-          {/* 5. Features — две колонки */}
-          <div className="grid grid-cols-2 gap-2 mb-3">
-            <div className="p-4" style={{ background: "#F0F9FF", borderRadius: "16px", border: "1px solid #BAE6FD" }}>
-              <p className="text-xs font-bold mb-2" style={{ color: "#0284C7" }}>📡 MTProxy</p>
-              <p className="text-xs leading-relaxed" style={{ color: "#374151" }}>Telegram работает сразу — без дополнительных приложений</p>
-            </div>
-            <div className="p-4" style={{ background: "#F0FDF4", borderRadius: "16px", border: "1px solid #BBF7D0" }}>
-              <p className="text-xs font-bold mb-2" style={{ color: "#16A34A" }}>🛡 VPN</p>
-              <p className="text-xs leading-relaxed" style={{ color: "#374151" }}>Instagram, TikTok, YouTube — любые сайты без ограничений</p>
-            </div>
-          </div>
+          {/* 5. Features */}
           <div className="flex flex-col gap-2 mb-7">
             {[
-              "⚡ Персональный сервер — скорость не делишь с чужими",
+              "🔀 Белые списки — РФ напрямую, блокировки через VPN автоматически",
+              "📱 До 10 устройств на одной подписке",
+              "⚡ Без лимитов по скорости и трафику",
+              "🚫 Реклама на YouTube заблокирована",
               "🔒 Без логов — мы не видим, что ты делаешь в сети",
-              "📲 Настройка за 2 минуты — подробная инструкция внутри",
             ].map((text, i) => (
               <div key={i} className="px-4 py-3 text-sm font-medium" style={{ background: "#F7F8FA", borderRadius: "14px", color: "#374151" }}>
                 {text}
@@ -1277,7 +1160,7 @@ export default function MiniAppPage() {
               <span className="font-bold" style={{ fontSize: "40px", color: "#111827" }}>299 ₽</span>
               <span className="text-base" style={{ color: "#6B7280" }}>/мес</span>
             </div>
-            <p className="text-sm mt-1" style={{ color: "#6B7280" }}>= 10 ₽ в день · Прокси + VPN · Отмена в любой момент</p>
+            <p className="text-sm mt-1" style={{ color: "#6B7280" }}>= 10 ₽ в день · до 10 устройств · без лимитов · отмена в любой момент</p>
           </div>
 
           {/* Способ оплаты */}

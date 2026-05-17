@@ -10,6 +10,7 @@ import {
 
 const TELEGRAM_BOT = "https://t.me/frostytg_bot?start=site"
 const TELEGRAM_SITE_OFFER_BOT = "https://t.me/frostytg_bot?start=siteoffer"
+const TELEGRAM_OFFER_BOT = "https://t.me/frostytg_bot?start=offer"
 const PRICE_RUB = 299
 
 type VpnPing = { online: boolean; latency_ms: number | null }
@@ -106,10 +107,10 @@ function PaymentCard({ ping }: { ping: VpnPing | null }) {
     >
       <div className="flex items-baseline justify-between mb-1">
         <span className="text-sm font-semibold" style={{ color: "#111827" }}>
-          Подписка 2 в 1
+          Умный VPN Frosty
         </span>
         <span className="text-xs" style={{ color: "#6B7280" }}>
-          Прокси + VPN
+          до 10 устройств
         </span>
       </div>
       <div className="flex items-baseline gap-1 mb-1">
@@ -121,7 +122,7 @@ function PaymentCard({ ping }: { ping: VpnPing | null }) {
         </span>
       </div>
       <p className="text-xs mb-4" style={{ color: "#6B7280" }}>
-        ≈ 10 ₽ в день · отмена в любой момент
+        ≈ 10 ₽ в день · без лимитов · отмена в любой момент
       </p>
       <div
         className="mb-4 px-3 py-2.5"
@@ -401,23 +402,23 @@ export function Landing() {
               className="inline-block text-xs font-bold uppercase tracking-wide px-3 py-1.5 mb-5"
               style={{ background: "#EFF6FF", color: "#2563EB", borderRadius: 999, letterSpacing: "0.06em" }}
             >
-              2 в 1 — Прокси + VPN · Бесплатный день в Telegram
+              Умный VPN · Белые списки · Бесплатный день в Telegram
             </span>
             <h1
               className="font-display font-extrabold leading-[1.05] mb-5"
               style={{ fontSize: "clamp(34px, 6vw, 56px)", letterSpacing: "-0.03em" }}
             >
-              Telegram работает сразу.
+              Один клик —{" "}
+              <span style={{ color: "#2AABEE" }}>Instagram, TikTok, YouTube</span> работают.
               <br />
-              <span style={{ color: "#2AABEE" }}>Instagram, TikTok, YouTube</span> — тоже.
+              Сбер, Госуслуги — напрямую.
             </h1>
             <p
               className="max-w-xl mb-7"
               style={{ fontSize: 17, lineHeight: 1.55, color: "#4B5563" }}
             >
-              Одна подписка — персональный MTProxy для Telegram и быстрый VPN для всего остального. Без
-              рекламы, логов и «общих серверов с 10 000 подключений». Если хочешь сначала проверить
-              сервис на своём операторе и устройствах, в боте есть бесплатный день.
+              Умный VPN с белыми списками: российские сайты идут напрямую, заблокированные — через VPN
+              автоматически. До 10 устройств, без лимитов по скорости и трафику. Реклама на YouTube заблокирована.
             </p>
 
             <div className="flex flex-wrap gap-3 mb-7">
@@ -437,7 +438,7 @@ export function Landing() {
                 Оформить за {PRICE_RUB} ₽ / мес →
               </button>
               <a
-                href={TELEGRAM_BOT}
+                href={TELEGRAM_OFFER_BOT}
                 className="inline-flex items-center gap-2 font-semibold transition-colors"
                 style={{
                   background: "#F7F8FA",
@@ -449,17 +450,21 @@ export function Landing() {
                 }}
               >
                 <MessageCircle className="w-5 h-5" />
-                Попробовать в Telegram
+                Бесплатный тестовый день
               </a>
             </div>
+            <p className="text-sm mb-6" style={{ color: "#6B7280" }}>
+              🎁 В Telegram-боте доступен один бесплатный тестовый день. Нажмите кнопку и активируйте оффер внутри бота.
+            </p>
 
             <div className="flex flex-wrap gap-2 mb-4">
-              <ServiceChip label="Telegram" color="#2AABEE" />
               <ServiceChip label="Instagram" color="#E1306C" />
               <ServiceChip label="TikTok" color="#111827" />
               <ServiceChip label="YouTube" color="#FF0000" />
               <ServiceChip label="Twitter / X" color="#0EA5E9" />
               <ServiceChip label="ChatGPT" color="#10A37F" />
+              <ServiceChip label="Яндекс напрямую" color="#FFCC00" />
+              <ServiceChip label="Сбер напрямую" color="#21A038" />
             </div>
 
             <div className="flex items-center gap-4 text-sm" style={{ color: "#6B7280" }}>
@@ -520,7 +525,7 @@ export function Landing() {
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                 {[
                   "1 день бесплатно",
-                  "Telegram и сайты в одном доступе",
+                  "VPN + белые списки уже включены",
                   "Можно попробовать перед оплатой",
                 ].map((item) => (
                   <div
@@ -574,31 +579,30 @@ export function Landing() {
             className="font-display font-extrabold mb-3"
             style={{ fontSize: "clamp(26px, 3.5vw, 36px)", letterSpacing: "-0.03em" }}
           >
-            Устал жонглировать тремя VPN?
+            VPN, который умнее обычного
           </h2>
           <p className="max-w-2xl mb-8" style={{ fontSize: 16, color: "#4B5563", lineHeight: 1.6 }}>
-            Обычные «бесплатные» VPN тормозят, ловят блокировки и лезут в трафик. MTProxy в Telegram
-            решает проблему только для мессенджера. Frosty — это одна подписка, которая закрывает обе
-            задачи: и Telegram, и сайты/приложения.
+            Обычный VPN тормозит Яндекс, Сбер и Госуслуги — он гонит весь трафик через сервер. Frosty
+            автоматически разделяет: российские сайты идут напрямую, заблокированные — через VPN. Без настроек.
           </p>
 
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             {[
               {
-                title: "Персональный сервер",
-                text: "Без общей очереди. Скорость не делишь с чужими людьми — трафик идёт только через ваш UUID.",
+                title: "Белые списки",
+                text: "РФ-сайты (Яндекс, Сбер, Госуслуги, банки) работают напрямую — без VPN. Instagram, TikTok, YouTube — через VPN. Автоматически.",
                 color: "#2AABEE",
-                icon: <Zap className="w-5 h-5" />,
-              },
-              {
-                title: "Без логов трафика",
-                text: "Мы не пишем, какие сайты вы открываете. Храним только статус подписки и платежа.",
-                color: "#16A34A",
                 icon: <Shield className="w-5 h-5" />,
               },
               {
-                title: "Настройка за 2 минуты",
-                text: "В Telegram — одна кнопка «Подключить прокси». VPN в Happ — вставил ссылку и готово.",
+                title: "До 10 устройств",
+                text: "Один аккаунт — телефон, планшет, ноутбук, компьютер. Все устройства подключены одновременно по одной подписке.",
+                color: "#16A34A",
+                icon: <Zap className="w-5 h-5" />,
+              },
+              {
+                title: "Один клик",
+                text: "Нажимаете «Подключить VPN» в боте — Happ открывается и добавляет сервер сам. Никаких копирований и инструкций.",
                 color: "#F59E0B",
                 icon: <Check className="w-5 h-5" />,
               },
@@ -649,17 +653,17 @@ export function Landing() {
               {
                 step: "1",
                 title: "Оплата 299 ₽",
-                text: "Оплата банковской картой. Письмо с доступом придёт на email, в Telegram — сразу появятся кнопки «Подключить прокси» и «VPN».",
+                text: "Оплата банковской картой (СБП, SberPay, Lava). Письмо придёт на email, в Telegram — мгновенный доступ.",
               },
               {
                 step: "2",
-                title: "Прокси для Telegram",
-                text: "В мини-приложении жмёте «Подключить прокси» — Telegram сам предлагает включить. Никаких приложений ставить не нужно.",
+                title: "Скачайте Happ",
+                text: "Установите бесплатное приложение Happ (iOS / Android) или Hiddify (Windows / Mac) — займёт минуту.",
               },
               {
                 step: "3",
-                title: "VPN для всего остального",
-                text: "Устанавливаете Happ (iOS / Android / Windows / Mac), копируете ссылку из мини-приложения — и Instagram, TikTok, YouTube начинают работать как раньше.",
+                title: "Один клик — и готово",
+                text: "Нажмите «🛡 Подключить VPN» в боте → «Открыть в Happ». Приложение добавит умный VPN автоматически. Белые списки уже включены.",
               },
             ].map((s) => (
               <div
@@ -728,14 +732,14 @@ export function Landing() {
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div className="p-6" style={{ background: "#FFFFFF", borderRadius: 20, border: "1px solid #FECACA" }}>
               <p className="text-xs font-bold uppercase mb-3" style={{ color: "#DC2626", letterSpacing: "0.06em" }}>
-                Обычный бесплатный VPN
+                Обычный VPN
               </p>
               <ul className="space-y-2">
                 {[
                   "Перегружен — скорость 2 Мбит, видео тормозит",
+                  "Яндекс, Сбер, Госуслуги тоже тормозят через VPN",
                   "Собирает и продаёт метаданные",
-                  "Реклама и принудительный ввод email в соцсети",
-                  "Telegram всё равно отваливается",
+                  "Реклама на YouTube всё равно есть",
                   "Ловит RKN-блокировки через неделю",
                 ].map((t) => (
                   <li key={t} className="flex items-start gap-2 text-sm" style={{ color: "#374151" }}>
@@ -756,15 +760,15 @@ export function Landing() {
               }}
             >
               <p className="text-xs font-bold uppercase mb-3" style={{ color: "#0284C7", letterSpacing: "0.06em" }}>
-                Frosty 2 в 1
+                Frosty умный VPN
               </p>
               <ul className="space-y-2">
                 {[
-                  "Персональный сервер — полная полоса именно у вас",
-                  "Без логов, что вы открываете",
-                  "MTProxy для Telegram и VLESS Reality для всего остального",
-                  "Живая поддержка в Telegram-боте",
-                  "299 ₽/мес, отмена в любой момент",
+                  "РФ-сайты напрямую, заблокированные — через VPN",
+                  "Реклама на YouTube заблокирована",
+                  "До 10 устройств по одной подписке",
+                  "Без лимитов по скорости и трафику",
+                  "Живая поддержка · 299 ₽/мес, отмена в любой момент",
                 ].map((t) => (
                   <li key={t} className="flex items-start gap-2 text-sm" style={{ color: "#111827" }}>
                     <Check className="w-4 h-4 mt-0.5 shrink-0" style={{ color: "#16A34A" }} />
@@ -788,28 +792,36 @@ export function Landing() {
 
           <div className="space-y-3">
             <Faq
-              q="Что такое «2 в 1» — чем отличается прокси и VPN?"
-              a="MTProxy — это режим работы только Telegram: он начинает открываться без рекламы и приложений. VPN (протокол VLESS Reality, приложение Happ) шифрует весь трафик устройства и открывает Instagram, TikTok, YouTube, ChatGPT и любые другие сайты. Frosty даёт и то, и другое в одной подписке."
+              q="Что такое «белые списки»?"
+              a="Умный VPN разделяет трафик автоматически: российские сайты (Яндекс, ВКонтакте, Сбер, Госуслуги, банки) идут напрямую без VPN — с полной скоростью. Заблокированные сайты (Instagram, TikTok, YouTube, X) — через зашифрованный VPN. Ничего настраивать не нужно."
+            />
+            <Faq
+              q="Правда без рекламы на YouTube?"
+              a="Да. Frosty блокирует рекламные серверы YouTube на уровне DNS ещё до подключения к VPN. Работает на всех устройствах, где настроен Happ."
             />
             <Faq
               q="На сколько устройств работает одна подписка?"
-              a="VPN-профиль можно добавить на несколько устройств одновременно (телефон + ноутбук). MTProxy в Telegram работает сразу на всех ваших Telegram-клиентах, куда настроен прокси."
+              a="До 10 устройств одновременно на одном аккаунте. Телефон, планшет, ноутбук, компьютер — всё по одной подписке."
+            />
+            <Faq
+              q="Есть ли лимит по скорости или трафику?"
+              a="Нет. Персональный сервер — скорость не делишь с другими. Ни ограничений по скорости, ни по объёму трафика."
             />
             <Faq
               q="Нужен ли Telegram, чтобы купить?"
-              a="Нет. Оплачиваете на сайте банковской картой, на email приходит чек и ссылка. Чтобы получить кнопки «Подключить прокси» и «VPN» — откройте нашего бота в Telegram из письма: подписка привяжется автоматически."
+              a="Нет. Оплачивайте на сайте банковской картой — на email придёт чек и ссылка. Чтобы подключить VPN, откройте бота из письма: подписка привяжется автоматически."
             />
             <Faq
               q="Какие способы оплаты?"
-              a="Оплата работает онлайн и на сайте, и в мини-приложении. Подписка — 299 ₽/мес, отключить можно в боте."
+              a="ЮKassa (СБП, SberPay, T-Pay, карты) или Lava (карта). Оплата на сайте, в мини-приложении или прямо в боте. 299 ₽/мес, отмена в любой момент."
             />
             <Faq
               q="Можно сначала попробовать бесплатно?"
-              a="Да. В Telegram-боте есть оффер на один бесплатный день. Он нужен, чтобы проверить скорость MTProxy и VPN на ваших устройствах и операторе перед оплатой."
+              a="Да. В Telegram-боте есть один бесплатный день. Нажмите «Бесплатный тестовый день» — активируется мгновенно, белые списки и блокировка рекламы уже включены."
             />
             <Faq
               q="Вы пишете логи моего трафика?"
-              a="Нет. Мы храним только то, что нужно для работы: телеграм-id или email, статус и даты подписки. Что именно вы открываете через VPN — мы не видим и не пишем."
+              a="Нет. Мы храним только то, что нужно для работы: telegram-id или email, статус и даты подписки. Что именно вы открываете через VPN — мы не видим и не пишем."
             />
             <Faq
               q="Что если не работает или что-то сломалось?"
@@ -825,11 +837,10 @@ export function Landing() {
             className="font-display font-extrabold mb-3"
             style={{ color: "#FFFFFF", fontSize: "clamp(26px, 3.5vw, 36px)", letterSpacing: "-0.03em" }}
           >
-            Пока вы читаете — Telegram уже мог бы работать.
+            Пока вы читаете — Instagram уже мог бы работать.
           </h2>
           <p className="mb-7 max-w-xl mx-auto" style={{ color: "#CBD5E1", fontSize: 16, lineHeight: 1.55 }}>
-            299 ₽ в месяц — и Instagram, TikTok, YouTube, ChatGPT и Telegram работают как до 2022 года. Без
-            капчи, без тормозов, без рекламы.
+            299 ₽ в месяц — и Instagram, TikTok, YouTube, ChatGPT работают без тормозов. Яндекс и Сбер — напрямую. Реклама на YouTube — заблокирована. Один клик.
           </p>
           <div className="flex flex-wrap items-center justify-center gap-3">
             <button
@@ -872,7 +883,7 @@ export function Landing() {
             <FrostIcon className="w-5 h-5" style={{ color: "#2AABEE" } as React.CSSProperties} />
             <span className="text-sm font-semibold">Frosty</span>
             <span className="text-xs" style={{ color: "#9CA3AF" }}>
-              · MTProxy + VPN · 299 ₽ / мес
+              · Умный VPN · до 10 устройств · 299 ₽ / мес
             </span>
           </div>
           <div className="flex items-center gap-4 text-sm" style={{ color: "#6B7280" }}>

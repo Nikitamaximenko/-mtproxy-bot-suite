@@ -2006,26 +2006,23 @@ def _notify_payment_success(tg_id: int, proxy_link: str) -> None:
     import time as _t
     v = int(_t.time())
     miniapp_url = f"{FRONTEND_URL}/mini?tg_id={tg_id}&v={v}" if FRONTEND_URL else ""
-    buttons: list[list[dict[str, Any]]] = [
-        [{"text": "\U0001f50c Подключить прокси Telegram", "url": proxy_link}],
-    ]
+    buttons: list[list[dict[str, Any]]] = []
     if miniapp_url:
-        buttons.append([{"text": "\U0001f6e1 Открыть личный кабинет (VPN)", "web_app": {"url": miniapp_url}}])
-    buttons.append([{"text": "\U0001f4e5 Скачать Happ для Android", "url": "https://play.google.com/store/apps/details?id=com.happproxy"}])
-    buttons.append([{"text": "\U0001f4e5 Скачать Happ для iOS", "url": "https://apps.apple.com/app/happ-proxy-utility/id6504287215"}])
+        buttons.append([{"text": "\U0001f6e1 Открыть мини-апп", "web_app": {"url": miniapp_url}}])
+    buttons.append([{"text": "\U0001f4f1 Скачать Happ для Android", "url": "https://play.google.com/store/apps/details?id=com.happproxy"}])
+    buttons.append([{"text": "\U0001f4f1 Скачать Happ для iOS", "url": "https://apps.apple.com/app/happ-proxy-utility/id6504287215"}])
     kb = {"inline_keyboard": buttons}
     _send_tg(tg_id, (
-        "\U0001f389 <b>Подписка активирована!</b>\n\n"
-        "Теперь у тебя есть:\n"
-        "\U0001f4e1 MTProxy \u2014 Telegram работает без ограничений\n"
-        "\U0001f6e1 VPN \u2014 Instagram, TikTok, YouTube и всё остальное\n\n"
-        "<b>Шаг 1 \u2014 Подключи прокси Telegram:</b>\n"
-        "Нажми кнопку \u00abПодключить прокси\u00bb ниже\n\n"
-        "<b>Шаг 2 \u2014 Подключи VPN:</b>\n"
-        "1. Скачай Happ: Android или iOS (кнопки ниже)\n"
-        "2. Открой \u00abЛичный кабинет\u00bb -> вкладка \u00abVPN\u00bb\n"
-        "3. Нажми \u00abОткрыть в Happ\u00bb \u2014 подключение за 10 секунд\n\n"
-        "Если возникли вопросы \u2014 напиши в поддержку"
+        "\U0001f389 <b>Умный VPN Frosty активирован!</b>\n\n"
+        "\U0001f6e1 Белые списки \u2014 РФ-сайты напрямую, Instagram/TikTok/YouTube через VPN автоматически\n"
+        "\U0001f4f1 До 10 устройств на одной подписке\n"
+        "\u26a1 Без лимитов по скорости и трафику\n\n"
+        "<b>Один клик для подключения:</b>\n"
+        "1. Скачай Happ (кнопки ниже)\n"
+        "2. Открой мини-апп \u2192 нажми \u00abСкопировать ссылку для Happ\u00bb\n"
+        "3. В Happ: \u00ab+\u00bb \u2192 \u00abВставить из буфера\u00bb \u2014 готово!\n\n"
+        "Или нажми \u00ab\U0001f6e1 Подключить VPN\u00bb в боте \u2014 ещё проще.\n\n"
+        "Вопросы \u2014 /support"
     ), kb)
 
 

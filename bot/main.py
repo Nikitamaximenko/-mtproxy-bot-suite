@@ -127,20 +127,14 @@ def _miniapp_url(tg_id: int) -> str:
 
 
 def main_menu_kb(tg_id: int) -> InlineKeyboardMarkup:
-    """Главное меню: ровно 6 действий — остальное через /help и /support."""
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [InlineKeyboardButton(text="🎁 Бесплатный день", callback_data="menu:trial")],
             [InlineKeyboardButton(text="💳 Купить / продлить подписку", callback_data="menu:buy_in_bot")],
-            [InlineKeyboardButton(text="📡 Подключить прокси / VPN", callback_data="menu:connect")],
+            [InlineKeyboardButton(text="🛡 Подключить VPN", callback_data="menu:connect")],
             [InlineKeyboardButton(text="🧊 Открыть мини-апп", web_app=WebAppInfo(url=_miniapp_url(tg_id)))],
             [InlineKeyboardButton(text="✅ Статус", callback_data="menu:status")],
-            [
-                InlineKeyboardButton(
-                    text="🚫 Отменить автопродление подписки",
-                    callback_data="menu:cancel_recurring",
-                )
-            ],
+            [InlineKeyboardButton(text="🚫 Отменить автопродление", callback_data="menu:cancel_recurring")],
         ]
     )
 
@@ -181,9 +175,9 @@ def support_chat_kb(*, show_cancel_autopay: bool = True) -> InlineKeyboardMarkup
 def trial_direct_kb(tg_id: int, *, show_copy_button: bool) -> InlineKeyboardMarkup:
     rows: list[list[InlineKeyboardButton]] = []
     if show_copy_button:
-        rows.append([InlineKeyboardButton(text="📋 СКОПИРОВАТЬ КОД", callback_data="menu:trial_copy_vless")])
-    rows.append([InlineKeyboardButton(text="💳 Купить / продлить подписку", callback_data="menu:buy_in_bot")])
-    rows.append([InlineKeyboardButton(text="📡 Подключить прокси / VPN", callback_data="menu:connect")])
+        rows.append([InlineKeyboardButton(text="📋 СКОПИРОВАТЬ VPN-КОД", callback_data="menu:trial_copy_vless")])
+    rows.append([InlineKeyboardButton(text="🛡 Открыть в Happ одним нажатием", callback_data="menu:connect")])
+    rows.append([InlineKeyboardButton(text="💳 Купить полную подписку", callback_data="menu:buy_in_bot")])
     rows.append([InlineKeyboardButton(text="🏠 Главное меню", callback_data="menu:main")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
@@ -212,15 +206,15 @@ def support_invite_html() -> str:
         return (
             "✨ <b>Поддержка</b>\n\n"
             "Пишите <b>прямо в этот чат</b> — мы на связи и готовы помочь.\n\n"
-            "Отправьте <b>следующим сообщением</b> свой вопрос: оплата, настройка VPN (Happ) — дальше ответит помощник, "
-            "и вы сможете продолжить с ним обычный диалог.\n\n"
+            "Отправьте <b>следующим сообщением</b> свой вопрос: оплата, подключение VPN (Happ) — "
+            "дальше ответит помощник, и вы сможете продолжить с ним обычный диалог.\n\n"
             "<i>Закончить: кнопка ниже или /done</i>"
         )
     return (
         "✨ <b>Поддержка</b>\n\n"
         "Пишите <b>прямо в этот чат</b>.\n\n"
         "Автоответ помощника сейчас недоступен — попробуйте чуть позже, команда /status "
-        "или кнопка «Подключить прокси / VPN» в главном меню (/start).\n\n"
+        "или кнопка «🛡 Подключить VPN» в главном меню (/start).\n\n"
         "<i>Закончить: кнопка ниже или /done</i>"
     )
 
@@ -236,23 +230,28 @@ def format_dt(dt_str: str | None) -> str:
 
 
 HELP_GENERAL = (
-    "🛡 <b>Как подключить VPN через Happ</b>\n"
+    "🛡 <b>Умный VPN Frosty — как подключить</b>\n"
+    "\n"
+    "<b>Что умеет Frosty:</b>\n"
+    "• Автоматически включает VPN для заблокированных сайтов (Instagram, TikTok, YouTube)\n"
+    "• Российские сайты (Яндекс, ВКонтакте, Сбер, Госуслуги) — напрямую, без VPN\n"
+    "• Реклама на YouTube — заблокирована\n"
+    "• До 10 устройств на одной подписке\n"
+    "• Без лимитов по скорости и трафику\n"
     "\n"
     "<b>Шаг 1 — Доступ</b>\n"
-    "Один раз можно взять <b>бесплатный день</b> (кнопка в меню) или сразу оплатить подписку в боте "
-    "(Lava или ЮKassa) либо через мини-апп.\n"
-    "Доступ активируется автоматически.\n"
+    "Возьми <b>бесплатный день</b> (кнопка в меню) или оплати подписку "
+    "(Lava или ЮKassa) — доступ активируется мгновенно.\n"
     "\n"
     "<b>Шаг 2 — Скачай Happ</b>\n"
     '• Android: <a href="https://play.google.com/store/apps/details?id=com.happproxy">Google Play</a>\n'
     '• iOS: <a href="https://apps.apple.com/app/happ-proxy-utility/id6504287215">App Store</a>\n'
     '• Windows/Mac: <a href="https://hiddify.com">Hiddify</a>\n'
     "\n"
-    "<b>Шаг 3 — Подключись</b>\n"
-    "1. В боте нажми «Подключить прокси / VPN» или открой мини-апп\n"
-    "2. Нажми «СКОПИРОВАТЬ VPN КОД» или следуй подсказкам для MTProxy\n"
-    "3. В Happ вставь ссылку через «+» → «Из буфера»\n"
-    "4. Нажми «Подключить» — готово ✅\n"
+    "<b>Шаг 3 — Подключись одним нажатием</b>\n"
+    "1. В боте нажми «🛡 Подключить VPN»\n"
+    "2. Нажми «Открыть в Happ» — приложение добавит сервер само\n"
+    "3. Или скопируй VPN-код и вставь в Happ через «+» → «Из буфера»\n"
     "\n"
     "━━━━━━━━━━━━━━━━\n"
     "❓ <b>Частые вопросы</b>\n"
@@ -518,68 +517,46 @@ def _hiddify_deeplink(url: str) -> str:
 
 
 async def _send_proxy_vpn_bundle(message: Message, session: aiohttp.ClientSession, tg_uid: int) -> None:
-    """MTProxy + VPN одним экраном (кнопка «Подключить прокси / VPN»)."""
-    proxy_link = await _get_proxy_link(session, tg_uid)
+    """Умный VPN — одно нажатие для подключения через Happ."""
     vless = await _get_vless_link(session, tg_uid)
-    if not proxy_link or not vless:
+    if not vless:
         await asyncio.sleep(0.8)
-        proxy_link = proxy_link or await _get_proxy_link(session, tg_uid)
-        vless = vless or await _get_vless_link(session, tg_uid)
-
-    if not proxy_link and not vless:
-        await message.answer(
-            "Прокси и VPN пока недоступны. Оформите подписку кнопкой «Купить / продлить подписку» "
-            "или откройте /status через минуту.",
-            reply_markup=main_menu_kb(tg_uid),
-        )
-        return
+        vless = await _get_vless_link(session, tg_uid)
 
     rows: list[list[InlineKeyboardButton]] = []
-
-    if proxy_link:
-        rows.append([InlineKeyboardButton(text="📡 Подключить MTProxy к Telegram", url=proxy_link)])
 
     if vless:
         sub_url = _subscription_url(tg_uid)
         deep = _hiddify_deeplink(sub_url)
         rows.append([InlineKeyboardButton(text="🛡 Открыть в Happ одним нажатием", url=deep)])
-        rows.append([InlineKeyboardButton(text="📋 Скопировать VPN-код вручную", callback_data="menu:copy_vpn")])
+        rows.append([InlineKeyboardButton(text="📋 Скопировать VPN-код", callback_data="menu:copy_vpn")])
+    else:
+        rows.append([InlineKeyboardButton(text="🔄 Обновить", callback_data="menu:connect")])
 
-    rows.append([InlineKeyboardButton(text="🔄 Обновить данные", callback_data="menu:connect")])
     rows.append([InlineKeyboardButton(text="🏠 Главное меню", callback_data="menu:main")])
 
-    # Строим текст
-    lines: list[str] = []
-    if proxy_link:
-        lines.append(
-            "📡 <b>Telegram (MTProxy)</b> — кнопка ниже подключит прокси автоматически.\n"
-        )
-    if vless:
-        if proxy_link:
-            lines.append("\n")
-        lines.append(
-            "🛡 <b>VPN (Happ)</b>\n"
-            "Нажмите <b>«Открыть в Happ»</b> — приложение откроется и добавит сервер само.\n\n"
-            "❓ Happ нет? "
-        )
-        lines.append(
-            '<a href="https://apps.apple.com/app/happ-proxy-utility/id6504287215">iOS</a> · '
-            '<a href="https://play.google.com/store/apps/details?id=com.happproxy">Android</a> · '
-            '<a href="https://hiddify.com">Windows/Mac (Hiddify)</a>\n\n'
-        )
-        lines.append(
-            "⚡ Что входит в VPN:\n"
-            "• РФ-сайты (Яндекс, ВКонтакте, Сбер) — напрямую, без VPN\n"
-            "• Instagram, TikTok, YouTube — через VPN\n"
-            "• Реклама на YouTube — заблокирована"
-        )
-    if not proxy_link:
-        lines.append("⚠️ MTProxy ещё не подгрузился — «Обновить данные» через минуту.")
     if not vless:
-        lines.append("\n⚠️ VPN ещё готовится — «Обновить данные» через 10–20 секунд.")
+        await message.answer(
+            "⏳ VPN ещё создаётся — нажмите «Обновить» через 10–20 секунд.\n\n"
+            "Если доступа нет совсем — оформите подписку: «💳 Купить / продлить подписку».",
+            parse_mode="HTML",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=rows),
+        )
+        return
 
     await message.answer(
-        "".join(lines),
+        "🛡 <b>Умный VPN Frosty</b>\n\n"
+        "Нажмите <b>«Открыть в Happ»</b> — приложение откроется и добавит сервер само.\n\n"
+        "❓ Happ нет?\n"
+        '<a href="https://apps.apple.com/app/happ-proxy-utility/id6504287215">iOS</a> · '
+        '<a href="https://play.google.com/store/apps/details?id=com.happproxy">Android</a> · '
+        '<a href="https://hiddify.com">Windows/Mac (Hiddify)</a>\n\n'
+        "⚡ <b>Что умеет Frosty:</b>\n"
+        "• РФ-сайты (Яндекс, Сбер, Госуслуги) — напрямую, без VPN\n"
+        "• Instagram, TikTok, YouTube — через VPN автоматически\n"
+        "• Реклама на YouTube — заблокирована\n"
+        "• До 10 устройств — один аккаунт\n"
+        "• Без лимитов по скорости и трафику",
         parse_mode="HTML",
         disable_web_page_preview=True,
         reply_markup=InlineKeyboardMarkup(inline_keyboard=rows),
@@ -590,8 +567,8 @@ def _vpn_direct_kb(vless: str) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [InlineKeyboardButton(text="📋 СКОПИРОВАТЬ VPN КОД", callback_data="menu:copy_vpn")],
+            [InlineKeyboardButton(text="🛡 Подключить VPN", callback_data="menu:connect")],
             [InlineKeyboardButton(text="💳 Купить / продлить подписку", callback_data="menu:buy_in_bot")],
-            [InlineKeyboardButton(text="📡 Подключить прокси / VPN", callback_data="menu:connect")],
             [InlineKeyboardButton(text="🏠 Главное меню", callback_data="menu:main")],
         ]
     )
@@ -622,23 +599,32 @@ async def _send_trial_direct_access(
 
     intro = "🎁 <b>Пробный период уже активен</b>" if already_active else "🎁 <b>Пробный день активирован!</b>"
     if vless_link:
+        sub_url = _subscription_url(tg_id)
+        deep = _hiddify_deeplink(sub_url)
+        rows: list[list[InlineKeyboardButton]] = [
+            [InlineKeyboardButton(text="🛡 Открыть в Happ одним нажатием", url=deep)],
+            [InlineKeyboardButton(text="📋 СКОПИРОВАТЬ VPN-КОД", callback_data="menu:trial_copy_vless")],
+            [InlineKeyboardButton(text="💳 Купить полную подписку", callback_data="menu:buy_in_bot")],
+            [InlineKeyboardButton(text="🏠 Главное меню", callback_data="menu:main")],
+        ]
         await message.answer(
             f"{intro}\n\n"
             f"Доступ до: <b>{exp_human}</b>\n\n"
-            "🛡 <b>Подключение VPN без mini app:</b>\n"
-            "1) Установите Happ\n"
-            "2) Нажмите кнопку <b>«СКОПИРОВАТЬ КОД»</b> ниже\n"
-            "3) В Happ: «+» → «Вставить из буфера»\n\n"
-            f"<code>{html.escape(vless_link)}</code>",
+            "Нажмите <b>«Открыть в Happ»</b> — приложение откроется и добавит умный VPN само.\n\n"
+            "❓ Happ нет?\n"
+            '<a href="https://apps.apple.com/app/happ-proxy-utility/id6504287215">iOS</a> · '
+            '<a href="https://play.google.com/store/apps/details?id=com.happproxy">Android</a> · '
+            '<a href="https://hiddify.com">Windows/Mac (Hiddify)</a>',
             parse_mode="HTML",
-            reply_markup=trial_direct_kb(tg_id, show_copy_button=True),
+            disable_web_page_preview=True,
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=rows),
         )
         return
 
     await message.answer(
         f"{intro}\n\n"
         f"Доступ до: <b>{exp_human}</b>\n\n"
-        "⚠️ Код для Happ ещё создаётся. Нажмите /status через 10–20 секунд.\n"
+        "⏳ VPN ещё создаётся — нажмите «🛡 Подключить VPN» через 10–20 секунд.\n"
         "Если не появится — напишите в поддержку, выдадим вручную.",
         parse_mode="HTML",
         reply_markup=trial_direct_kb(tg_id, show_copy_button=False),
@@ -699,7 +685,7 @@ async def send_grant_trial_result(
         if err == "already_subscribed":
             await message.answer(
                 "✅ У вас уже есть активная подписка.\n\n"
-                "Данные для MTProxy и VPN — кнопка «Подключить прокси / VPN» или мини-апп:",
+                "Нажми «🛡 Подключить VPN» — один клик запустит Happ с готовым сервером.",
                 reply_markup=main_menu_kb(tg_id),
             )
             return
@@ -797,8 +783,8 @@ async def cmd_start(message: Message, session: aiohttp.ClientSession, state: FSM
 
             if data.get("ok"):
                 await message.answer(
-                    "🧊 <b>Frosty — подписка 2 в 1 активирована!</b>\n\n"
-                    "✅ Прокси для Telegram и VPN — кнопка «Подключить прокси / VPN» или мини-апп.",
+                    "🧊 <b>Frosty — умный VPN активирован!</b>\n\n"
+                    "✅ Нажми «🛡 Подключить VPN» — и ты готов. Один клик открывает Happ с настроенным сервером.",
                     parse_mode="HTML",
                     reply_markup=main_menu_kb(tg_id),
                 )
@@ -815,22 +801,22 @@ async def cmd_start(message: Message, session: aiohttp.ClientSession, state: FSM
         if data.get("found"):
             expires_at = format_dt(data.get("expires_at"))
             await message.answer(
-                f"✅ Подписка 2 в 1 активна до {expires_at}.\n\n"
-                "📡 Прокси и 🛡 VPN — кнопка «Подключить прокси / VPN» или мини-апп.",
+                f"✅ Умный VPN Frosty активен до {expires_at}.\n\n"
+                "Нажми «🛡 Подключить VPN» — всё настроится автоматически.",
                 reply_markup=main_menu_kb(tg_id),
             )
             return
 
     await message.answer(
-        f"🧊 <b>Frosty — 2 в 1 за {PRICE_RUB} ₽/мес</b>\n"
+        f"🧊 <b>Frosty — Умный VPN за {PRICE_RUB} ₽/мес</b>\n"
         "\n"
-        "📡 <b>MTProxy</b> — Telegram без ограничений, отдельные приложения не нужны\n"
-        "🛡 <b>VPN</b> — Instagram, TikTok, YouTube и любые сайты\n"
-        "\n"
-        "<b>Персональный доступ</b> — только ты на своём канале, без чужих пользователей.\n"
+        "🛡 <b>Белые списки</b> — РФ-сайты (Сбер, Госуслуги, Яндекс) работают напрямую, "
+        "заблокированные (Instagram, TikTok, YouTube) — автоматически через VPN\n"
+        "📱 <b>До 10 устройств</b> — телефон, планшет, ноутбук — все на одной подписке\n"
+        "⚡ <b>Без лимитов</b> — никаких ограничений по скорости и трафику\n"
         "\n"
         f"<b>10 ₽/день · {PRICE_RUB} ₽/мес · Отмена в любой момент</b>\n\n"
-        f"🎁 Один <b>бесплатный день</b> — в меню ниже. Поддержка: /support",
+        "🎁 Один <b>бесплатный день</b> — в меню ниже. Поддержка: /support",
         parse_mode="HTML",
         reply_markup=main_menu_kb(tg_id),
     )
@@ -877,13 +863,12 @@ async def cmd_status(message: Message, session: aiohttp.ClientSession, tg_id: in
 
     if not data.get("active"):
         await message.answer(
-            "🧊 <b>Подписка 2 в 1 не активна</b>\n"
+            "🧊 <b>Умный VPN Frosty — подписка не активна</b>\n"
             "\n"
-            "Одна подписка: 📡 Telegram через MTProxy и 🛡 VPN для Instagram, TikTok, YouTube — "
-            "персональный канал, без лимита трафика.\n"
+            "🛡 Белые списки · 📱 до 10 устройств · ⚡ без лимитов по скорости и трафику\n"
             "\n"
-            f"<b>От {PRICE_RUB} ₽/мес</b> · 10 ₽/день · отмена автопродления в меню бота\n\n"
-            "Оплата в боте (Lava / ЮKassa) или мини-апп — см. кнопки ниже.",
+            f"<b>От {PRICE_RUB} ₽/мес</b> · 10 ₽/день · отмена в любой момент\n\n"
+            "Оплата в боте (Lava / ЮKassa) или мини-апп — кнопки ниже.",
             parse_mode="HTML",
             reply_markup=main_menu_kb(tg_id),
         )
@@ -893,44 +878,32 @@ async def cmd_status(message: Message, session: aiohttp.ClientSession, tg_id: in
     is_trial = bool(data.get("is_trial"))
     autopay_on = bool(data.get("autopay_enabled"))
     lava_autopay = bool(data.get("lava_autopay_enabled"))
-    proxy_link = data.get("proxy_link")
     if is_trial:
         renew_line = f"🎁 <b>Пробный день</b> — затем {PRICE_RUB} ₽/мес\n"
         autopay_line = ""
     elif lava_autopay:
         renew_line = f"💳 Тариф: {PRICE_RUB} ₽/мес · 10 ₽/день\n"
         autopay_line = (
-            "🔄 <b>Lava.top</b>: автопродление <b>включено</b>. Отключить без потери текущего срока — "
-            "кнопка «Отменить автопродление подписки» в меню ниже (спросим подтверждение).\n"
+            "🔄 <b>Lava.top</b>: автопродление <b>включено</b>. Отключить — "
+            "кнопка «Отменить автопродление» в меню.\n"
         )
     elif autopay_on:
         renew_line = f"💳 Тариф: {PRICE_RUB} ₽/мес · 10 ₽/день\n"
-        autopay_line = (
-            "🔄 <b>ЮKassa/ЮMoney</b>: автопродление включено. Отключить можно той же кнопкой ниже.\n"
-        )
+        autopay_line = "🔄 <b>ЮKassa</b>: автопродление включено. Отключить — кнопка ниже.\n"
     else:
         renew_line = f"💳 Тариф: {PRICE_RUB} ₽/мес · 10 ₽/день\n"
-        autopay_line = (
-            "🔄 Рекуррентный метод в базе не привязан — автопродление, скорее всего, уже отключено. "
-            "Если сомневаетесь, всё равно можно нажать кнопку отмены ниже.\n"
-        )
+        autopay_line = "🔄 Автопродление не привязано — продление только вручную.\n"
     status_text = (
-        f"✅ <b>Подписка 2 в 1 активна</b>\n"
+        f"✅ <b>Умный VPN активен</b>\n"
         f"\n"
-        f"📡 MTProxy и 🛡 VPN — кнопка <b>«Подключить прокси / VPN»</b> в меню или мини-апп\n"
+        f"🛡 Нажми «Подключить VPN» — один клик запустит Happ\n"
         f"\n"
         f"📅 Действует до: {expires_at}\n"
         f"{renew_line}"
         f"{autopay_line}"
-        f"🖥 Устройств: до 10 на аккаунте\n"
-        f"❓ Вопросы по оплате — /support"
+        f"📱 Устройств: до 10 на аккаунте\n"
+        f"❓ Вопросы — /support"
     )
-    if not proxy_link:
-        status_text += (
-            "\n\n"
-            "⚠️ Доступ в кабинете ещё полностью не подгрузился. "
-            "Если нет прокси или VPN — напиши в поддержку."
-        )
     await message.answer(
         status_text,
         parse_mode="HTML",
@@ -972,12 +945,13 @@ async def main() -> None:
         try:
             await bot.set_my_description(
                 description=(
-                    f"Frosty — 2 в 1 за {PRICE_RUB} ₽/мес: MTProxy для Telegram и VPN (VLESS) для сайтов. "
-                    "Персональный канал, до 10 устройств."
+                    f"Frosty — умный VPN за {PRICE_RUB} ₽/мес. "
+                    "Белые списки: РФ-сайты напрямую, Instagram/TikTok/YouTube — через VPN. "
+                    "До 10 устройств, без лимитов по скорости и трафику."
                 )
             )
             await bot.set_my_short_description(
-                short_description=f"2 в 1: прокси для Telegram + VPN. От {PRICE_RUB} ₽/мес."
+                short_description=f"Умный VPN с белыми списками. {PRICE_RUB} ₽/мес."
             )
         except Exception:
             pass
@@ -1179,7 +1153,7 @@ async def main() -> None:
             vless = await _get_vless_link(session, tg_uid)
             if not vless:
                 await msg.answer(
-                    "Код пока не получен. Нажмите «Подключить прокси / VPN» снова через 10–20 секунд.",
+                    "Код пока не получен. Нажмите «🛡 Подключить VPN» снова через 10–20 секунд.",
                     reply_markup=main_menu_kb(tg_uid),
                 )
                 return
