@@ -22,7 +22,7 @@ from uuid import UUID, uuid4
 
 from dotenv import load_dotenv
 from fastapi import Body, Depends, FastAPI, HTTPException, Query, Request
-from fastapi.responses import JSONResponse, PlainTextResponse
+from fastapi.responses import JSONResponse, PlainTextResponse, Response
 from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import (
     BigInteger,
@@ -4091,6 +4091,136 @@ def _build_smart_xray_config(vless_link: str) -> dict:
     }
 
 
+def _build_clash_config(vless_link: str) -> str:
+    """
+    Clash/Mihomo YAML — единственный subscription-формат, который Happ принимает
+    И который поддерживает routing rules из коробки.
+
+    Дизайн-решения для скорости:
+    - Нет секции dns: → Happ использует свои DNS-настройки, мы не трогаем
+    - DOMAIN-SUFFIX,ru,DIRECT покрывает ВСЕ .ru одним правилом (O(log n) lookup)
+    - Нет GEOIP/GEOSITE → нет скачивания mmdb/dat файлов
+    - Только ~30 правил → matching занимает микросекунды, на скорость не влияет
+    - Telegram/WhatsApp/прочие мессенджеры не перечислены в DIRECT → идут через VPN
+      только если заблокированы; системный DNS не меняется
+    """
+    from urllib.parse import parse_qs, urlparse
+
+    parsed = urlparse(vless_link)
+    uuid = parsed.username or ""
+    server = parsed.hostname or XRAY_SERVER_IP
+    port = parsed.port or 443
+    qs = parse_qs(parsed.query)
+
+    def q(key: str, default: str = "") -> str:
+        return (qs.get(key) or [default])[0]
+
+    security = q("security", "tls")
+    sni = q("sni", server) or XRAY_SNI
+    fp = q("fp", "chrome")
+    pbk = q("pbk", "") or XRAY_PUBLIC_KEY
+    sid = q("sid", "") or XRAY_SHORT_ID
+    network = q("type", "tcp")
+
+    # ── Proxy definition ──────────────────────────────────────────────────────
+    proxy_fields: list[str] = [
+        '  - name: "Frosty VPN"',
+        '    type: vless',
+        f'    server: "{server}"',
+        f'    port: {port}',
+        f'    uuid: "{uuid}"',
+        f'    tls: {"true" if security in ("tls", "reality") else "false"}',
+        f'    servername: "{sni}"',
+        '    skip-cert-verify: false',
+        '    udp: true',
+    ]
+    if security == "reality" and pbk:
+        proxy_fields += [
+            '    reality-opts:',
+            f'      public-key: "{pbk}"',
+            f'      short-id: "{sid}"',
+        ]
+    if fp:
+        proxy_fields.append(f'    client-fingerprint: {fp}')
+    proxy_fields.append(f'    network: {network or "tcp"}')
+    if network == "ws":
+        proxy_fields += [
+            '    ws-opts:',
+            f'      path: "{q("path", "/")}"',
+            '      headers:',
+            f'        Host: "{q("host", sni)}"',
+        ]
+    elif network == "grpc":
+        proxy_fields += [
+            '    grpc-opts:',
+            f'      grpc-service-name: "{q("serviceName", "")}"',
+        ]
+
+    proxies_block = "\n".join(proxy_fields)
+
+    # ── Routing rules ─────────────────────────────────────────────────────────
+    # Порядок важен: первое совпавшее правило выигрывает.
+    rules: list[str] = [
+        # Рекламные домены → REJECT (только ключевые SDK YouTube-рекламы)
+        "  - DOMAIN-SUFFIX,doubleclick.net,REJECT",
+        "  - DOMAIN-SUFFIX,googleadservices.com,REJECT",
+        "  - DOMAIN-SUFFIX,googlesyndication.com,REJECT",
+        "  - DOMAIN-SUFFIX,imasdk.googleapis.com,REJECT",
+        "  - DOMAIN-SUFFIX,ads.youtube.com,REJECT",
+        # Российские TLD → DIRECT (одно правило покрывает ALL .ru домены)
+        "  - DOMAIN-SUFFIX,ru,DIRECT",
+        "  - DOMAIN-SUFFIX,su,DIRECT",
+        # Non-.ru домены российских сервисов → DIRECT
+        "  - DOMAIN-SUFFIX,yandex.com,DIRECT",
+        "  - DOMAIN-SUFFIX,yandex.net,DIRECT",
+        "  - DOMAIN-SUFFIX,yastatic.net,DIRECT",
+        "  - DOMAIN-SUFFIX,yandexcloud.net,DIRECT",
+        "  - DOMAIN-SUFFIX,dzen.ru,DIRECT",
+        "  - DOMAIN-SUFFIX,vk.com,DIRECT",
+        "  - DOMAIN-SUFFIX,vk.me,DIRECT",
+        "  - DOMAIN-SUFFIX,userapi.com,DIRECT",
+        "  - DOMAIN-SUFFIX,vk-cdn.net,DIRECT",
+        "  - DOMAIN-SUFFIX,vkuseraudio.com,DIRECT",
+        "  - DOMAIN-SUFFIX,wbstatic.net,DIRECT",
+        "  - DOMAIN-SUFFIX,wbbasket.ru,DIRECT",
+        "  - DOMAIN-SUFFIX,wbimg.ru,DIRECT",
+        "  - DOMAIN-SUFFIX,2gis.com,DIRECT",
+        "  - DOMAIN-SUFFIX,2gis.io,DIRECT",
+        "  - DOMAIN-SUFFIX,tbank.ru,DIRECT",
+        "  - DOMAIN-SUFFIX,premier.one,DIRECT",
+        "  - DOMAIN-SUFFIX,qiwi.com,DIRECT",
+        "  - DOMAIN-SUFFIX,mycdn.me,DIRECT",
+        # Приватные адреса (LAN) → DIRECT
+        "  - IP-CIDR,10.0.0.0/8,DIRECT",
+        "  - IP-CIDR,172.16.0.0/12,DIRECT",
+        "  - IP-CIDR,192.168.0.0/16,DIRECT",
+        "  - IP-CIDR,127.0.0.0/8,DIRECT",
+        # Всё остальное → через VLESS VPN
+        '  - MATCH,🌍 Proxy',
+    ]
+    rules_block = "\n".join(rules)
+
+    return f"""\
+mixed-port: 7890
+allow-lan: false
+mode: rule
+log-level: error
+ipv6: false
+
+proxies:
+{proxies_block}
+
+proxy-groups:
+  - name: "🌍 Proxy"
+    type: select
+    proxies:
+      - "Frosty VPN"
+
+rules:
+{rules_block}
+"""
+
+
 def _build_singbox_config(vless_link: str) -> dict:
     """
     Оптимизированный sing-box конфиг — нет загрузок при старте.
@@ -4426,6 +4556,55 @@ def vpn_singbox(
         headers={
             "profile-title": "Frosty VPN",
             "support-url": "https://t.me/frosty_support",
+        },
+    )
+
+
+@app.get(
+    "/vpn/clash/{telegram_id}",
+    summary="Clash/Mihomo YAML с белыми списками РФ — subscription-формат для Happ",
+)
+def vpn_clash(
+    telegram_id: int,
+    req: Request,
+    db: Session = Depends(get_db),
+    token: str = "",
+) -> Response:
+    """
+    Возвращает Clash YAML конфиг с routing rules.
+
+    Happ принимает этот формат как subscription URL и применяет routing:
+    - .ru / .su → DIRECT (без VPN, без задержек)
+    - Google Ads / YouTube SDK → REJECT
+    - Всё остальное → VLESS proxy
+
+    Нет кастомного DNS — Happ использует свои настройки, скорость не падает.
+    Нет внешних rule_set — нет скачиваний при старте.
+    """
+    if INTERNAL_API_TOKEN and not _trusted_vpn_request(req, telegram_id, token):
+        raise HTTPException(status_code=403, detail="Forbidden")
+
+    if not _active_sub_for_vpn(telegram_id, db):
+        raise HTTPException(status_code=403, detail="No active subscription")
+
+    if not XRAY_API_URL:
+        raise HTTPException(status_code=503, detail="VPN not configured")
+
+    result = _ensure_xray_client(telegram_id, db)
+    if not result:
+        raise HTTPException(status_code=503, detail="Creating VPN client, try in 30s")
+
+    _, vless_link = result
+    yaml_config = _build_clash_config(vless_link)
+    expires_ts = int(_active_sub_expires(telegram_id, db) or 0)
+    return Response(
+        content=yaml_config,
+        media_type="text/yaml; charset=utf-8",
+        headers={
+            "profile-title": "Frosty VPN",
+            "support-url": "https://t.me/frosty_support",
+            "subscription-userinfo": f"upload=0; download=0; total=0; expire={expires_ts}",
+            "content-disposition": f'attachment; filename="frosty-{telegram_id}.yaml"',
         },
     )
 
