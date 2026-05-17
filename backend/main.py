@@ -4551,6 +4551,8 @@ class BroadcastRequest(BaseModel):
     include_opted_out: bool = False
     button_text: str | None = Field(None, max_length=64)
     button_url: str | None = Field(None, max_length=2048)
+    # Если True — кнопка открывает мини-апп (web_app) вместо внешней ссылки
+    button_web_app: bool = False
 
 
 class BroadcastQueuedResponse(BaseModel):
@@ -4635,8 +4637,13 @@ def admin_broadcast(payload: BroadcastRequest, req: Request, db: Session = Depen
 
     msg = payload.message.strip()
     kb: dict | None = None
-    if payload.button_text and payload.button_url:
-        kb = {"inline_keyboard": [[{"text": payload.button_text, "url": payload.button_url}]]}
+    if payload.button_text:
+        if payload.button_web_app and FRONTEND_URL:
+            # Кнопка открывает мини-апп оплаты внутри Telegram
+            miniapp_url = f"{FRONTEND_URL}{MINIAPP_PATH or '/mini'}"
+            kb = {"inline_keyboard": [[{"text": payload.button_text, "web_app": {"url": miniapp_url}}]]}
+        elif payload.button_url:
+            kb = {"inline_keyboard": [[{"text": payload.button_text, "url": payload.button_url}]]}
 
     t = threading.Thread(target=_broadcast_worker, args=(ids, msg, kb), daemon=True)
     t.start()
