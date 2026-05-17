@@ -3982,9 +3982,27 @@ def _vless_stream_settings() -> dict:
     }
 
 
-class SmartConfigResponse(BaseModel):
-    available: bool
-    reason: str | None = None
+def _vpn_sub_token(tg_id: int) -> str:
+    """
+    HMAC-токен для subscription/smart-config URLs.
+    Stateless: не требует БД, не истекает, вычисляется детерминированно.
+    Достаточен для защиты от перебора tg_id — без него Happ получает 403.
+    """
+    key = (INTERNAL_API_TOKEN or "frosty-sub-fallback").encode()
+    return hmac.new(key, f"sub:{tg_id}".encode(), hashlib.sha256).hexdigest()[:32]
+
+
+def _sub_token_valid(tg_id: int, token: str) -> bool:
+    if not token:
+        return False
+    return hmac.compare_digest(token, _vpn_sub_token(tg_id))
+
+
+def _trusted_vpn_request(req: Request, tg_id: int, token_param: str) -> bool:
+    """Три способа пройти аутентификацию для VPN-endpoint-ов."""
+    if _sub_token_valid(tg_id, token_param):
+        return True
+    return _vpn_config_caller_trusted(req, tg_id)
 
 
 @app.get(
@@ -3992,10 +4010,13 @@ class SmartConfigResponse(BaseModel):
     summary="Xray JSON с умной маршрутизацией РФ + блокировкой рекламы",
 )
 def vpn_smart_config(
-    telegram_id: int, req: Request, db: Session = Depends(get_db)
+    telegram_id: int,
+    req: Request,
+    db: Session = Depends(get_db),
+    token: str = "",
 ) -> JSONResponse:
-    if INTERNAL_API_TOKEN and not _vpn_config_caller_trusted(req, telegram_id):
-        return JSONResponse({"available": False, "reason": "internal_token_required"}, status_code=403)
+    if INTERNAL_API_TOKEN and not _trusted_vpn_request(req, telegram_id, token):
+        return JSONResponse({"available": False, "reason": "forbidden"}, status_code=403)
 
     if not _active_sub_for_vpn(telegram_id, db):
         return JSONResponse({"available": False, "reason": "no_subscription"}, status_code=403)
@@ -4012,7 +4033,7 @@ def vpn_smart_config(
     return JSONResponse(
         config,
         media_type="application/json",
-        headers={"Content-Disposition": f'attachment; filename="frosty-smart-{telegram_id}.json"'},
+        headers={"Content-Disposition": f'attachment; filename="frosty-{telegram_id}.json"'},
     )
 
 
@@ -4023,14 +4044,20 @@ def vpn_smart_config(
     summary="Subscription URL: base64-список конфигов для Happ/Hiddify",
 )
 def vpn_subscription(
-    telegram_id: int, req: Request, db: Session = Depends(get_db)
+    telegram_id: int,
+    req: Request,
+    db: Session = Depends(get_db),
+    token: str = "",
 ) -> PlainTextResponse:
     """
     Возвращает base64-encoded список VLESS-ссылок.
-    Happ и Hiddify поддерживают этот формат: Импорт → Из URL.
-    Клиент периодически перечитывает URL и обновляет конфиги автоматически.
+    Happ и Hiddify: «+» → «Subscription» → вставить URL.
+    Happ сам обновляет конфиг при смене ключа.
+
+    Авторизация: ?token=HMAC (бот передаёт автоматически)
+    или X-Internal-Token заголовок (мини-апп).
     """
-    if INTERNAL_API_TOKEN and not _vpn_config_caller_trusted(req, telegram_id):
+    if INTERNAL_API_TOKEN and not _trusted_vpn_request(req, telegram_id, token):
         raise HTTPException(status_code=403, detail="Forbidden")
 
     if not _active_sub_for_vpn(telegram_id, db):
@@ -4044,19 +4071,39 @@ def vpn_subscription(
         raise HTTPException(status_code=503, detail="Creating VPN client, try in 30s")
 
     _, vless_link = result
-    # Subscription format: base64(link1\nlink2\n...)
-    # Добавляем имя профиля через заголовок profile-title (некоторые клиенты читают)
-    payload = vless_link.encode("utf-8")
-    encoded = base64.b64encode(payload).decode("ascii")
+    encoded = base64.b64encode(vless_link.encode("utf-8")).decode("ascii")
+    expires_ts = int(_active_sub_expires(telegram_id, db) or 0)
     return PlainTextResponse(
         encoded,
         headers={
             "Content-Type": "text/plain; charset=utf-8",
             "profile-title": "Frosty VPN",
             "support-url": "https://t.me/frosty_support",
-            "subscription-userinfo": "upload=0; download=0; total=0; expire=0",
+            "subscription-userinfo": f"upload=0; download=0; total=0; expire={expires_ts}",
         },
     )
+
+
+def _active_sub_expires(tg_id: int, db: Session) -> int | None:
+    """UNIX-timestamp истечения активной подписки для subscription-userinfo."""
+    import calendar
+    now = utcnow()
+    stmt = (
+        select(Subscription.expires_at)
+        .where(
+            Subscription.telegram_id == tg_id,
+            Subscription.payment_status.in_(SUBSCRIPTION_ACCESS_STATUSES),
+            Subscription.expires_at > now,
+            Subscription.access_suspended == False,  # noqa: E712
+            Subscription.access_blocked_reason.is_(None),
+        )
+        .order_by(Subscription.expires_at.desc())
+        .limit(1)
+    )
+    row = db.execute(stmt).scalar_one_or_none()
+    if row is None:
+        return None
+    return calendar.timegm(row.timetuple())
 
 
 @app.get("/vpn/online", response_model=VpnOnlineResponse)
