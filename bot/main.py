@@ -504,6 +504,12 @@ def _subscription_url(tg_id: int) -> str:
     return f"{BACKEND_BASE_URL}/vpn/subscription/{tg_id}?token={token}"
 
 
+def _singbox_url(tg_id: int) -> str:
+    """Sing-box JSON с routing rules (белые списки РФ). Для hiddify:// deep link."""
+    token = _vpn_sub_token(tg_id)
+    return f"{BACKEND_BASE_URL}/vpn/singbox/{tg_id}?token={token}"
+
+
 def _smart_config_url(tg_id: int) -> str:
     token = _vpn_sub_token(tg_id)
     return f"{BACKEND_BASE_URL}/vpn/smart-config/{tg_id}?token={token}"
@@ -542,10 +548,10 @@ async def _send_proxy_vpn_bundle(message: Message, session: aiohttp.ClientSessio
         )
         return
 
-    sub_url = _subscription_url(tg_uid)
-    deep = _hiddify_deeplink(sub_url)
+    # Sing-box конфиг включает белые списки РФ + блокировку рекламы.
+    # hiddify:// в тексте — Telegram рендерит кликабельной ссылкой на мобильных клиентах.
+    deep = _hiddify_deeplink(_singbox_url(tg_uid))
 
-    # hiddify:// в тексте — Telegram рендерит кликабельной ссылкой на мобильных клиентах
     await message.answer(
         "🛡 <b>Умный VPN Frosty</b>\n\n"
         "<b>Шаг 1.</b> Установите приложение Happ:\n"
@@ -606,8 +612,7 @@ async def _send_trial_direct_access(
 
     intro = "🎁 <b>Пробный период уже активен</b>" if already_active else "🎁 <b>Пробный день активирован!</b>"
     if vless_link:
-        sub_url = _subscription_url(tg_id)
-        deep = _hiddify_deeplink(sub_url)
+        deep = _hiddify_deeplink(_singbox_url(tg_id))
         # deep link в тексте — Telegram рендерит его кликабельным; в url-кнопке hiddify:// не поддерживается
         await message.answer(
             f"{intro}\n\n"

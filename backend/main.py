@@ -3928,6 +3928,21 @@ def _build_smart_xray_config(vless_link: str) -> dict:
         "domain:okko.tv",
         "domain:kion.ru",
         "domain:tvzavr.ru",
+        # ── Яндекс (международные домены, CDN, новые TLDs) ────────────────
+        "domain:yandex.com", "domain:yandex.net", "domain:yandex.eu", "domain:yandex.kz",
+        "domain:yastatic.net",          # Яндекс static CDN
+        "domain:yandexcloud.net",       # Яндекс Облако
+        "domain:dzen.ru",               # Яндекс Дзен
+        "domain:zen.yandex.ru",
+        "domain:taxi.yandex.com",       # Яндекс Такси (международный)
+        "domain:eda.yandex.com",        # Яндекс Еда (международный)
+        "domain:beru.ru",               # Яндекс Маркет (старый домен)
+        "domain:music.yandex.com",      # Яндекс Музыка (международный)
+        "domain:maps.yandex.com",       # Яндекс Карты (международный)
+        "domain:disk.yandex.com",       # Яндекс Диск (международный)
+        "domain:alice.yandex.ru",       # Алиса
+        "domain:yandexpay.ru",          # Яндекс Пэй
+        "domain:yoomoney.ru",           # ЮMoney
         # ── Карты и навигация ──────────────────────────────────────────────
         "domain:2gis.ru", "domain:2gis.com", "domain:2gis.io",
         "domain:api.2gis.ru", "domain:tile.maps.2gis.com",
@@ -4076,6 +4091,204 @@ def _build_smart_xray_config(vless_link: str) -> dict:
     }
 
 
+def _build_singbox_config(vless_link: str) -> dict:
+    """
+    Sing-box JSON-конфиг для импорта в Happ / Hiddify.
+
+    Маршрутизация (split-tunneling):
+    - Российские сайты (geosite-ru + явный список) → direct (без VPN)
+    - Реклама YouTube / Google Ads / трекеры → block
+    - Всё остальное (Instagram, TikTok, YouTube...) → VLESS proxy
+
+    DNS:
+    - РФ-домены → Яндекс DNS 77.88.8.8 (direct)
+    - Прочее → AdGuard DNS 94.140.14.14 (через VPN, блокирует рекламу)
+    """
+    from urllib.parse import parse_qs, urlparse
+
+    parsed = urlparse(vless_link)
+    uuid = parsed.username or ""
+    server = parsed.hostname or XRAY_SERVER_IP
+    port = parsed.port or 443
+    qs = parse_qs(parsed.query)
+
+    def q(key: str, default: str = "") -> str:
+        return (qs.get(key) or [default])[0]
+
+    security = q("security", "tls")
+    sni = q("sni", server) or XRAY_SNI
+    fp = q("fp", "chrome")
+    pbk = q("pbk", "") or XRAY_PUBLIC_KEY
+    sid = q("sid", "") or XRAY_SHORT_ID
+    network = q("type", "tcp")
+
+    tls_block: dict = {
+        "enabled": security in ("tls", "reality"),
+        "server_name": sni,
+        "utls": {"enabled": bool(fp), "fingerprint": fp or "chrome"},
+    }
+    if security == "reality" and pbk:
+        tls_block["reality"] = {"enabled": True, "public_key": pbk, "short_id": sid}
+
+    vless_out: dict = {
+        "type": "vless",
+        "tag": "proxy",
+        "server": server,
+        "server_port": port,
+        "uuid": uuid,
+        "tls": tls_block,
+    }
+    if network == "ws":
+        vless_out["transport"] = {
+            "type": "ws",
+            "path": q("path", "/"),
+            "headers": {"Host": q("host", sni)},
+        }
+    elif network == "grpc":
+        vless_out["transport"] = {
+            "type": "grpc",
+            "service_name": q("serviceName", ""),
+        }
+
+    # Explicit non-.ru domains or CDN domains that geosite-ru might miss
+    _RU_SINGBOX_EXPLICIT: list[str] = [
+        # ── Яндекс (международные домены и CDN) ──────────────────────────
+        "yandex.com", "yandex.net", "yandex.eu", "yandex.kz",
+        "yastatic.net",            # Yandex static CDN
+        "yandexcloud.net",         # Yandex Cloud
+        "dzen.ru",                 # Яндекс Дзен (отдельный домен)
+        "zen.yandex.ru",
+        # Yandex Taxi / Еда / Лавка используют yandex.ru (покрыто geosite-ru)
+        # но для надёжности добавим явно:
+        "taxi.yandex.ru", "taxi.yandex.com",
+        "eda.yandex.ru", "eda.yandex.com",
+        "lavka.yandex.ru",
+        "delivery.yandex.ru",
+        "market.yandex.ru", "beru.ru",   # Яндекс Маркет
+        "music.yandex.ru", "music.yandex.com",
+        "kinopoisk.ru", "hd.kinopoisk.ru",
+        "maps.yandex.ru", "maps.yandex.com",
+        "navigator.yandex.ru",
+        "drive.yandex.ru",              # Каршеринг
+        "yandex.ru",                    # Основной домен (geosite-ru должен покрыть)
+        "alice.yandex.ru",
+        "plus.yandex.ru",
+        "disk.yandex.ru", "disk.yandex.com",
+        "cloud.yandex.ru",
+        "practicum.yandex.ru",
+        "yandexpay.ru", "pay.yandex.ru",
+        "yoomoney.ru", "money.yandex.ru",
+        # ── VK (non-.ru TLDs и CDN) ──────────────────────────────────────
+        "vk.com", "vk.me", "vkontakte.ru",
+        "userapi.com", "vk-cdn.net",
+        "vkuseraudio.com", "vkvideo.ru",
+        # ── Wildberries CDN ───────────────────────────────────────────────
+        "wbstatic.net", "wbbasket.ru", "wbimg.ru",
+        # ── 2GIS ──────────────────────────────────────────────────────────
+        "2gis.com", "2gis.io",
+        # ── T-Bank ────────────────────────────────────────────────────────
+        "tbank.ru",
+        # ── Медиа/стриминг (non-.ru TLDs) ────────────────────────────────
+        "premier.one",
+        # ── QIWI ──────────────────────────────────────────────────────────
+        "qiwi.com",
+        # ── Mail.ru CDN ───────────────────────────────────────────────────
+        "imgsmail.ru", "fileboom.me", "mycdn.me",
+    ]
+
+    # YouTube preroll + Google Ads домены → block
+    _AD_DOMAINS: list[str] = [
+        "doubleclick.net",
+        "googleadservices.com",
+        "googlesyndication.com",
+        "googletagservices.com",
+        "adservice.google.com",
+        "ads.youtube.com",
+        "imasdk.googleapis.com",
+        "s0.2mdn.net",
+        "pagead2.googlesyndication.com",
+    ]
+
+    return {
+        "log": {"level": "warn", "timestamp": True},
+        "dns": {
+            "servers": [
+                {
+                    "tag": "dns-ru",
+                    "address": "https://77.88.8.8/dns-query",
+                    "detour": "direct",
+                },
+                {
+                    "tag": "dns-proxy",
+                    "address": "https://dns.adguard.com/dns-query",
+                },
+                {
+                    "tag": "dns-block",
+                    "address": "rcode://refused",
+                },
+            ],
+            "rules": [
+                {"rule_set": ["geosite-ru"], "server": "dns-ru"},
+                {"domain_suffix": _RU_SINGBOX_EXPLICIT, "server": "dns-ru"},
+                {"domain_suffix": _AD_DOMAINS, "server": "dns-block"},
+            ],
+            "final": "dns-proxy",
+            "independent_cache": True,
+        },
+        "outbounds": [
+            vless_out,
+            {"type": "direct", "tag": "direct"},
+            {"type": "block", "tag": "block"},
+        ],
+        "route": {
+            "rules": [
+                # Реклама → block
+                {"domain_suffix": _AD_DOMAINS, "outbound": "block"},
+                {"rule_set": ["geosite-ads"], "outbound": "block"},
+                # Явные РФ-домены (CDN / non-.ru TLDs) → direct
+                {"domain_suffix": _RU_SINGBOX_EXPLICIT, "outbound": "direct"},
+                # РФ geosite → direct
+                {"rule_set": ["geosite-ru"], "outbound": "direct"},
+                # РФ geoip → direct
+                {"rule_set": ["geoip-ru"], "outbound": "direct"},
+                # Приватные IP → direct
+                {"ip_is_private": True, "outbound": "direct"},
+            ],
+            "rule_set": [
+                {
+                    "type": "remote",
+                    "tag": "geosite-ru",
+                    "format": "binary",
+                    "url": "https://cdn.jsdelivr.net/gh/SagerNet/sing-geosite@rule-set/geosite-ru.srs",
+                    "download_detour": "direct",
+                    "update_interval": "7d",
+                },
+                {
+                    "type": "remote",
+                    "tag": "geoip-ru",
+                    "format": "binary",
+                    "url": "https://cdn.jsdelivr.net/gh/SagerNet/sing-geoip@rule-set/geoip-ru.srs",
+                    "download_detour": "direct",
+                    "update_interval": "7d",
+                },
+                {
+                    "type": "remote",
+                    "tag": "geosite-ads",
+                    "format": "binary",
+                    "url": "https://cdn.jsdelivr.net/gh/SagerNet/sing-geosite@rule-set/geosite-category-ads-all.srs",
+                    "download_detour": "direct",
+                    "update_interval": "1d",
+                },
+            ],
+            "final": "proxy",
+            "auto_detect_interface": True,
+        },
+        "experimental": {
+            "cache_file": {"enabled": True, "store_rdrc": True},
+        },
+    }
+
+
 def _parse_vless_for_xray(vless_link: str) -> dict:
     """Из строки vless://uuid@host:port?params парсим outbound-объект."""
     from urllib.parse import parse_qs, urlparse
@@ -4214,6 +4427,51 @@ def vpn_subscription(
             "profile-title": "Frosty VPN",
             "support-url": "https://t.me/frosty_support",
             "subscription-userinfo": f"upload=0; download=0; total=0; expire={expires_ts}",
+        },
+    )
+
+
+@app.get(
+    "/vpn/singbox/{telegram_id}",
+    summary="Sing-box конфиг с белыми списками РФ — для Happ / Hiddify",
+)
+def vpn_singbox(
+    telegram_id: int,
+    req: Request,
+    db: Session = Depends(get_db),
+    token: str = "",
+) -> JSONResponse:
+    """
+    Возвращает полный sing-box JSON-конфиг с routing rules:
+    - РФ-сайты (geosite-ru + Яндекс) → direct (без VPN)
+    - Реклама YouTube / Google Ads → block
+    - Instagram, TikTok, YouTube, прочее → VLESS proxy
+
+    Именно этот URL используется в hiddify:// deep link.
+    Happ / Hiddify определяют формат по Content-Type: application/json
+    и применяют routing rules автоматически.
+    """
+    if INTERNAL_API_TOKEN and not _trusted_vpn_request(req, telegram_id, token):
+        raise HTTPException(status_code=403, detail="Forbidden")
+
+    if not _active_sub_for_vpn(telegram_id, db):
+        raise HTTPException(status_code=403, detail="No active subscription")
+
+    if not XRAY_API_URL:
+        raise HTTPException(status_code=503, detail="VPN not configured")
+
+    result = _ensure_xray_client(telegram_id, db)
+    if not result:
+        raise HTTPException(status_code=503, detail="Creating VPN client, try in 30s")
+
+    _, vless_link = result
+    config = _build_singbox_config(vless_link)
+    return JSONResponse(
+        config,
+        media_type="application/json",
+        headers={
+            "profile-title": "Frosty VPN",
+            "support-url": "https://t.me/frosty_support",
         },
     )
 
