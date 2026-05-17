@@ -22,7 +22,7 @@ from uuid import UUID, uuid4
 
 from dotenv import load_dotenv
 from fastapi import Body, Depends, FastAPI, HTTPException, Query, Request
-from fastapi.responses import PlainTextResponse
+from fastapi.responses import JSONResponse, PlainTextResponse
 from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import (
     BigInteger,
@@ -3846,6 +3846,217 @@ def vpn_config(telegram_id: int, req: Request, db: Session = Depends(get_db)) ->
 
 class VpnOnlineResponse(BaseModel):
     online: int
+
+
+# ── Smart Config (Xray JSON с умной маршрутизацией) ──────────────────────────
+
+def _build_smart_xray_config(vless_link: str) -> dict:
+    """
+    Возвращает полный Xray JSON-конфиг для вставки в Happ / Hiddify.
+
+    Логика маршрутизации:
+    - geoip:ru + geoip:private + geosite:ru → напрямую (РФ-сайты без VPN)
+    - Рекламные домены YouTube / Google Ads / DoubleClick → blackhole
+    - Всё остальное → VLESS outbound (Frosty VPN)
+
+    DNS:
+    - Доменные запросы к российским сайтам идут в 77.88.8.8 (Яндекс DNS)
+    - Остальные — через AdGuard DNS (94.140.14.14), блокирует рекламу / трекеры
+    """
+    return {
+        "log": {"loglevel": "warning"},
+        "dns": {
+            "servers": [
+                {
+                    "address": "77.88.8.8",
+                    "domains": ["geosite:ru", "geosite:yandex"],
+                },
+                "94.140.14.14",
+                "8.8.8.8",
+            ]
+        },
+        "inbounds": [
+            {
+                "tag": "socks",
+                "port": 10808,
+                "protocol": "socks",
+                "settings": {"auth": "noauth", "udp": True},
+                "listen": "127.0.0.1",
+            },
+            {
+                "tag": "http",
+                "port": 10809,
+                "protocol": "http",
+                "settings": {},
+                "listen": "127.0.0.1",
+            },
+        ],
+        "outbounds": [
+            {
+                "tag": "proxy",
+                "protocol": "vless",
+                "settings": {
+                    "vnext": [_parse_vless_for_xray(vless_link)]
+                },
+                "streamSettings": _vless_stream_settings(),
+            },
+            {"tag": "direct", "protocol": "freedom", "settings": {}},
+            {"tag": "block", "protocol": "blackhole", "settings": {"response": {"type": "http"}}},
+        ],
+        "routing": {
+            "domainStrategy": "IPIfNonMatch",
+            "rules": [
+                # YouTube ad-domains → block
+                {
+                    "type": "field",
+                    "domain": [
+                        "doubleclick.net",
+                        "googleadservices.com",
+                        "googlesyndication.com",
+                        "googletagservices.com",
+                        "adservice.google.com",
+                        "ads.youtube.com",
+                        "imasdk.googleapis.com",
+                    ],
+                    "outboundTag": "block",
+                },
+                # РФ-сайты и приватные IP → direct
+                {
+                    "type": "field",
+                    "domain": ["geosite:ru", "geosite:yandex", "geosite:category-ru"],
+                    "outboundTag": "direct",
+                },
+                {
+                    "type": "field",
+                    "ip": ["geoip:ru", "geoip:private"],
+                    "outboundTag": "direct",
+                },
+                # Всё остальное → VPN
+                {
+                    "type": "field",
+                    "network": "tcp,udp",
+                    "outboundTag": "proxy",
+                },
+            ],
+        },
+    }
+
+
+def _parse_vless_for_xray(vless_link: str) -> dict:
+    """Из строки vless://uuid@host:port?params парсим outbound-объект."""
+    from urllib.parse import parse_qs, urlparse
+    parsed = urlparse(vless_link)
+    client_id = parsed.username or ""
+    host = parsed.hostname or XRAY_SERVER_IP
+    port = parsed.port or 443
+    qs = parse_qs(parsed.query)
+
+    def q(key: str, default: str = "") -> str:
+        return (qs.get(key) or [default])[0]
+
+    return {
+        "address": host,
+        "port": port,
+        "users": [
+            {
+                "id": client_id,
+                "encryption": "none",
+                "flow": q("flow", ""),
+            }
+        ],
+    }
+
+
+def _vless_stream_settings() -> dict:
+    """streamSettings для Reality / TCP по умолчанию."""
+    return {
+        "network": "tcp",
+        "security": "reality",
+        "realitySettings": {
+            "serverName": XRAY_SNI or "www.microsoft.com",
+            "fingerprint": "chrome",
+            "publicKey": XRAY_PUBLIC_KEY,
+            "shortId": XRAY_SHORT_ID,
+            "spiderX": "/",
+        },
+    }
+
+
+class SmartConfigResponse(BaseModel):
+    available: bool
+    reason: str | None = None
+
+
+@app.get(
+    "/vpn/smart-config/{telegram_id}",
+    summary="Xray JSON с умной маршрутизацией РФ + блокировкой рекламы",
+)
+def vpn_smart_config(
+    telegram_id: int, req: Request, db: Session = Depends(get_db)
+) -> JSONResponse:
+    if INTERNAL_API_TOKEN and not _vpn_config_caller_trusted(req, telegram_id):
+        return JSONResponse({"available": False, "reason": "internal_token_required"}, status_code=403)
+
+    if not _active_sub_for_vpn(telegram_id, db):
+        return JSONResponse({"available": False, "reason": "no_subscription"}, status_code=403)
+
+    if not XRAY_API_URL:
+        return JSONResponse({"available": False, "reason": "vpn_not_configured"}, status_code=503)
+
+    result = _ensure_xray_client(telegram_id, db)
+    if not result:
+        return JSONResponse({"available": False, "reason": "creating"}, status_code=503)
+
+    _, vless_link = result
+    config = _build_smart_xray_config(vless_link)
+    return JSONResponse(
+        config,
+        media_type="application/json",
+        headers={"Content-Disposition": f'attachment; filename="frosty-smart-{telegram_id}.json"'},
+    )
+
+
+# ── Subscription URL для Happ / Hiddify (auto-update) ────────────────────────
+
+@app.get(
+    "/vpn/subscription/{telegram_id}",
+    summary="Subscription URL: base64-список конфигов для Happ/Hiddify",
+)
+def vpn_subscription(
+    telegram_id: int, req: Request, db: Session = Depends(get_db)
+) -> PlainTextResponse:
+    """
+    Возвращает base64-encoded список VLESS-ссылок.
+    Happ и Hiddify поддерживают этот формат: Импорт → Из URL.
+    Клиент периодически перечитывает URL и обновляет конфиги автоматически.
+    """
+    if INTERNAL_API_TOKEN and not _vpn_config_caller_trusted(req, telegram_id):
+        raise HTTPException(status_code=403, detail="Forbidden")
+
+    if not _active_sub_for_vpn(telegram_id, db):
+        raise HTTPException(status_code=403, detail="No active subscription")
+
+    if not XRAY_API_URL:
+        raise HTTPException(status_code=503, detail="VPN not configured")
+
+    result = _ensure_xray_client(telegram_id, db)
+    if not result:
+        raise HTTPException(status_code=503, detail="Creating VPN client, try in 30s")
+
+    _, vless_link = result
+    # Subscription format: base64(link1\nlink2\n...)
+    # Добавляем имя профиля через заголовок profile-title (некоторые клиенты читают)
+    payload = vless_link.encode("utf-8")
+    encoded = base64.b64encode(payload).decode("ascii")
+    return PlainTextResponse(
+        encoded,
+        headers={
+            "Content-Type": "text/plain; charset=utf-8",
+            "profile-title": "Frosty VPN",
+            "support-url": "https://t.me/frosty_support",
+            "subscription-userinfo": "upload=0; download=0; total=0; expire=0",
+        },
+    )
 
 
 @app.get("/vpn/online", response_model=VpnOnlineResponse)

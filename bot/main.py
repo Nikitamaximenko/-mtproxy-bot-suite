@@ -492,6 +492,14 @@ async def _get_vless_link(session: aiohttp.ClientSession, tg_id: int) -> str | N
     return vless.strip() or None
 
 
+def _smart_config_url(tg_id: int) -> str:
+    return f"{BACKEND_BASE_URL}/vpn/smart-config/{tg_id}"
+
+
+def _subscription_url(tg_id: int) -> str:
+    return f"{BACKEND_BASE_URL}/vpn/subscription/{tg_id}"
+
+
 async def _send_proxy_vpn_bundle(message: Message, session: aiohttp.ClientSession, tg_uid: int) -> None:
     """MTProxy + VPN одним экраном (кнопка «Подключить прокси / VPN»)."""
     proxy_link = await _get_proxy_link(session, tg_uid)
@@ -509,7 +517,7 @@ async def _send_proxy_vpn_bundle(message: Message, session: aiohttp.ClientSessio
         )
         return
 
-    lines: list[str] = ["📡 <b>MTProxy</b> для Telegram и 🛡 <b>VPN</b> (Happ) — данные ниже.\n"]
+    lines: list[str] = ["📡 <b>MTProxy</b> для Telegram и 🛡 <b>VPN</b> — данные ниже.\n"]
     rows: list[list[InlineKeyboardButton]] = []
 
     if proxy_link:
@@ -530,11 +538,27 @@ async def _send_proxy_vpn_bundle(message: Message, session: aiohttp.ClientSessio
     if vless:
         lines.append("\n━━ <b>VPN (Happ)</b> ━━\n")
         lines.append(
-            "1) Установите Happ\n"
-            "2) Нажмите «СКОПИРОВАТЬ VPN КОД»\n"
-            "3) В Happ: «+» → «Вставить из буфера»\n\n"
+            "<b>Способ 1 — Умное подключение</b> (рекомендуется) ⚡\n"
+            "РФ-сайты напрямую, заблокированные через VPN, реклама YouTube заблокирована.\n"
+            "Happ → «+» → <b>«Из файла/URL»</b> → вставьте ссылку «Умный конфиг».\n\n"
+            "<b>Способ 2 — Subscription URL</b> (автообновление) 🔄\n"
+            "Happ → «+» → <b>«Subscription»</b> → вставьте ссылку «Subscription URL».\n\n"
+            "<b>Способ 3 — Вручную</b>\n"
+            "Нажмите «СКОПИРОВАТЬ VPN КОД» и вставьте в Happ через «+» → «Вставить из буфера».\n\n"
             f"<code>{html.escape(vless)}</code>"
         )
+        rows.append([
+            InlineKeyboardButton(
+                text="⚡ Умный конфиг (рекомендуется)",
+                callback_data="menu:smart_config_info",
+            )
+        ])
+        rows.append([
+            InlineKeyboardButton(
+                text="🔄 Subscription URL (автообновление)",
+                callback_data="menu:sub_url_info",
+            )
+        ])
         rows.append([InlineKeyboardButton(text="📋 СКОПИРОВАТЬ VPN КОД", callback_data="menu:copy_vpn")])
     else:
         lines.append(
@@ -1171,6 +1195,84 @@ async def main() -> None:
                 f"<code>{html.escape(vless)}</code>",
                 parse_mode="HTML",
                 reply_markup=trial_direct_kb(tg_uid, show_copy_button=True),
+            )
+            return
+
+        if action == "smart_config_info":
+            await query.answer()
+            tg_uid = query.from_user.id
+            smart_url = _smart_config_url(tg_uid)
+            await msg.answer(
+                "⚡ <b>Умный конфиг Frosty</b>\n\n"
+                "Что он делает:\n"
+                "• РФ-сайты (Яндекс, ВКонтакте, Госуслуги, Сбер…) — <b>напрямую</b>, без VPN → быстро\n"
+                "• Instagram, TikTok, YouTube, X — <b>через VPN</b>\n"
+                "• Реклама на YouTube — <b>заблокирована</b>\n\n"
+                "<b>Как подключить в Happ:</b>\n"
+                "1. Скопируйте ссылку ниже\n"
+                "2. В Happ нажмите «+» → «Из файла/URL» или «Импорт по ссылке»\n"
+                "3. Вставьте ссылку и нажмите «Добавить»\n\n"
+                f"<code>{html.escape(smart_url)}</code>",
+                parse_mode="HTML",
+                reply_markup=InlineKeyboardMarkup(
+                    inline_keyboard=[
+                        [InlineKeyboardButton(text="📋 Скопировать ссылку", callback_data="menu:copy_smart_url")],
+                        [InlineKeyboardButton(text="◀️ Назад", callback_data="menu:connect")],
+                    ]
+                ),
+            )
+            return
+
+        if action == "copy_smart_url":
+            await query.answer("Отправляю ссылку…")
+            tg_uid = query.from_user.id
+            smart_url = _smart_config_url(tg_uid)
+            await msg.answer(
+                "Ссылка умного конфига:\n\n"
+                f"<code>{html.escape(smart_url)}</code>\n\n"
+                "В Happ: «+» → «Из файла/URL» → вставьте и добавьте.",
+                parse_mode="HTML",
+                reply_markup=InlineKeyboardMarkup(
+                    inline_keyboard=[[InlineKeyboardButton(text="◀️ К подключению", callback_data="menu:connect")]]
+                ),
+            )
+            return
+
+        if action == "sub_url_info":
+            await query.answer()
+            tg_uid = query.from_user.id
+            sub_url = _subscription_url(tg_uid)
+            await msg.answer(
+                "🔄 <b>Subscription URL</b>\n\n"
+                "Happ периодически сам обновляет конфиг по этой ссылке — "
+                "если мы обновим VPN-ключ, вам ничего вручную делать не нужно.\n\n"
+                "<b>Как подключить в Happ:</b>\n"
+                "1. Скопируйте ссылку ниже\n"
+                "2. В Happ нажмите «+» → <b>«Subscription»</b> (или «По подписке»)\n"
+                "3. Вставьте ссылку и нажмите «Добавить»\n\n"
+                f"<code>{html.escape(sub_url)}</code>",
+                parse_mode="HTML",
+                reply_markup=InlineKeyboardMarkup(
+                    inline_keyboard=[
+                        [InlineKeyboardButton(text="📋 Скопировать ссылку", callback_data="menu:copy_sub_url")],
+                        [InlineKeyboardButton(text="◀️ Назад", callback_data="menu:connect")],
+                    ]
+                ),
+            )
+            return
+
+        if action == "copy_sub_url":
+            await query.answer("Отправляю ссылку…")
+            tg_uid = query.from_user.id
+            sub_url = _subscription_url(tg_uid)
+            await msg.answer(
+                "Subscription URL:\n\n"
+                f"<code>{html.escape(sub_url)}</code>\n\n"
+                "В Happ: «+» → «Subscription» → вставьте и добавьте.",
+                parse_mode="HTML",
+                reply_markup=InlineKeyboardMarkup(
+                    inline_keyboard=[[InlineKeyboardButton(text="◀️ К подключению", callback_data="menu:connect")]]
+                ),
             )
             return
 
