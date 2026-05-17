@@ -521,10 +521,14 @@ def _smart_config_url(tg_id: int) -> str:
     return f"{BACKEND_BASE_URL}/vpn/smart-config/{tg_id}?token={token}"
 
 
-def _hiddify_deeplink(url: str) -> str:
-    """hiddify://import/BASE64 — открывает Happ/Hiddify и добавляет подписку одним нажатием."""
+def _hiddify_deeplink(proxy_link: str) -> str:
+    """hiddify://import/BASE64 — открывает Happ и добавляет сервер одним нажатием.
+
+    proxy_link может быть vless://..., vmess://... или https:// subscription URL.
+    Happ принимает vless:// напрямую — без ошибки "URL не валидна".
+    """
     import base64 as _b64
-    encoded = _b64.urlsafe_b64encode(url.encode()).decode().rstrip("=")
+    encoded = _b64.urlsafe_b64encode(proxy_link.encode()).decode().rstrip("=")
     return f"hiddify://import/{encoded}"
 
 
@@ -554,8 +558,9 @@ async def _send_proxy_vpn_bundle(message: Message, session: aiohttp.ClientSessio
         )
         return
 
-    # hiddify:// в тексте — Telegram рендерит кликабельной ссылкой на мобильных клиентах.
-    deep = _hiddify_deeplink(_subscription_url(tg_uid))
+    # Кодируем сам VLESS-ключ в hiddify:// — Happ принимает vless:// без ошибок.
+    # Subscription URL-подход вызывал "URL подписки не валидна" в Happ.
+    deep = _hiddify_deeplink(vless)
 
     await message.answer(
         "🛡 <b>Умный VPN Frosty</b>\n\n"
@@ -563,13 +568,12 @@ async def _send_proxy_vpn_bundle(message: Message, session: aiohttp.ClientSessio
         '• <a href="https://apps.apple.com/app/happ-proxy-utility/id6504287215">iOS (App Store)</a>\n'
         '• <a href="https://play.google.com/store/apps/details?id=com.happproxy">Android (Google Play)</a>\n'
         '• <a href="https://hiddify.com">Windows / Mac (Hiddify)</a>\n\n'
-        "<b>Шаг 2.</b> Нажмите ссылку ниже — Happ откроется и добавит сервер сам:\n"
+        "<b>Шаг 2.</b> Нажмите ссылку ниже — Happ откроется и добавит VPN сам:\n"
         f"<code>{deep}</code>\n\n"
         "Или нажмите кнопку <b>«📋 Скопировать VPN-код»</b> и вставьте в Happ через «+» → «Из буфера».\n\n"
         "⚡ <b>Что умеет Frosty:</b>\n"
         "• WB, Ozon, Avito, Сбер, Госуслуги, Яндекс, VK — напрямую\n"
         "• Instagram, TikTok, YouTube — через VPN автоматически\n"
-        "• Реклама на YouTube — заблокирована\n"
         "• До 10 устройств · без лимитов по скорости и трафику",
         parse_mode="HTML",
         disable_web_page_preview=True,
@@ -617,7 +621,7 @@ async def _send_trial_direct_access(
 
     intro = "🎁 <b>Пробный период уже активен</b>" if already_active else "🎁 <b>Пробный день активирован!</b>"
     if vless_link:
-        deep = _hiddify_deeplink(_subscription_url(tg_id))
+        deep = _hiddify_deeplink(vless_link)
         # deep link в тексте — Telegram рендерит его кликабельным; в url-кнопке hiddify:// не поддерживается
         await message.answer(
             f"{intro}\n\n"
