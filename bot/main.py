@@ -558,19 +558,14 @@ async def _send_proxy_vpn_bundle(message: Message, session: aiohttp.ClientSessio
         )
         return
 
-    # Кодируем сам VLESS-ключ в hiddify:// — Happ принимает vless:// без ошибок.
-    # Subscription URL-подход вызывал "URL подписки не валидна" в Happ.
-    deep = _hiddify_deeplink(vless)
-
     await message.answer(
         "🛡 <b>Умный VPN Frosty</b>\n\n"
         "<b>Шаг 1.</b> Установите приложение Happ:\n"
         '• <a href="https://apps.apple.com/app/happ-proxy-utility/id6504287215">iOS (App Store)</a>\n'
         '• <a href="https://play.google.com/store/apps/details?id=com.happproxy">Android (Google Play)</a>\n'
         '• <a href="https://hiddify.com">Windows / Mac (Hiddify)</a>\n\n'
-        "<b>Шаг 2.</b> Нажмите ссылку ниже — Happ откроется и добавит VPN сам:\n"
-        f"<code>{deep}</code>\n\n"
-        "Или нажмите кнопку <b>«📋 Скопировать VPN-код»</b> и вставьте в Happ через «+» → «Из буфера».\n\n"
+        "<b>Шаг 2.</b> Скопируйте ваш VPN-ключ кнопкой ниже и вставьте в Happ: «+» → «Вставить из буфера»\n\n"
+        f"<code>{vless}</code>\n\n"
         "⚡ <b>Что умеет Frosty:</b>\n"
         "• WB, Ozon, Avito, Сбер, Госуслуги, Яндекс, VK — напрямую\n"
         "• Instagram, TikTok, YouTube — через VPN автоматически\n"
@@ -621,15 +616,12 @@ async def _send_trial_direct_access(
 
     intro = "🎁 <b>Пробный период уже активен</b>" if already_active else "🎁 <b>Пробный день активирован!</b>"
     if vless_link:
-        deep = _hiddify_deeplink(vless_link)
-        # deep link в тексте — Telegram рендерит его кликабельным; в url-кнопке hiddify:// не поддерживается
         await message.answer(
             f"{intro}\n\n"
             f"Доступ до: <b>{exp_human}</b>\n\n"
-            "<b>Нажмите ссылку ниже</b> — Happ откроется и добавит умный VPN сам:\n"
-            f"<code>{deep}</code>\n\n"
-            "Или скопируйте VPN-код кнопкой ниже и вставьте в Happ через «+» → «Из буфера».\n\n"
-            "❓ Happ нет?\n"
+            "Скопируйте VPN-ключ кнопкой ниже и вставьте в Happ: «+» → «Вставить из буфера»\n\n"
+            f"<code>{vless_link}</code>\n\n"
+            "❓ Нет Happ?\n"
             '<a href="https://apps.apple.com/app/happ-proxy-utility/id6504287215">iOS</a> · '
             '<a href="https://play.google.com/store/apps/details?id=com.happproxy">Android</a> · '
             '<a href="https://hiddify.com">Windows/Mac (Hiddify)</a>',
