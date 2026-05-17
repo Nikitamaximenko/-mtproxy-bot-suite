@@ -176,7 +176,7 @@ def trial_direct_kb(tg_id: int, *, show_copy_button: bool) -> InlineKeyboardMark
     rows: list[list[InlineKeyboardButton]] = []
     if show_copy_button:
         rows.append([InlineKeyboardButton(text="📋 СКОПИРОВАТЬ VPN-КОД", callback_data="menu:trial_copy_vless")])
-    rows.append([InlineKeyboardButton(text="🛡 Открыть в Happ одним нажатием", callback_data="menu:connect")])
+    rows.append([InlineKeyboardButton(text="🛡 Подключить VPN", callback_data="menu:connect")])
     rows.append([InlineKeyboardButton(text="💳 Купить полную подписку", callback_data="menu:buy_in_bot")])
     rows.append([InlineKeyboardButton(text="🏠 Главное меню", callback_data="menu:main")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
@@ -517,50 +517,56 @@ def _hiddify_deeplink(url: str) -> str:
 
 
 async def _send_proxy_vpn_bundle(message: Message, session: aiohttp.ClientSession, tg_uid: int) -> None:
-    """Умный VPN — одно нажатие для подключения через Happ."""
+    """Умный VPN — подключение через Happ.
+
+    Telegram Bot API принимает в url-кнопках только http/https/tg://.
+    hiddify:// и другие схемы вызывают 400 Bad Request от Telegram.
+    Поэтому deep link отправляем в тексте сообщения (там любые схемы кликабельны),
+    а кнопки используем только для стандартных действий.
+    """
     vless = await _get_vless_link(session, tg_uid)
     if not vless:
         await asyncio.sleep(0.8)
         vless = await _get_vless_link(session, tg_uid)
 
-    rows: list[list[InlineKeyboardButton]] = []
-
-    if vless:
-        sub_url = _subscription_url(tg_uid)
-        deep = _hiddify_deeplink(sub_url)
-        rows.append([InlineKeyboardButton(text="🛡 Открыть в Happ одним нажатием", url=deep)])
-        rows.append([InlineKeyboardButton(text="📋 Скопировать VPN-код", callback_data="menu:copy_vpn")])
-    else:
-        rows.append([InlineKeyboardButton(text="🔄 Обновить", callback_data="menu:connect")])
-
-    rows.append([InlineKeyboardButton(text="🏠 Главное меню", callback_data="menu:main")])
-
     if not vless:
         await message.answer(
-            "⏳ VPN ещё создаётся — нажмите «Обновить» через 10–20 секунд.\n\n"
-            "Если доступа нет совсем — оформите подписку: «💳 Купить / продлить подписку».",
+            "⏳ VPN ещё создаётся — подождите 10–20 секунд и нажмите кнопку снова.\n\n"
+            "Если доступ не появляется — оформите подписку: «💳 Купить / продлить подписку».",
             parse_mode="HTML",
-            reply_markup=InlineKeyboardMarkup(inline_keyboard=rows),
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="🔄 Обновить", callback_data="menu:connect")],
+                [InlineKeyboardButton(text="💳 Купить / продлить", callback_data="menu:buy_in_bot")],
+                [InlineKeyboardButton(text="🏠 Главное меню", callback_data="menu:main")],
+            ]),
         )
         return
 
+    sub_url = _subscription_url(tg_uid)
+    deep = _hiddify_deeplink(sub_url)
+
+    # hiddify:// в тексте — Telegram рендерит кликабельной ссылкой на мобильных клиентах
     await message.answer(
         "🛡 <b>Умный VPN Frosty</b>\n\n"
-        "Нажмите <b>«Открыть в Happ»</b> — приложение откроется и добавит сервер само.\n\n"
-        "❓ Happ нет?\n"
-        '<a href="https://apps.apple.com/app/happ-proxy-utility/id6504287215">iOS</a> · '
-        '<a href="https://play.google.com/store/apps/details?id=com.happproxy">Android</a> · '
-        '<a href="https://hiddify.com">Windows/Mac (Hiddify)</a>\n\n'
+        "<b>Шаг 1.</b> Установите приложение Happ:\n"
+        '• <a href="https://apps.apple.com/app/happ-proxy-utility/id6504287215">iOS (App Store)</a>\n'
+        '• <a href="https://play.google.com/store/apps/details?id=com.happproxy">Android (Google Play)</a>\n'
+        '• <a href="https://hiddify.com">Windows / Mac (Hiddify)</a>\n\n'
+        "<b>Шаг 2.</b> Нажмите ссылку ниже — Happ откроется и добавит сервер сам:\n"
+        f"<code>{deep}</code>\n\n"
+        "Или нажмите кнопку <b>«📋 Скопировать VPN-код»</b> и вставьте в Happ через «+» → «Из буфера».\n\n"
         "⚡ <b>Что умеет Frosty:</b>\n"
-        "• Маркетплейсы (WB, Ozon, Avito) — напрямую, без VPN\n"
-        "• Банки (Сбер, Т-Банк, Альфа) — напрямую\n"
-        "• Госуслуги, Яндекс, VK, Mail.ru — напрямую\n"
+        "• WB, Ozon, Avito, Сбер, Госуслуги, Яндекс, VK — напрямую\n"
         "• Instagram, TikTok, YouTube — через VPN автоматически\n"
         "• Реклама на YouTube — заблокирована\n"
         "• До 10 устройств · без лимитов по скорости и трафику",
         parse_mode="HTML",
         disable_web_page_preview=True,
-        reply_markup=InlineKeyboardMarkup(inline_keyboard=rows),
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="📋 Скопировать VPN-код", callback_data="menu:copy_vpn")],
+            [InlineKeyboardButton(text="🔄 Обновить данные", callback_data="menu:connect")],
+            [InlineKeyboardButton(text="🏠 Главное меню", callback_data="menu:main")],
+        ]),
     )
 
 
@@ -602,23 +608,24 @@ async def _send_trial_direct_access(
     if vless_link:
         sub_url = _subscription_url(tg_id)
         deep = _hiddify_deeplink(sub_url)
-        rows: list[list[InlineKeyboardButton]] = [
-            [InlineKeyboardButton(text="🛡 Открыть в Happ одним нажатием", url=deep)],
-            [InlineKeyboardButton(text="📋 СКОПИРОВАТЬ VPN-КОД", callback_data="menu:trial_copy_vless")],
-            [InlineKeyboardButton(text="💳 Купить полную подписку", callback_data="menu:buy_in_bot")],
-            [InlineKeyboardButton(text="🏠 Главное меню", callback_data="menu:main")],
-        ]
+        # deep link в тексте — Telegram рендерит его кликабельным; в url-кнопке hiddify:// не поддерживается
         await message.answer(
             f"{intro}\n\n"
             f"Доступ до: <b>{exp_human}</b>\n\n"
-            "Нажмите <b>«Открыть в Happ»</b> — приложение откроется и добавит умный VPN само.\n\n"
+            "<b>Нажмите ссылку ниже</b> — Happ откроется и добавит умный VPN сам:\n"
+            f"<code>{deep}</code>\n\n"
+            "Или скопируйте VPN-код кнопкой ниже и вставьте в Happ через «+» → «Из буфера».\n\n"
             "❓ Happ нет?\n"
             '<a href="https://apps.apple.com/app/happ-proxy-utility/id6504287215">iOS</a> · '
             '<a href="https://play.google.com/store/apps/details?id=com.happproxy">Android</a> · '
             '<a href="https://hiddify.com">Windows/Mac (Hiddify)</a>',
             parse_mode="HTML",
             disable_web_page_preview=True,
-            reply_markup=InlineKeyboardMarkup(inline_keyboard=rows),
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="📋 СКОПИРОВАТЬ VPN-КОД", callback_data="menu:trial_copy_vless")],
+                [InlineKeyboardButton(text="💳 Купить полную подписку", callback_data="menu:buy_in_bot")],
+                [InlineKeyboardButton(text="🏠 Главное меню", callback_data="menu:main")],
+            ]),
         )
         return
 
@@ -1142,10 +1149,16 @@ async def main() -> None:
             return
 
         if action in ("connect", "get_proxy", "get_vpn"):
-            await query.answer(
-                "Проверяю доступ…" if action == "connect" else "Открываю подключение…"
-            )
-            await _send_proxy_vpn_bundle(msg, session, query.from_user.id)
+            await query.answer("Проверяю доступ…")
+            tg_uid = query.from_user.id if query.from_user else 0
+            try:
+                await _send_proxy_vpn_bundle(msg, session, tg_uid)
+            except Exception as exc:
+                _log.exception("_send_proxy_vpn_bundle failed tg_id=%s: %s", tg_uid, exc)
+                await msg.answer(
+                    "Не удалось загрузить VPN-данные. Попробуйте через минуту или напишите /support.",
+                    reply_markup=main_menu_kb(tg_uid),
+                )
             return
 
         if action == "copy_vpn":
