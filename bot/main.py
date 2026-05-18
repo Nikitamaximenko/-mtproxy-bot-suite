@@ -405,17 +405,6 @@ async def backend_checkout_create(
         return resp.status, data
 
 
-def _parse_proxy_link(link: str) -> tuple[str, str, str]:
-    from urllib.parse import parse_qs, urlparse
-    parsed = urlparse(link)
-    params = parse_qs(parsed.query)
-    return (
-        params.get("server", ["—"])[0],
-        params.get("port", ["—"])[0],
-        params.get("secret", ["—"])[0],
-    )
-
-
 def _normalize_payment_url_bot(url: str) -> str:
     u = (url or "").strip()
     if not u:
@@ -447,42 +436,17 @@ def _api_error_detail(payload: dict[str, Any]) -> str:
     return ""
 
 
-def _manual_setup_text(server: str, port: str, secret: str) -> str:
-    return (
-        "<b>Настройка подключения в Telegram</b>\n"
-        "\n"
-        "<b>На смартфоне (Android / iOS)</b>\n"
-        "1. Откройте Telegram → <b>Настройки → Данные и память → Прокси</b>\n"
-        "2. Включите «Использовать прокси» → «Добавить прокси» → <b>MTProto</b>\n"
-        "3. Введите:\n"
-        f"   • <b>Сервер:</b> <code>{server}</code>\n"
-        f"   • <b>Порт:</b> <code>{port}</code>\n"
-        f"   • <b>Секрет:</b> <code>{secret}</code>\n"
-        "4. Сохраните\n"
-        "\n"
-        "<b>На компьютере (Telegram Desktop)</b>\n"
-        "1. <b>Настройки → Дополнительно → Тип соединения</b>\n"
-        "2. Выберите «Использовать прокси (MTProto)»\n"
-        "3. Введите те же данные и сохраните"
-    )
-
-
-async def _get_proxy_link(session: aiohttp.ClientSession, tg_id: int) -> str | None:
+async def _fetch_vpn_config(session: aiohttp.ClientSession, tg_id: int) -> dict:
+    """Запрашивает /vpn/config/{tg_id} и возвращает dict с полями available/reason/vless_link/vless_link_alt."""
     try:
-        data = await backend_get(session, f"/subscription/{tg_id}")
+        return await backend_get(session, f"/vpn/config/{tg_id}")
     except Exception:
-        return None
-    if not data.get("active"):
-        return None
-    return data.get("proxy_link") or None
+        return {}
 
 
 async def _get_vless_link(session: aiohttp.ClientSession, tg_id: int) -> tuple[str | None, str | None]:
     """Возвращает (vless_link :443, vless_link_alt :8443) или (None, None)."""
-    try:
-        data = await backend_get(session, f"/vpn/config/{tg_id}")
-    except Exception:
-        return None, None
+    data = await _fetch_vpn_config(session, tg_id)
     if not data.get("available"):
         return None, None
     vless = data.get("vless_link")
@@ -492,77 +456,82 @@ async def _get_vless_link(session: aiohttp.ClientSession, tg_id: int) -> tuple[s
     return vless.strip(), (vless_alt.strip() if isinstance(vless_alt, str) and vless_alt.strip() else None)
 
 
-def _vpn_sub_token(tg_id: int) -> str:
-    """Тот же HMAC что и в бэкенде — для авторизации subscription URL без заголовков."""
-    import hmac as _hmac
-    import hashlib as _hl
-    key = (INTERNAL_API_TOKEN or "frosty-sub-fallback").encode()
-    return _hmac.new(key, f"sub:{tg_id}".encode(), _hl.sha256).hexdigest()[:32]
-
-
-def _subscription_url(tg_id: int) -> str:
-    token = _vpn_sub_token(tg_id)
-    return f"{BACKEND_BASE_URL}/vpn/subscription/{tg_id}?token={token}"
-
-
-def _singbox_url(tg_id: int) -> str:
-    """Sing-box JSON с routing rules (белые списки РФ)."""
-    token = _vpn_sub_token(tg_id)
-    return f"{BACKEND_BASE_URL}/vpn/singbox/{tg_id}?token={token}"
-
-
-def _clash_url(tg_id: int) -> str:
-    """Clash YAML с routing rules — subscription-формат, который Happ принимает."""
-    token = _vpn_sub_token(tg_id)
-    return f"{BACKEND_BASE_URL}/vpn/clash/{tg_id}?token={token}"
-
-
-def _smart_config_url(tg_id: int) -> str:
-    token = _vpn_sub_token(tg_id)
-    return f"{BACKEND_BASE_URL}/vpn/smart-config/{tg_id}?token={token}"
-
-
-def _hiddify_deeplink(proxy_link: str) -> str:
-    """hiddify://import/BASE64 — открывает Happ и добавляет сервер одним нажатием.
-
-    proxy_link может быть vless://..., vmess://... или https:// subscription URL.
-    Happ принимает vless:// напрямую — без ошибки "URL не валидна".
-    """
-    import base64 as _b64
-    encoded = _b64.urlsafe_b64encode(proxy_link.encode()).decode().rstrip("=")
-    return f"hiddify://import/{encoded}"
-
-
 async def _send_proxy_vpn_bundle(message: Message, session: aiohttp.ClientSession, tg_uid: int) -> None:
-    """Умный VPN — подключение через Happ.
+    """Умный VPN — подключение через Happ. Дифференцированные сообщения по причине отказа."""
+    data = await _fetch_vpn_config(session, tg_uid)
+    if not data.get("available"):
+        reason = data.get("reason", "")
 
-    Telegram Bot API принимает в url-кнопках только http/https/tg://.
-    hiddify:// и другие схемы вызывают 400 Bad Request от Telegram.
-    Поэтому deep link отправляем в тексте сообщения (там любые схемы кликабельны),
-    а кнопки используем только для стандартных действий.
-    """
-    vless, vless_alt = await _get_vless_link(session, tg_uid)
-    if not vless:
-        await asyncio.sleep(0.8)
-        vless, vless_alt = await _get_vless_link(session, tg_uid)
+        # Подписка приостановлена (renewal_failed, admin suspend)
+        if reason == "suspended":
+            await message.answer(
+                "⚠️ <b>Доступ временно приостановлен</b>\n\n"
+                "Возможные причины:\n"
+                "• Не удалось списать оплату за автопродление\n"
+                "• Подписка заблокирована администратором\n\n"
+                "💳 Оплатите подписку чтобы восстановить доступ, или обратитесь в поддержку.",
+                parse_mode="HTML",
+                reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                    [InlineKeyboardButton(text="💳 Оплатить / продлить", callback_data="menu:buy_in_bot")],
+                    [InlineKeyboardButton(text="💬 Поддержка", callback_data="menu:support")],
+                    [InlineKeyboardButton(text="🏠 Главное меню", callback_data="menu:main")],
+                ]),
+            )
+            return
 
-    if not vless:
+        # Нет подписки совсем
+        if reason == "no_subscription":
+            await message.answer(
+                "❌ <b>Подписка не найдена</b>\n\n"
+                "Оформите подписку чтобы получить доступ к VPN.\n"
+                "Доступен бесплатный пробный день.",
+                parse_mode="HTML",
+                reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                    [InlineKeyboardButton(text="🎁 Бесплатный день", callback_data="menu:trial")],
+                    [InlineKeyboardButton(text="💳 Купить подписку", callback_data="menu:buy_in_bot")],
+                    [InlineKeyboardButton(text="🏠 Главное меню", callback_data="menu:main")],
+                ]),
+            )
+            return
+
+        # VPN создаётся или временная ошибка API
+        if reason == "creating":
+            await message.answer(
+                "⏳ <b>VPN создаётся</b>\n\n"
+                "Подождите 10–20 секунд и нажмите «Обновить».",
+                parse_mode="HTML",
+                reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                    [InlineKeyboardButton(text="🔄 Обновить", callback_data="menu:connect")],
+                    [InlineKeyboardButton(text="🏠 Главное меню", callback_data="menu:main")],
+                ]),
+            )
+            return
+
+        # Неизвестная причина / пустой ответ — делаем ещё один попытку
+        await asyncio.sleep(1.0)
+        data = await _fetch_vpn_config(session, tg_uid)
+
+    vless = data.get("vless_link")
+    vless_alt = data.get("vless_link_alt")
+    if not data.get("available") or not isinstance(vless, str) or not vless.strip():
         await message.answer(
-            "⏳ VPN ещё создаётся — подождите 10–20 секунд и нажмите кнопку снова.\n\n"
-            "Если доступ не появляется — оформите подписку: «💳 Купить / продлить подписку».",
+            "⏳ <b>VPN ещё инициализируется</b>\n\n"
+            "Подождите 15–20 секунд и нажмите «Обновить».\n"
+            "Если проблема повторяется — напишите в поддержку.",
             parse_mode="HTML",
             reply_markup=InlineKeyboardMarkup(inline_keyboard=[
                 [InlineKeyboardButton(text="🔄 Обновить", callback_data="menu:connect")],
-                [InlineKeyboardButton(text="💳 Купить / продлить", callback_data="menu:buy_in_bot")],
+                [InlineKeyboardButton(text="💬 Поддержка", callback_data="menu:support")],
                 [InlineKeyboardButton(text="🏠 Главное меню", callback_data="menu:main")],
             ]),
         )
         return
 
+    vless = vless.strip()
     alt_block = (
         f"\n\n🔄 <b>Не работает дома/WiFi?</b> Попробуйте резервный ключ (порт 8443):\n"
-        f"<code>{vless_alt}</code>"
-    ) if vless_alt else ""
+        f"<code>{vless_alt.strip()}</code>"
+    ) if isinstance(vless_alt, str) and vless_alt.strip() else ""
 
     await message.answer(
         "🛡 <b>Умный VPN Frosty</b>\n\n"
@@ -586,16 +555,6 @@ async def _send_proxy_vpn_bundle(message: Message, session: aiohttp.ClientSessio
         ]),
     )
 
-
-def _vpn_direct_kb(vless: str) -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(
-        inline_keyboard=[
-            [InlineKeyboardButton(text="📋 СКОПИРОВАТЬ VPN КОД", callback_data="menu:copy_vpn")],
-            [InlineKeyboardButton(text="🛡 Подключить VPN", callback_data="menu:connect")],
-            [InlineKeyboardButton(text="💳 Купить / продлить подписку", callback_data="menu:buy_in_bot")],
-            [InlineKeyboardButton(text="🏠 Главное меню", callback_data="menu:main")],
-        ]
-    )
 
 
 def _buy_direct_kb(payment_url: str) -> InlineKeyboardMarkup:
@@ -657,11 +616,11 @@ async def _send_trial_direct_access(
 
 
 async def show_cancel_autopay_button(session: aiohttp.ClientSession, tg_id: int) -> bool:
-    """Кнопка отмены в меню/поддержке: для любой активной платной (не trial) подписки."""
+    """Кнопка отмены автопродления: только для активной платной (не trial) подписки без suspend."""
     try:
         data = await backend_get(session, f"/subscription/{tg_id}")
     except Exception:
-        return True
+        return False  # При ошибке API прячем кнопку, чтобы не вводить в заблуждение
     if not data.get("active") or data.get("suspended") or data.get("is_trial"):
         return False
     return True
@@ -877,12 +836,20 @@ async def cmd_status(message: Message, session: aiohttp.ClientSession, tg_id: in
         return
 
     if data.get("suspended"):
+        expires_at_susp = format_dt(data.get("expires_at"))
         await message.answer(
             "⏸ <b>Доступ приостановлен</b>\n\n"
-            "Оплата прошла, но доступ временно снят администратором. "
-            "Напиши в поддержку — восстановим по оплаченному периоду без сдвига дат.",
+            "Возможные причины:\n"
+            "• Не прошло автопродление (проблема с картой/счётом)\n"
+            "• Администратор временно заблокировал доступ\n\n"
+            f"📅 Оплачено до: {expires_at_susp}\n\n"
+            "💳 Оплатите подписку вручную — доступ восстановится сразу.\n"
+            "Или напишите в поддержку.",
             parse_mode="HTML",
-            reply_markup=support_kb(),
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="💳 Оплатить / продлить", callback_data="menu:buy_in_bot")],
+                [InlineKeyboardButton(text="💬 Поддержка", callback_data="menu:support")],
+            ]),
         )
         return
 
@@ -1194,7 +1161,11 @@ async def main() -> None:
             await msg.answer(
                 f"Скопируйте строку ниже и вставьте в Happ:\n\n<code>{html.escape(vless)}</code>{alt_copy}",
                 parse_mode="HTML",
-                reply_markup=_vpn_direct_kb(vless),
+                reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                    [InlineKeyboardButton(text="🛡 Подключить VPN", callback_data="menu:connect")],
+                    [InlineKeyboardButton(text="💳 Купить / продлить подписку", callback_data="menu:buy_in_bot")],
+                    [InlineKeyboardButton(text="🏠 Главное меню", callback_data="menu:main")],
+                ]),
             )
             return
 
@@ -1461,35 +1432,6 @@ async def main() -> None:
             "Пока принимаем только текст — напишите вопрос прямо в этот чат сообщением.",
             reply_markup=support_chat_kb(show_cancel_autopay=sc_chat),
         )
-
-    @dp.callback_query(lambda c: c.data == "copy_proxy_link")
-    async def _copy(query: CallbackQuery) -> None:
-        session = _get_session(dp)
-        msg = query.message
-        if not msg or not isinstance(msg, Message):
-            await query.answer("Не удалось.", show_alert=True)
-            return
-        proxy_link = await _get_proxy_link(session, query.from_user.id)
-        if not proxy_link:
-            await query.answer("Подписка не активна.", show_alert=True)
-            return
-        await msg.answer(f"Ссылка для копирования:\n<code>{proxy_link}</code>", parse_mode="HTML")
-        await query.answer()
-
-    @dp.callback_query(lambda c: c.data == "manual_setup")
-    async def _manual(query: CallbackQuery) -> None:
-        session = _get_session(dp)
-        msg = query.message
-        if not msg or not isinstance(msg, Message):
-            await query.answer("Не удалось.", show_alert=True)
-            return
-        proxy_link = await _get_proxy_link(session, query.from_user.id)
-        if not proxy_link:
-            await query.answer("Подписка не активна.", show_alert=True)
-            return
-        server, port, secret = _parse_proxy_link(proxy_link)
-        await msg.answer(_manual_setup_text(server, port, secret), parse_mode="HTML")
-        await query.answer()
 
     await dp.start_polling(bot)
 

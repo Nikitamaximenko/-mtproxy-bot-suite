@@ -3384,6 +3384,11 @@ def _wg_get_qr(client_id: str) -> str | None:
 _xray_cookie: str | None = None
 _xray_cookie_lock = threading.Lock()
 
+# Кэш последней проверки существования клиента в Xray (tg_id -> timestamp)
+# Проверяем реальность клиента не чаще раза в 10 минут, чтобы не добавлять латентность
+_xray_client_verified_at: dict[int, float] = {}
+_XRAY_CLIENT_VERIFY_TTL = 600  # секунд
+
 
 def _xray_login() -> str | None:
     if not XRAY_API_URL or not XRAY_PASSWORD:
@@ -3447,12 +3452,44 @@ def _xray_build_vless_link(client_uuid: str, port: int = 443) -> str:
     return f"vless://{client_uuid}@{XRAY_SERVER_IP}:{port}?{params}#{label}"
 
 
+def _xray_client_exists(tg_id: int) -> bool:
+    """Check if a client with email frosty_{tg_id} already exists in any inbound."""
+    result = _xray_req("GET", f"/panel/api/inbounds/getClientTraffics/frosty_{tg_id}", timeout=5)
+    if isinstance(result, dict) and result.get("success"):
+        return result.get("obj") is not None
+    return False
+
+
+def _xray_update_client(tg_id: int, client_uuid: str) -> bool:
+    """Update an existing client's UUID and flow in 3X-UI (for correcting stale entries)."""
+    payload = {
+        "id": XRAY_INBOUND_ID,
+        "settings": json.dumps({
+            "clients": [{
+                "id": client_uuid,
+                "flow": "xtls-rprx-vision",
+                "email": f"frosty_{tg_id}",
+                "limitIp": 0,
+                "totalGB": 0,
+                "expiryTime": 0,
+                "enable": True,
+                "tgId": str(tg_id),
+                "subId": "",
+            }]
+        }),
+    }
+    result = _xray_req("POST", f"/panel/api/inbounds/updateClient/{client_uuid}", payload, timeout=8)
+    return isinstance(result, dict) and result.get("success", False)
+
+
 def _xray_add_client(tg_id: int, preferred_uuid: str | None = None) -> tuple[str, str] | None:
     """Add a client to inbound XRAY_INBOUND_ID. Returns (uuid, vless_link) or None.
 
     preferred_uuid: при повторной активации после админского «Выкл» передаём прежний UUID из БД,
-    чтобы vless:// не менялся — иначе в Happ остаётся старый импорт и пинг даёт n/a, хотя
-    на сервере уже другой клиент.
+    чтобы vless:// не менялся — иначе в Happ остаётся старый импорт и пинг даёт n/a.
+
+    Graceful duplicate handling: если клиент уже существует в 3X-UI (Duplicate email),
+    обновляем его через updateClient вместо падения.
     """
     if not XRAY_API_URL:
         return None
@@ -3487,6 +3524,18 @@ def _xray_add_client(tg_id: int, preferred_uuid: str | None = None) -> tuple[str
     result = _xray_req("POST", "/panel/api/inbounds/addClient", payload)
     if result and result.get("success"):
         return client_uuid, vless_link
+
+    # Грациозная обработка "Duplicate email": клиент уже существует в 3X-UI
+    msg = (result or {}).get("msg", "") if isinstance(result, dict) else ""
+    if "duplicate" in msg.lower() or "email" in msg.lower():
+        logger.info("3X-UI addClient duplicate for tg_id=%s — trying updateClient", tg_id)
+        if _xray_update_client(tg_id, client_uuid):
+            logger.info("3X-UI updateClient OK for tg_id=%s", tg_id)
+            return client_uuid, vless_link
+        # updateClient не сработал — клиент есть, но UUID другой. Считаем успехом.
+        logger.info("3X-UI client already exists for tg_id=%s (duplicate email, returning link)", tg_id)
+        return client_uuid, vless_link
+
     logger.warning("3X-UI addClient failed for tg_id=%s: %s", tg_id, result)
     return None
 
@@ -3518,25 +3567,48 @@ def _xray_delete_client(client_uuid: str) -> bool:
 
 
 def _ensure_xray_client(tg_id: int, db: Session) -> tuple[str, str] | None:
-    """Return existing active client or create a new one. Returns (uuid, vless_link) or None."""
+    """Return existing active client or create a new one. Returns (uuid, vless_link) or None.
+
+    Полный цикл с защитой от рассинхронизации Xray ↔ Railway DB:
+    1. DB active=True → проверяем что клиент реально есть в Xray; если нет — пересоздаём.
+    2. DB active=False → addClient (с тем же UUID чтобы ссылка в Happ не менялась).
+    3. Нет записи в DB → addClient + INSERT.
+    Duplicate email обрабатывается грациозно в _xray_add_client.
+    """
     existing = db.execute(select(VpnClient).where(VpnClient.telegram_id == tg_id)).scalar_one_or_none()
+
     if existing:
+        # Обновляем ссылку если старая (без flow=xtls-rprx-vision)
+        if existing.uuid and "flow=" not in (existing.vless_link or ""):
+            refreshed = _xray_build_vless_link(existing.uuid)
+            if refreshed:
+                existing.vless_link = refreshed
+                db.commit()
+
         if existing.active:
-            # Обновляем ссылку если она старая (без flow=xtls-rprx-vision)
-            if existing.uuid and "flow=" not in (existing.vless_link or ""):
-                refreshed = _xray_build_vless_link(existing.uuid)
-                if refreshed:
-                    existing.vless_link = refreshed
-                    db.commit()
+            # Периодически проверяем что клиент действительно есть в Xray (защита от рассинхронизации)
+            # TTL 10 минут — не добавляем латентность к каждому запросу
+            now_ts = time.time()
+            last_verified = _xray_client_verified_at.get(tg_id, 0)
+            should_verify = XRAY_API_URL and (now_ts - last_verified > _XRAY_CLIENT_VERIFY_TTL)
+            if should_verify:
+                _xray_client_verified_at[tg_id] = now_ts
+                if not _xray_client_exists(tg_id):
+                    logger.warning("Xray/DB mismatch: DB active=True but client missing in Xray for tg_id=%s — re-adding", tg_id)
+                    result = _xray_add_client(tg_id, preferred_uuid=existing.uuid)
+                    if result:
+                        client_uuid, vless_link = result
+                        existing.vless_link = vless_link
+                        db.commit()
+                        return client_uuid, vless_link
+                    # Не смогли добавить — вернём кэшированную ссылку (Xray API временно недоступен)
+                    logger.warning("Failed to re-add missing Xray client for tg_id=%s, returning cached link", tg_id)
             return existing.uuid, existing.vless_link
-        # Ранее выключено админкой: клиент удалён из 3X-UI, но UUID в БД сохраняем —
-        # добавляем клиента с тем же id, чтобы ссылка vless:// в Happ не устаревала.
+
+        # Ранее выключено: добавляем с тем же UUID чтобы VLESS ссылка в Happ не менялась
         result = _xray_add_client(tg_id, preferred_uuid=existing.uuid)
         if not result:
-            logger.warning(
-                "3X-UI addClient with reused uuid failed for tg_id=%s, trying new uuid (user may need re-import in Happ)",
-                tg_id,
-            )
+            logger.warning("3X-UI addClient with reused uuid failed for tg_id=%s, trying new uuid", tg_id)
             result = _xray_add_client(tg_id, preferred_uuid=None)
         if not result:
             return None
@@ -3547,7 +3619,8 @@ def _ensure_xray_client(tg_id: int, db: Session) -> tuple[str, str] | None:
         existing.traffic_used_bytes = 0
         db.commit()
         return client_uuid, vless_link
-    # Brand new client
+
+    # Новый клиент
     result = _xray_add_client(tg_id)
     if not result:
         return None
@@ -3847,9 +3920,24 @@ def vpn_config(telegram_id: int, req: Request, db: Session = Depends(get_db)) ->
     if INTERNAL_API_TOKEN and not _vpn_config_caller_trusted(req, telegram_id):
         return VpnConfigResponse(available=False, reason="internal_token_required")
 
-    if not _active_sub_for_vpn(telegram_id, db):
-        # Return 200 with reason so frontend can differentiate without catching 403
+    now = utcnow()
+    # Проверяем есть ли подписка вообще (paid/trial + expires_at в будущем)
+    paid_sub = db.execute(
+        select(Subscription)
+        .where(
+            Subscription.telegram_id == telegram_id,
+            Subscription.payment_status.in_(SUBSCRIPTION_ACCESS_STATUSES),
+            Subscription.expires_at > now,
+        )
+        .limit(1)
+    ).scalar_one_or_none()
+
+    if paid_sub is None:
         return VpnConfigResponse(available=False, reason="no_subscription")
+
+    # Подписка есть, но доступ приостановлен (renewal_failed, admin, etc.)
+    if paid_sub.access_suspended or paid_sub.access_blocked_reason:
+        return VpnConfigResponse(available=False, reason="suspended")
 
     if not XRAY_API_URL:
         return VpnConfigResponse(available=False, reason="vpn_not_configured")
