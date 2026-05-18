@@ -3435,7 +3435,7 @@ def _xray_req(method: str, path: str, body: dict | None = None, timeout: int = 8
         return result if status < 300 else None
 
 
-def _xray_build_vless_link(client_uuid: str) -> str:
+def _xray_build_vless_link(client_uuid: str, port: int = 443) -> str:
     if not (XRAY_SERVER_IP and XRAY_PUBLIC_KEY):
         return ""
     params = (
@@ -3443,7 +3443,8 @@ def _xray_build_vless_link(client_uuid: str) -> str:
         f"&fp=chrome&type=tcp&flow=xtls-rprx-vision"
         f"&sni={XRAY_SNI}&sid={XRAY_SHORT_ID}&spx=%2F"
     )
-    return f"vless://{client_uuid}@{XRAY_SERVER_IP}:443?{params}#Frosty VPN"
+    label = "Frosty VPN" if port == 443 else f"Frosty VPN ({port})"
+    return f"vless://{client_uuid}@{XRAY_SERVER_IP}:{port}?{params}#{label}"
 
 
 def _xray_add_client(tg_id: int, preferred_uuid: str | None = None) -> tuple[str, str] | None:
@@ -3733,6 +3734,7 @@ class VpnConfigResponse(BaseModel):
     available: bool
     reason: str | None = None  # "no_subscription" | "vpn_not_configured" | "creating" | "internal_token_required"
     vless_link: str | None = None
+    vless_link_alt: str | None = None  # резервная ссылка на порт 8443 (для ISP блокирующих :443)
     uuid: str | None = None
 
 
@@ -3857,7 +3859,8 @@ def vpn_config(telegram_id: int, req: Request, db: Session = Depends(get_db)) ->
         return VpnConfigResponse(available=True, reason="creating")
 
     client_uuid, vless_link = result
-    return VpnConfigResponse(available=True, vless_link=vless_link, uuid=client_uuid)
+    vless_link_alt = _xray_build_vless_link(client_uuid, port=8443) or None
+    return VpnConfigResponse(available=True, vless_link=vless_link, vless_link_alt=vless_link_alt, uuid=client_uuid)
 
 
 class VpnOnlineResponse(BaseModel):

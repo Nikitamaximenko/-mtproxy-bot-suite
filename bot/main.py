@@ -477,18 +477,19 @@ async def _get_proxy_link(session: aiohttp.ClientSession, tg_id: int) -> str | N
     return data.get("proxy_link") or None
 
 
-async def _get_vless_link(session: aiohttp.ClientSession, tg_id: int) -> str | None:
-    """Пробуем получить vless конфиг напрямую из бэкенда, без mini app."""
+async def _get_vless_link(session: aiohttp.ClientSession, tg_id: int) -> tuple[str | None, str | None]:
+    """Возвращает (vless_link :443, vless_link_alt :8443) или (None, None)."""
     try:
         data = await backend_get(session, f"/vpn/config/{tg_id}")
     except Exception:
-        return None
+        return None, None
     if not data.get("available"):
-        return None
+        return None, None
     vless = data.get("vless_link")
-    if not isinstance(vless, str):
-        return None
-    return vless.strip() or None
+    vless_alt = data.get("vless_link_alt")
+    if not isinstance(vless, str) or not vless.strip():
+        return None, None
+    return vless.strip(), (vless_alt.strip() if isinstance(vless_alt, str) and vless_alt.strip() else None)
 
 
 def _vpn_sub_token(tg_id: int) -> str:
@@ -540,10 +541,10 @@ async def _send_proxy_vpn_bundle(message: Message, session: aiohttp.ClientSessio
     Поэтому deep link отправляем в тексте сообщения (там любые схемы кликабельны),
     а кнопки используем только для стандартных действий.
     """
-    vless = await _get_vless_link(session, tg_uid)
+    vless, vless_alt = await _get_vless_link(session, tg_uid)
     if not vless:
         await asyncio.sleep(0.8)
-        vless = await _get_vless_link(session, tg_uid)
+        vless, vless_alt = await _get_vless_link(session, tg_uid)
 
     if not vless:
         await message.answer(
@@ -558,14 +559,20 @@ async def _send_proxy_vpn_bundle(message: Message, session: aiohttp.ClientSessio
         )
         return
 
+    alt_block = (
+        f"\n\n🔄 <b>Не работает дома/WiFi?</b> Попробуйте резервный ключ (порт 8443):\n"
+        f"<code>{vless_alt}</code>"
+    ) if vless_alt else ""
+
     await message.answer(
         "🛡 <b>Умный VPN Frosty</b>\n\n"
         "<b>Шаг 1.</b> Установите приложение Happ:\n"
         '• <a href="https://apps.apple.com/app/happ-proxy-utility/id6504287215">iOS (App Store)</a>\n'
         '• <a href="https://play.google.com/store/apps/details?id=com.happproxy">Android (Google Play)</a>\n'
         '• <a href="https://hiddify.com">Windows / Mac (Hiddify)</a>\n\n'
-        "<b>Шаг 2.</b> Скопируйте ваш VPN-ключ кнопкой ниже и вставьте в Happ: «+» → «Вставить из буфера»\n\n"
-        f"<code>{vless}</code>\n\n"
+        "<b>Шаг 2.</b> Скопируйте VPN-ключ и вставьте в Happ: «+» → «Вставить из буфера»\n\n"
+        f"<code>{vless}</code>"
+        f"{alt_block}\n\n"
         "⚡ <b>Что умеет Frosty:</b>\n"
         "• WB, Ozon, Avito, Сбер, Госуслуги, Яндекс, VK — напрямую\n"
         "• Instagram, TikTok, YouTube — через VPN автоматически\n"
@@ -609,18 +616,22 @@ async def _send_trial_direct_access(
     already_active: bool,
 ) -> None:
     # Иногда XRAY отдаёт конфиг через 1-2 секунды после активации.
-    vless_link = await _get_vless_link(session, tg_id)
+    vless_link, vless_link_alt = await _get_vless_link(session, tg_id)
     if not vless_link:
         await asyncio.sleep(1.5)
-        vless_link = await _get_vless_link(session, tg_id)
+        vless_link, vless_link_alt = await _get_vless_link(session, tg_id)
 
     intro = "🎁 <b>Пробный период уже активен</b>" if already_active else "🎁 <b>Пробный день активирован!</b>"
     if vless_link:
+        alt_block_trial = (
+            f"\n\n🔄 <b>Не работает на WiFi?</b> Резервный ключ (порт 8443):\n<code>{vless_link_alt}</code>"
+        ) if vless_link_alt else ""
         await message.answer(
             f"{intro}\n\n"
             f"Доступ до: <b>{exp_human}</b>\n\n"
-            "Скопируйте VPN-ключ кнопкой ниже и вставьте в Happ: «+» → «Вставить из буфера»\n\n"
-            f"<code>{vless_link}</code>\n\n"
+            "Скопируйте VPN-ключ и вставьте в Happ: «+» → «Вставить из буфера»\n\n"
+            f"<code>{vless_link}</code>"
+            f"{alt_block_trial}\n\n"
             "❓ Нет Happ?\n"
             '<a href="https://apps.apple.com/app/happ-proxy-utility/id6504287215">iOS</a> · '
             '<a href="https://play.google.com/store/apps/details?id=com.happproxy">Android</a> · '
@@ -1170,16 +1181,18 @@ async def main() -> None:
         if action == "copy_vpn":
             await query.answer("Отправляю код для копирования")
             tg_uid = query.from_user.id
-            vless = await _get_vless_link(session, tg_uid)
+            vless, vless_alt = await _get_vless_link(session, tg_uid)
             if not vless:
                 await msg.answer(
                     "Код пока не получен. Нажмите «🛡 Подключить VPN» снова через 10–20 секунд.",
                     reply_markup=main_menu_kb(tg_uid),
                 )
                 return
+            alt_copy = (
+                f"\n\n🔄 <b>Не работает на WiFi?</b> Резервный ключ:\n<code>{html.escape(vless_alt)}</code>"
+            ) if vless_alt else ""
             await msg.answer(
-                "Скопируйте строку ниже и вставьте в Happ:\n\n"
-                f"<code>{html.escape(vless)}</code>",
+                f"Скопируйте строку ниже и вставьте в Happ:\n\n<code>{html.escape(vless)}</code>{alt_copy}",
                 parse_mode="HTML",
                 reply_markup=_vpn_direct_kb(vless),
             )
@@ -1188,16 +1201,18 @@ async def main() -> None:
         if action == "trial_copy_vless":
             await query.answer("Готовлю код…")
             tg_uid = query.from_user.id
-            vless = await _get_vless_link(session, tg_uid)
+            vless, vless_alt = await _get_vless_link(session, tg_uid)
             if not vless:
                 await msg.answer(
                     "Код ещё не готов. Подождите 10–20 секунд и нажмите кнопку снова или /status.",
                     reply_markup=trial_direct_kb(tg_uid, show_copy_button=False),
                 )
                 return
+            alt_trial = (
+                f"\n\n🔄 <b>Не работает на WiFi?</b> Резервный:\n<code>{html.escape(vless_alt)}</code>"
+            ) if vless_alt else ""
             await msg.answer(
-                "Скопируйте этот код и вставьте в Happ:\n\n"
-                f"<code>{html.escape(vless)}</code>",
+                f"Скопируйте этот код и вставьте в Happ:\n\n<code>{html.escape(vless)}</code>{alt_trial}",
                 parse_mode="HTML",
                 reply_markup=trial_direct_kb(tg_uid, show_copy_button=True),
             )
