@@ -3440,7 +3440,8 @@ def _xray_build_vless_link(client_uuid: str) -> str:
         return ""
     params = (
         f"security=reality&encryption=none&pbk={XRAY_PUBLIC_KEY}"
-        f"&fp=chrome&type=tcp&sni={XRAY_SNI}&sid={XRAY_SHORT_ID}&spx=%2F"
+        f"&fp=chrome&type=tcp&flow=xtls-rprx-vision"
+        f"&sni={XRAY_SNI}&sid={XRAY_SHORT_ID}&spx=%2F"
     )
     return f"vless://{client_uuid}@{XRAY_SERVER_IP}:443?{params}#Frosty VPN"
 
@@ -3471,7 +3472,7 @@ def _xray_add_client(tg_id: int, preferred_uuid: str | None = None) -> tuple[str
         "settings": json.dumps({
             "clients": [{
                 "id": client_uuid,
-                "flow": "",
+                "flow": "xtls-rprx-vision",
                 "email": f"frosty_{tg_id}",
                 "limitIp": 0,
                 "totalGB": 0,
@@ -3520,6 +3521,12 @@ def _ensure_xray_client(tg_id: int, db: Session) -> tuple[str, str] | None:
     existing = db.execute(select(VpnClient).where(VpnClient.telegram_id == tg_id)).scalar_one_or_none()
     if existing:
         if existing.active:
+            # Обновляем ссылку если она старая (без flow=xtls-rprx-vision)
+            if existing.uuid and "flow=" not in (existing.vless_link or ""):
+                refreshed = _xray_build_vless_link(existing.uuid)
+                if refreshed:
+                    existing.vless_link = refreshed
+                    db.commit()
             return existing.uuid, existing.vless_link
         # Ранее выключено админкой: клиент удалён из 3X-UI, но UUID в БД сохраняем —
         # добавляем клиента с тем же id, чтобы ссылка vless:// в Happ не устаревала.
