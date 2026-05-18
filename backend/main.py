@@ -3947,8 +3947,9 @@ def vpn_config(telegram_id: int, req: Request, db: Session = Depends(get_db)) ->
         return VpnConfigResponse(available=True, reason="creating")
 
     client_uuid, vless_link = result
-    vless_link_alt = _xray_build_vless_link(client_uuid, port=8443) or None
-    return VpnConfigResponse(available=True, vless_link=vless_link, vless_link_alt=vless_link_alt, uuid=client_uuid)
+    # Порт 8443 — socat relay — слишком медленный (480–1400ms TLS vs 150–270ms на 443).
+    # Не отдаём его клиентам; fallback только через iptables DNAT на VPS (без overhead).
+    return VpnConfigResponse(available=True, vless_link=vless_link, uuid=client_uuid)
 
 
 class VpnOnlineResponse(BaseModel):

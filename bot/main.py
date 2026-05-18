@@ -528,10 +528,6 @@ async def _send_proxy_vpn_bundle(message: Message, session: aiohttp.ClientSessio
         return
 
     vless = vless.strip()
-    alt_block = (
-        f"\n\n🔄 <b>Не работает дома/WiFi?</b> Попробуйте резервный ключ (порт 8443):\n"
-        f"<code>{vless_alt.strip()}</code>"
-    ) if isinstance(vless_alt, str) and vless_alt.strip() else ""
 
     await message.answer(
         "🛡 <b>Умный VPN Frosty</b>\n\n"
@@ -540,8 +536,7 @@ async def _send_proxy_vpn_bundle(message: Message, session: aiohttp.ClientSessio
         '• <a href="https://play.google.com/store/apps/details?id=com.happproxy">Android (Google Play)</a>\n'
         '• <a href="https://hiddify.com">Windows / Mac (Hiddify)</a>\n\n'
         "<b>Шаг 2.</b> Скопируйте VPN-ключ и вставьте в Happ: «+» → «Вставить из буфера»\n\n"
-        f"<code>{vless}</code>"
-        f"{alt_block}\n\n"
+        f"<code>{vless}</code>\n\n"
         "⚡ <b>Что умеет Frosty:</b>\n"
         "• WB, Ozon, Avito, Сбер, Госуслуги, Яндекс, VK — напрямую\n"
         "• Instagram, TikTok, YouTube — через VPN автоматически\n"
@@ -582,15 +577,11 @@ async def _send_trial_direct_access(
 
     intro = "🎁 <b>Пробный период уже активен</b>" if already_active else "🎁 <b>Пробный день активирован!</b>"
     if vless_link:
-        alt_block_trial = (
-            f"\n\n🔄 <b>Не работает на WiFi?</b> Резервный ключ (порт 8443):\n<code>{vless_link_alt}</code>"
-        ) if vless_link_alt else ""
         await message.answer(
             f"{intro}\n\n"
             f"Доступ до: <b>{exp_human}</b>\n\n"
             "Скопируйте VPN-ключ и вставьте в Happ: «+» → «Вставить из буфера»\n\n"
-            f"<code>{vless_link}</code>"
-            f"{alt_block_trial}\n\n"
+            f"<code>{vless_link}</code>\n\n"
             "❓ Нет Happ?\n"
             '<a href="https://apps.apple.com/app/happ-proxy-utility/id6504287215">iOS</a> · '
             '<a href="https://play.google.com/store/apps/details?id=com.happproxy">Android</a> · '
@@ -1155,15 +1146,11 @@ async def main() -> None:
                     reply_markup=main_menu_kb(tg_uid),
                 )
                 return
-            alt_copy = (
-                f"\n\n🔄 <b>Не работает на WiFi?</b> Резервный ключ:\n<code>{html.escape(vless_alt)}</code>"
-            ) if vless_alt else ""
             await msg.answer(
-                f"Скопируйте строку ниже и вставьте в Happ:\n\n<code>{html.escape(vless)}</code>{alt_copy}",
+                f"Скопируйте строку ниже и вставьте в Happ:\n\n<code>{html.escape(vless)}</code>",
                 parse_mode="HTML",
                 reply_markup=InlineKeyboardMarkup(inline_keyboard=[
                     [InlineKeyboardButton(text="🛡 Подключить VPN", callback_data="menu:connect")],
-                    [InlineKeyboardButton(text="💳 Купить / продлить подписку", callback_data="menu:buy_in_bot")],
                     [InlineKeyboardButton(text="🏠 Главное меню", callback_data="menu:main")],
                 ]),
             )
