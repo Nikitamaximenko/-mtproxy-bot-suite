@@ -3396,7 +3396,7 @@ def _xray_login() -> str | None:
             headers={"Content-Type": "application/json"},
             method="POST",
         )
-        with urllib.request.urlopen(req, timeout=10) as resp:
+        with urllib.request.urlopen(req, timeout=5) as resp:
             raw_cookie = resp.headers.get("Set-Cookie", "")
             return raw_cookie.split(";")[0] if raw_cookie else None
     except Exception as e:
@@ -3404,7 +3404,7 @@ def _xray_login() -> str | None:
         return None
 
 
-def _xray_req(method: str, path: str, body: dict | None = None) -> dict | None:
+def _xray_req(method: str, path: str, body: dict | None = None, timeout: int = 8) -> dict | None:
     global _xray_cookie
 
     def _do(cookie: str) -> tuple[int, dict | None]:
@@ -3415,7 +3415,7 @@ def _xray_req(method: str, path: str, body: dict | None = None) -> dict | None:
             headers["Content-Type"] = "application/json"
         req_obj = urllib.request.Request(url, data=raw_body, headers=headers, method=method)
         try:
-            with urllib.request.urlopen(req_obj, timeout=15) as resp:
+            with urllib.request.urlopen(req_obj, timeout=timeout) as resp:
                 raw = resp.read()
                 return resp.status, json.loads(raw) if raw else None
         except urllib.error.HTTPError as e:
@@ -3573,7 +3573,11 @@ def deactivate_vpn_client(tg_id: int, db: Session) -> None:
 
 
 def _process_vpn_traffic_sync() -> None:
-    """Sync traffic stats from 3X-UI and deactivate over-limit clients."""
+    """Sync traffic stats from 3X-UI and deactivate over-limit clients.
+
+    Использует короткий таймаут (5s) на каждый запрос и пропускает
+    недоступные клиенты — не блокирует весь цикл если Xray API тормозит.
+    """
     if not XRAY_API_URL:
         return
     db = SessionLocal()
@@ -3585,26 +3589,34 @@ def _process_vpn_traffic_sync() -> None:
 
         deactivated = 0
         synced = 0
+        errors = 0
         for client in clients:
             email = f"frosty_{client.telegram_id}"
             try:
-                up, down = _xray_get_client_traffic(email)
-                total = up + down
-                client.traffic_used_bytes = total
-                client.last_sync_at = now
-                synced += 1
-                # Enforce traffic limit (0 = unlimited)
-                if client.traffic_limit_gb > 0:
-                    limit_bytes = client.traffic_limit_gb * 1024 * 1024 * 1024
-                    if total >= limit_bytes:
-                        logger.info("Traffic limit exceeded for tg_id=%s (%d GB), deactivating", client.telegram_id, client.traffic_limit_gb)
-                        _deactivate_vpn_client_no_commit(int(client.telegram_id), db)
-                        deactivated += 1
+                # Короткий таймаут: если Xray API не отвечает быстро — пропускаем
+                result = _xray_req("GET", f"/panel/api/inbounds/clientTraffics/{email}", timeout=5)
+                if isinstance(result, dict) and result.get("success"):
+                    obj = result.get("obj") or {}
+                    up = int(obj.get("up", 0)) if isinstance(obj, dict) else 0
+                    down = int(obj.get("down", 0)) if isinstance(obj, dict) else 0
+                    total = up + down
+                    client.traffic_used_bytes = total
+                    client.last_sync_at = now
+                    synced += 1
+                    if client.traffic_limit_gb > 0:
+                        limit_bytes = client.traffic_limit_gb * 1024 * 1024 * 1024
+                        if total >= limit_bytes:
+                            logger.info("Traffic limit exceeded tg_id=%s (%d GB)", client.telegram_id, client.traffic_limit_gb)
+                            _deactivate_vpn_client_no_commit(int(client.telegram_id), db)
+                            deactivated += 1
+                else:
+                    errors += 1
             except Exception:
-                logger.exception("Failed to sync traffic for tg_id=%s", client.telegram_id)
+                errors += 1
+                logger.debug("Traffic sync skip tg_id=%s (Xray API unavailable)", client.telegram_id)
 
         db.commit()
-        logger.info("VPN traffic sync: %d clients synced, %d deactivated", synced, deactivated)
+        logger.info("VPN traffic sync: %d synced, %d deactivated, %d errors/skipped", synced, deactivated, errors)
     except Exception:
         db.rollback()
         raise
