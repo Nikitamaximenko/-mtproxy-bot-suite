@@ -74,7 +74,7 @@ export async function POST(req: NextRequest) {
     customer_email?: unknown
     payment_provider?: unknown
   }
-  const backendUrl = (process.env.BACKEND_URL || "http://localhost:8000").replace(/\/+$/, "")
+  const backendUrl = (process.env.BACKEND_URL || "https://138-124-80-97.sslip.io:9443").replace(/\/+$/, "")
   const tgIdNum = Number(telegram_id)
   const normalizedUsername = typeof username === "string" && username.trim() ? username.trim() : null
   const normalizedEmail = typeof email === "string" && email.trim() ? email.trim() : null

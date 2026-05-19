@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server"
 
-const BACKEND = (process.env.BACKEND_URL || "http://localhost:8000").replace(/\/+$/, "")
+const BACKEND = (process.env.BACKEND_URL || "https://138-124-80-97.sslip.io:9443").replace(/\/+$/, "")
 
 function backendHeaders(initData?: string | null): Record<string, string> {
   const h: Record<string, string> = {

@@ -12,7 +12,7 @@ function backendHeaders(initData?: string | null): Record<string, string> {
 }
 
 export async function GET(req: NextRequest) {
-  const backendUrl = (process.env.BACKEND_URL || "http://localhost:8000").replace(/\/+$/, "")
+  const backendUrl = (process.env.BACKEND_URL || "https://138-124-80-97.sslip.io:9443").replace(/\/+$/, "")
 
   // Email-based lookup (web users returning to the site)
   const email = req.nextUrl.searchParams.get("email")
@@ -52,7 +52,7 @@ export async function GET(req: NextRequest) {
  * подписи Telegram (без совпадения INTERNAL_API_TOKEN на Vercel).
  */
 export async function POST(req: NextRequest) {
-  const backendUrl = (process.env.BACKEND_URL || "http://localhost:8000").replace(/\/+$/, "")
+  const backendUrl = (process.env.BACKEND_URL || "https://138-124-80-97.sslip.io:9443").replace(/\/+$/, "")
   try {
     const body = (await req.json()) as { tg_id?: unknown; init_data?: unknown }
     const tgId = Number(body.tg_id)
