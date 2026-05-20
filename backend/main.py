@@ -688,63 +688,6 @@ def health() -> HealthResponse:
     return HealthResponse(status="ok")
 
 
-@app.get("/admin/export-env")
-def admin_export_env(req: Request) -> JSONResponse:
-    """Export env config for migration. Protected by admin key."""
-    got = (req.headers.get("x-admin-key") or "").strip()
-    if not ADMIN_API_KEY or not hmac.compare_digest(got, ADMIN_API_KEY):
-        raise HTTPException(status_code=403, detail="forbidden")
-    return JSONResponse({
-        "LAVA_TOP_API_KEY": LAVA_TOP_API_KEY,
-        "LAVA_TOP_OFFER_ID": LAVA_TOP_OFFER_ID,
-        "LAVA_TOP_WEBHOOK_API_KEY": LAVA_TOP_WEBHOOK_API_KEY,
-        "LAVA_TOP_PERIODICITY": LAVA_TOP_PERIODICITY,
-        "LAVA_TOP_PAYMENT_PROVIDER": LAVA_TOP_PAYMENT_PROVIDER,
-        "LAVA_TOP_PAYMENT_METHOD": LAVA_TOP_PAYMENT_METHOD,
-        "LAVA_PAY_URL_TEMPLATE": LAVA_PAY_URL_TEMPLATE,
-        "LAVA_CHECKOUT_FALLBACK_URL": LAVA_CHECKOUT_FALLBACK_URL,
-        "YOOKASSA_SHOP_ID": YOOKASSA_SHOP_ID,
-        "YOOKASSA_SECRET_KEY": YOOKASSA_SECRET_KEY,
-        "PAYMENT_AMOUNT_RUB": str(PAYMENT_AMOUNT_RUB),
-        "TRIAL_DAYS": str(TRIAL_DAYS),
-        "ADMIN_NOTIFY_CHAT_ID": ADMIN_NOTIFY_CHAT_ID,
-        "INTERNAL_API_TOKEN": INTERNAL_API_TOKEN,
-        "FRONTEND_URL": FRONTEND_URL,
-        "PUBLIC_BASE_URL": PUBLIC_BASE_URL,
-        "MINIAPP_PATH": MINIAPP_PATH,
-        "DATABASE_URL": DATABASE_URL,
-    })
-
-
-@app.get("/admin/export-db")
-def admin_export_db(req: Request, db: Session = Depends(get_db)) -> JSONResponse:
-    """Export all DB rows via raw SQL. Protected by admin key."""
-    got = (req.headers.get("x-admin-key") or "").strip()
-    if not ADMIN_API_KEY or not hmac.compare_digest(got, ADMIN_API_KEY):
-        raise HTTPException(status_code=403, detail="forbidden")
-    import decimal as _decimal
-    result: dict[str, Any] = {}
-    for table in ("users", "subscriptions", "vpn_clients"):
-        try:
-            rows_result = db.execute(text(f"SELECT * FROM {table}"))
-            cols = list(rows_result.keys())
-            data = []
-            for row in rows_result.fetchall():
-                record: dict[str, Any] = {}
-                for col, val in zip(cols, row):
-                    if val is None:
-                        record[col] = None
-                    elif isinstance(val, datetime):
-                        record[col] = val.isoformat()
-                    elif isinstance(val, _decimal.Decimal):
-                        record[col] = float(val)
-                    else:
-                        record[col] = str(val)
-                data.append(record)
-            result[table] = data
-        except Exception as tbl_err:
-            result[table] = {"error": str(tbl_err)}
-    return JSONResponse(result)
 
 
 class TrackRefRequest(BaseModel):
