@@ -718,58 +718,33 @@ def admin_export_env(req: Request) -> JSONResponse:
 
 @app.get("/admin/export-db")
 def admin_export_db(req: Request, db: Session = Depends(get_db)) -> JSONResponse:
-    """Temporary: export all DB data for migration to VPS. Protected by admin key."""
+    """Export all DB rows via raw SQL. Protected by admin key."""
     got = (req.headers.get("x-admin-key") or "").strip()
     if not ADMIN_API_KEY or not hmac.compare_digest(got, ADMIN_API_KEY):
         raise HTTPException(status_code=403, detail="forbidden")
-    users = db.execute(select(TgUser)).scalars().all()
-    subs = db.execute(select(Subscription)).scalars().all()
-    vpn_clients = db.execute(select(VpnClient)).scalars().all()
-    def row_to_dict(obj: Any) -> dict[str, Any]:
-        result = {}
-        for k, v in obj.__dict__.items():
-            if k.startswith("_"):
-                continue
-            if isinstance(v, datetime):
-                v = v.isoformat()
-            elif hasattr(v, "hex"):  # UUID
-                v = str(v)
-            result[k] = v
-        return result
-    env_config = {
-        "LAVA_TOP_API_KEY": LAVA_TOP_API_KEY,
-        "LAVA_TOP_OFFER_ID": LAVA_TOP_OFFER_ID,
-        "LAVA_TOP_WEBHOOK_API_KEY": LAVA_TOP_WEBHOOK_API_KEY,
-        "LAVA_TOP_PERIODICITY": LAVA_TOP_PERIODICITY,
-        "LAVA_TOP_PAYMENT_PROVIDER": LAVA_TOP_PAYMENT_PROVIDER,
-        "LAVA_TOP_PAYMENT_METHOD": LAVA_TOP_PAYMENT_METHOD,
-        "LAVA_PAY_URL_TEMPLATE": LAVA_PAY_URL_TEMPLATE,
-        "LAVA_CHECKOUT_FALLBACK_URL": LAVA_CHECKOUT_FALLBACK_URL,
-        "YOOKASSA_SHOP_ID": YOOKASSA_SHOP_ID,
-        "YOOKASSA_SECRET_KEY": YOOKASSA_SECRET_KEY,
-        "PAYMENT_AMOUNT_RUB": PAYMENT_AMOUNT_RUB,
-        "TRIAL_DAYS": TRIAL_DAYS,
-        "ADMIN_NOTIFY_CHAT_ID": ADMIN_NOTIFY_CHAT_ID,
-        "BOT_TOKEN": BOT_TOKEN,
-        "INTERNAL_API_TOKEN": INTERNAL_API_TOKEN,
-        "FRONTEND_URL": FRONTEND_URL,
-        "PUBLIC_BASE_URL": PUBLIC_BASE_URL,
-        "MINIAPP_PATH": MINIAPP_PATH,
-        "XRAY_API_URL": XRAY_API_URL,
-        "XRAY_USERNAME": XRAY_USERNAME,
-        "XRAY_PASSWORD": XRAY_PASSWORD,
-        "XRAY_INBOUND_ID": XRAY_INBOUND_ID,
-        "XRAY_PUBLIC_KEY": XRAY_PUBLIC_KEY,
-        "XRAY_SHORT_ID": XRAY_SHORT_ID,
-        "XRAY_SNI": XRAY_SNI,
-        "XRAY_SERVER_IP": XRAY_SERVER_IP,
-    }
-    return JSONResponse({
-        "env": env_config,
-        "users": [row_to_dict(u) for u in users],
-        "subscriptions": [row_to_dict(s) for s in subs],
-        "vpn_clients": [row_to_dict(v) for v in vpn_clients],
-    })
+    import decimal as _decimal
+    result: dict[str, Any] = {}
+    for table in ("tg_users", "subscriptions", "vpn_clients"):
+        try:
+            rows_result = db.execute(text(f"SELECT * FROM {table}"))
+            cols = list(rows_result.keys())
+            data = []
+            for row in rows_result.fetchall():
+                record: dict[str, Any] = {}
+                for col, val in zip(cols, row):
+                    if val is None:
+                        record[col] = None
+                    elif isinstance(val, datetime):
+                        record[col] = val.isoformat()
+                    elif isinstance(val, _decimal.Decimal):
+                        record[col] = float(val)
+                    else:
+                        record[col] = str(val)
+                data.append(record)
+            result[table] = data
+        except Exception as tbl_err:
+            result[table] = {"error": str(tbl_err)}
+    return JSONResponse(result)
 
 
 class TrackRefRequest(BaseModel):
