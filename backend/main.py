@@ -688,6 +688,53 @@ def health() -> HealthResponse:
     return HealthResponse(status="ok")
 
 
+@app.get("/admin/export-db")
+def admin_export_db(req: Request, db: Session = Depends(get_db)) -> JSONResponse:
+    """Temporary: export all DB data for migration to VPS. Protected by admin key."""
+    got = (req.headers.get("x-admin-key") or "").strip()
+    if not ADMIN_API_KEY or not hmac.compare_digest(got, ADMIN_API_KEY):
+        raise HTTPException(status_code=403, detail="forbidden")
+    users = db.execute(select(TgUser)).scalars().all()
+    subs = db.execute(select(Subscription)).scalars().all()
+    vpn_clients = db.execute(select(VpnClient)).scalars().all()
+    def row_to_dict(obj: Any) -> dict[str, Any]:
+        return {c.key: getattr(obj, c.key) for c in sa_inspect(obj).mapper.column_attrs}
+    env_config = {
+        "LAVA_TOP_API_KEY": LAVA_TOP_API_KEY,
+        "LAVA_TOP_OFFER_ID": LAVA_TOP_OFFER_ID,
+        "LAVA_TOP_WEBHOOK_API_KEY": LAVA_TOP_WEBHOOK_API_KEY,
+        "LAVA_TOP_PERIODICITY": LAVA_TOP_PERIODICITY,
+        "LAVA_TOP_PAYMENT_PROVIDER": LAVA_TOP_PAYMENT_PROVIDER,
+        "LAVA_TOP_PAYMENT_METHOD": LAVA_TOP_PAYMENT_METHOD,
+        "LAVA_PAY_URL_TEMPLATE": LAVA_PAY_URL_TEMPLATE,
+        "LAVA_CHECKOUT_FALLBACK_URL": LAVA_CHECKOUT_FALLBACK_URL,
+        "YOOKASSA_SHOP_ID": YOOKASSA_SHOP_ID,
+        "YOOKASSA_SECRET_KEY": YOOKASSA_SECRET_KEY,
+        "PAYMENT_AMOUNT_RUB": PAYMENT_AMOUNT_RUB,
+        "TRIAL_DAYS": TRIAL_DAYS,
+        "ADMIN_NOTIFY_CHAT_ID": ADMIN_NOTIFY_CHAT_ID,
+        "BOT_TOKEN": BOT_TOKEN,
+        "INTERNAL_API_TOKEN": INTERNAL_API_TOKEN,
+        "FRONTEND_URL": FRONTEND_URL,
+        "PUBLIC_BASE_URL": PUBLIC_BASE_URL,
+        "MINIAPP_PATH": MINIAPP_PATH,
+        "XRAY_API_URL": XRAY_API_URL,
+        "XRAY_USERNAME": XRAY_USERNAME,
+        "XRAY_PASSWORD": XRAY_PASSWORD,
+        "XRAY_INBOUND_ID": XRAY_INBOUND_ID,
+        "XRAY_PUBLIC_KEY": XRAY_PUBLIC_KEY,
+        "XRAY_SHORT_ID": XRAY_SHORT_ID,
+        "XRAY_SNI": XRAY_SNI,
+        "XRAY_SERVER_IP": XRAY_SERVER_IP,
+    }
+    return JSONResponse({
+        "env": env_config,
+        "users": [row_to_dict(u) for u in users],
+        "subscriptions": [row_to_dict(s) for s in subs],
+        "vpn_clients": [row_to_dict(v) for v in vpn_clients],
+    })
+
+
 class TrackRefRequest(BaseModel):
     telegram_id: int = Field(..., ge=1)
     username: str | None = None
