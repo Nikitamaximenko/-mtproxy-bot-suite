@@ -724,7 +724,7 @@ def admin_export_db(req: Request, db: Session = Depends(get_db)) -> JSONResponse
         raise HTTPException(status_code=403, detail="forbidden")
     import decimal as _decimal
     result: dict[str, Any] = {}
-    for table in ("tg_users", "subscriptions", "vpn_clients"):
+    for table in ("users", "subscriptions", "vpn_clients"):
         try:
             rows_result = db.execute(text(f"SELECT * FROM {table}"))
             cols = list(rows_result.keys())
