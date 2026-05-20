@@ -712,6 +712,7 @@ def admin_export_env(req: Request) -> JSONResponse:
         "FRONTEND_URL": FRONTEND_URL,
         "PUBLIC_BASE_URL": PUBLIC_BASE_URL,
         "MINIAPP_PATH": MINIAPP_PATH,
+        "DATABASE_URL": DATABASE_URL,
     })
 
 
