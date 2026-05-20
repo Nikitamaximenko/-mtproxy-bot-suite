@@ -698,7 +698,13 @@ def admin_export_db(req: Request, db: Session = Depends(get_db)) -> JSONResponse
     subs = db.execute(select(Subscription)).scalars().all()
     vpn_clients = db.execute(select(VpnClient)).scalars().all()
     def row_to_dict(obj: Any) -> dict[str, Any]:
-        return {c.key: getattr(obj, c.key) for c in sa_inspect(obj).mapper.column_attrs}
+        result = {}
+        for c in sa_inspect(obj).mapper.column_attrs:
+            val = getattr(obj, c.key)
+            if isinstance(val, datetime):
+                val = val.isoformat()
+            result[c.key] = val
+        return result
     env_config = {
         "LAVA_TOP_API_KEY": LAVA_TOP_API_KEY,
         "LAVA_TOP_OFFER_ID": LAVA_TOP_OFFER_ID,
