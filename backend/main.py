@@ -1726,11 +1726,9 @@ def checkout_create(payload: CheckoutCreateRequest, db: Session = Depends(get_db
 
 
 def _apply_proxy_credentials(sub: Subscription) -> None:
-    """Выдать MTProxy-учётные данные без смены оплаченного периода."""
-    if not MT_PROXY_SERVER:
-        raise RuntimeError("MT_PROXY_SERVER is not configured")
-    if not MT_PROXY_SECRET:
-        raise RuntimeError("MT_PROXY_SECRET is not configured")
+    """Выдать MTProxy-учётные данные (опционально; если MT_PROXY_SERVER не задан — пропускаем)."""
+    if not MT_PROXY_SERVER or not MT_PROXY_SECRET:
+        return
     sub.proxy_server = MT_PROXY_SERVER
     sub.proxy_port = MT_PROXY_PORT
     sub.proxy_secret = MT_PROXY_SECRET
@@ -6264,7 +6262,7 @@ def admin_proxy_status(req: Request) -> ProxyStatusResponse:
     _require_admin(req)
     server = MT_PROXY_SERVER or ""
     if not server:
-        raise HTTPException(status_code=503, detail="MT_PROXY_SERVER is not configured")
+        return ProxyStatusResponse(online=False, server="", port=0, latency_ms=None, degraded=False, handshake="not_configured")
     port = MT_PROXY_PORT
 
     online = False
