@@ -895,6 +895,14 @@ async def cmd_status(message: Message, session: aiohttp.ClientSession, tg_id: in
 
 
 async def main() -> None:
+    # On Railway the bot is disabled — only VPS instance polls Telegram.
+    # Prevents TelegramConflictError from two simultaneous getUpdates.
+    if os.getenv("RAILWAY_ENVIRONMENT"):
+        import asyncio as _asyncio
+        _log.info("RAILWAY_ENVIRONMENT detected — bot polling disabled on Railway. VPS instance is primary.")
+        await _asyncio.sleep(float("inf"))
+        return
+
     if not BOT_TOKEN:
         raise SystemExit("BOT_TOKEN is missing. Create bot/.env from bot/.env.example")
 
