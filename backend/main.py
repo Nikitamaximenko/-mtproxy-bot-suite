@@ -1639,7 +1639,7 @@ def checkout_create(payload: CheckoutCreateRequest, db: Session = Depends(get_db
             payment_url=payment_url,
         )
         logger.info("Checkout YooKassa: tg_id=%s token=%s", tg_id, token)
-    return CheckoutCreateResponse(payment_url=payment_url, payment_token=token)
+        return CheckoutCreateResponse(payment_url=payment_url, payment_token=token)
 
     lava_contract_id: str | None = None
     lava_top_configured = bool(LAVA_TOP_API_KEY and LAVA_TOP_OFFER_ID)
