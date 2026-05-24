@@ -1498,6 +1498,83 @@ def _checkout_fallback_payment_url(payment_token: str) -> str:
     )
 
 
+_LAVA_ORDER_ID_KEYS = (
+    "order_id",
+    "orderId",
+    "OrderId",
+    "merchant_order_id",
+    "externalId",
+    "external_id",
+    "payment_token",
+)
+
+
+def _lava_extract_payment_token(payload: dict) -> str | None:
+    """Извлечь наш payment_token (UUID) из тела вебхука Lava."""
+    candidates: list[str] = []
+    for key in _LAVA_ORDER_ID_KEYS:
+        val = payload.get(key)
+        if val:
+            candidates.append(str(val).strip())
+    for nested_key in ("product", "buyer", "metadata", "customFields"):
+        nested = payload.get(nested_key)
+        if isinstance(nested, dict):
+            for key in _LAVA_ORDER_ID_KEYS:
+                val = nested.get(key)
+                if val:
+                    candidates.append(str(val).strip())
+    for cf_key in ("custom_fields", "customFields"):
+        cf = payload.get(cf_key)
+        if cf:
+            candidates.append(str(cf).strip())
+    uuid_re = re.compile(
+        r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+        re.IGNORECASE,
+    )
+    for candidate in candidates:
+        if uuid_re.match(candidate):
+            return candidate
+    return None
+
+
+def _find_subscription_for_lava_webhook(
+    db: Session,
+    *,
+    contract_id: str,
+    parent_contract_id: str,
+    event_type: str,
+    payload: dict,
+) -> Subscription | None:
+    """Найти подписку по contractId или payment_token (order_id в legacy checkout)."""
+    lookup_id = contract_id if event_type == "payment.success" else (parent_contract_id or contract_id)
+
+    if lookup_id:
+        sub = db.execute(
+            select(Subscription).where(Subscription.lava_contract_id == lookup_id)
+        ).scalar_one_or_none()
+        if sub:
+            return sub
+
+    if contract_id and event_type != "payment.success":
+        sub = db.execute(
+            select(Subscription).where(Subscription.lava_contract_id == contract_id)
+        ).scalar_one_or_none()
+        if sub:
+            return sub
+
+    token = _lava_extract_payment_token(payload)
+    if token:
+        sub = db.execute(
+            select(Subscription).where(Subscription.payment_token == token)
+        ).scalar_one_or_none()
+        if sub:
+            if lookup_id and not (sub.lava_contract_id or "").strip():
+                sub.lava_contract_id = lookup_id
+            return sub
+
+    return None
+
+
 @app.post("/checkout/create", response_model=CheckoutCreateResponse)
 def checkout_create(payload: CheckoutCreateRequest, db: Session = Depends(get_db)) -> CheckoutCreateResponse:
     import random
@@ -1552,6 +1629,8 @@ def checkout_create(payload: CheckoutCreateRequest, db: Session = Depends(get_db
             existing_user.username = username
         if effective_email and not existing_user.email:
             existing_user.email = effective_email
+    if not effective_email and existing_user and existing_user.email:
+        effective_email = _normalize_email(existing_user.email)
 
     token = uuid4()
     sub = Subscription(
@@ -2423,12 +2502,23 @@ async def lava_webhook(req: Request, db: Session = Depends(get_db)) -> OkRespons
     # payment.success: use contractId (first payment)
     # subscription.recurring.payment.success: use parentContractId (we saved the first contract)
     lookup_id = contract_id if event_type == "payment.success" else (parent_contract_id or contract_id)
-    if not lookup_id:
+    if not lookup_id and not _lava_extract_payment_token(payload):
         return OkResponse(ok=True)
 
-    sub = db.execute(select(Subscription).where(Subscription.lava_contract_id == lookup_id)).scalar_one_or_none()
+    sub = _find_subscription_for_lava_webhook(
+        db,
+        contract_id=contract_id,
+        parent_contract_id=parent_contract_id,
+        event_type=event_type,
+        payload=payload,
+    )
     if sub is None:
-        logger.warning("No subscription found for contractId=%s (event=%s)", lookup_id, event_type)
+        logger.warning(
+            "No subscription found for contractId=%s order_token=%s (event=%s)",
+            lookup_id or None,
+            _lava_extract_payment_token(payload),
+            event_type,
+        )
         return OkResponse(ok=True)
 
     is_recurring = event_type == "subscription.recurring.payment.success"
