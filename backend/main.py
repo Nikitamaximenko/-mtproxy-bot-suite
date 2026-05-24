@@ -421,6 +421,23 @@ def _real_paid_subscription_clause(model: type[Subscription] = Subscription):
     )
 
 
+def _verified_payment_clause(model: type[Subscription] = Subscription):
+    """Строка с подтверждённой оплатой (Lava / YooKassa / billing_provider), без ручных /admin/activate."""
+    has_provider = or_(
+        and_(model.billing_provider.is_not(None), model.billing_provider != ""),
+        model.lava_contract_id.is_not(None),
+        and_(model.yookassa_payment_method_id.is_not(None), model.yookassa_payment_method_id != ""),
+        and_(model.yookassa_last_applied_payment_id.is_not(None), model.yookassa_last_applied_payment_id != ""),
+    )
+    return and_(_real_paid_subscription_clause(model), has_provider)
+
+
+def _vpn_subscription_url(telegram_id: int) -> str:
+    """Clash subscription URL с smart routing для Happ / Hiddify."""
+    token = _vpn_sub_token(telegram_id)
+    return f"{PUBLIC_BASE_URL}/vpn/clash/{telegram_id}?token={token}"
+
+
 def _backfill_trial_offer_rows() -> None:
     """
     Исторические trial-строки раньше никак не помечались.
@@ -1789,7 +1806,7 @@ def checkout_create(payload: CheckoutCreateRequest, db: Session = Depends(get_db
             payment_url=payment_url,
         )
         logger.info("Checkout YooKassa: tg_id=%s token=%s", tg_id, token)
-        return CheckoutCreateResponse(payment_url=payment_url, payment_token=token)
+    return CheckoutCreateResponse(payment_url=payment_url, payment_token=token)
 
     lava_contract_id: str | None = None
     lava_top_configured = bool(LAVA_TOP_API_KEY and LAVA_TOP_OFFER_ID)
@@ -3996,6 +4013,7 @@ class VpnConfigResponse(BaseModel):
     vless_link: str | None = None
     vless_link_alt: str | None = None  # резервная ссылка на порт 8443 (для ISP блокирующих :443)
     uuid: str | None = None
+    subscription_url: str | None = None  # Clash URL с smart routing для Happ
 
 
 def _require_internal_token(req: Request) -> None:
@@ -4136,7 +4154,12 @@ def vpn_config(telegram_id: int, req: Request, db: Session = Depends(get_db)) ->
     client_uuid, vless_link = result
     # Порт 8443 — socat relay — слишком медленный (480–1400ms TLS vs 150–270ms на 443).
     # Не отдаём его клиентам; fallback только через iptables DNAT на VPS (без overhead).
-    return VpnConfigResponse(available=True, vless_link=vless_link, uuid=client_uuid)
+    return VpnConfigResponse(
+        available=True,
+        vless_link=vless_link,
+        uuid=client_uuid,
+        subscription_url=_vpn_subscription_url(telegram_id),
+    )
 
 
 class VpnOnlineResponse(BaseModel):
@@ -4160,143 +4183,7 @@ def _build_smart_xray_config(vless_link: str) -> dict:
     - Российские домены → Яндекс DNS (77.88.8.8)
     - Остальные → AdGuard DNS (94.140.14.14, блокирует рекламу / трекеры)
     """
-    # Популярные РФ-сервисы, которые могут не попасть в geosite:ru
-    # (non-.ru TLDs, CDN-домены, новые домены) — явный whitelist
-    _RU_EXPLICIT_DOMAINS = [
-        # ── Маркетплейсы ──────────────────────────────────────────────────
-        "domain:wildberries.ru", "domain:wbstatic.net", "domain:wbbasket.ru",
-        "domain:wbimg.ru", "domain:wb.ru",
-        "domain:ozon.ru", "domain:ozon.by",
-        "domain:avito.ru", "domain:avito.st",
-        "domain:lamoda.ru",
-        "domain:citilink.ru",
-        "domain:dns-shop.ru", "domain:dns.ru",
-        "domain:mvideo.ru",
-        "domain:eldorado.ru",
-        "domain:sbermegamarket.ru", "domain:megamarket.ru",
-        "domain:ali-tech.ru", "domain:aliexpress.ru",
-        "domain:leroymerlin.ru",
-        "domain:technopark.ru",
-        "domain:samara.ru", "domain:youla.ru",
-        "domain:kuper.ru",
-        # ── Банки и финансы ────────────────────────────────────────────────
-        "domain:sberbank.ru", "domain:sbrf.ru", "domain:sber.ru",
-        "domain:domclick.ru", "domain:sberins.ru", "domain:sberauto.ru",
-        "domain:tbank.ru", "domain:tinkoff.ru",
-        "domain:alfabank.ru", "domain:alfa-bank.ru",
-        "domain:vtb.ru",
-        "domain:raiffeisen.ru", "domain:raiffeisencity.ru",
-        "domain:gazprombank.ru", "domain:gpb.ru",
-        "domain:rshb.ru",
-        "domain:pochtabank.ru",
-        "domain:sovcombank.ru",
-        "domain:rncb.ru",
-        "domain:open.ru", "domain:binbank.ru",
-        "domain:mtsbank.ru",
-        "domain:qiwi.com", "domain:qiwi.ru",
-        "domain:yoomoney.ru", "domain:money.yandex.ru",
-        "domain:nspk.ru", "domain:mirpay.ru",
-        "domain:cloudpayments.ru",
-        # ── Госуслуги и государственные ────────────────────────────────────
-        "domain:gosuslugi.ru", "domain:esia.gosuslugi.ru",
-        "domain:nalog.ru", "domain:nalog.gov.ru", "domain:lkfl.nalog.ru",
-        "domain:mos.ru", "domain:mos.ru",
-        "domain:pfr.ru", "domain:sfr.gov.ru",
-        "domain:rosreestr.gov.ru", "domain:rosreestr.ru",
-        "domain:fssp.gov.ru", "domain:fssprus.ru",
-        "domain:gibdd.ru",
-        "domain:rkn.gov.ru",
-        "domain:government.ru", "domain:kremlin.ru",
-        "domain:mil.ru",
-        "domain:cbr.ru",
-        "domain:fns.ru",
-        # ── Соцсети и почта ────────────────────────────────────────────────
-        "domain:vk.com", "domain:vk.me", "domain:vkontakte.ru",
-        "domain:userapi.com", "domain:vk-cdn.net", "domain:vk.userapi.com",
-        "domain:ok.ru", "domain:odnoklassniki.ru",
-        "domain:mail.ru", "domain:my.mail.ru",
-        "domain:imgsmail.ru", "domain:fileboom.me",
-        # ── Медиа и стриминг ───────────────────────────────────────────────
-        "domain:kinopoisk.ru",
-        "domain:ivi.ru",
-        "domain:rutube.ru",
-        "domain:premier.one",
-        "domain:start.ru",
-        "domain:more.tv",
-        "domain:okko.tv",
-        "domain:kion.ru",
-        "domain:tvzavr.ru",
-        # ── Яндекс (международные домены, CDN, новые TLDs) ────────────────
-        "domain:yandex.com", "domain:yandex.net", "domain:yandex.eu", "domain:yandex.kz",
-        "domain:yastatic.net",          # Яндекс static CDN
-        "domain:yandexcloud.net",       # Яндекс Облако
-        "domain:dzen.ru",               # Яндекс Дзен
-        "domain:zen.yandex.ru",
-        "domain:taxi.yandex.com",       # Яндекс Такси (международный)
-        "domain:eda.yandex.com",        # Яндекс Еда (международный)
-        "domain:beru.ru",               # Яндекс Маркет (старый домен)
-        "domain:music.yandex.com",      # Яндекс Музыка (международный)
-        "domain:maps.yandex.com",       # Яндекс Карты (международный)
-        "domain:disk.yandex.com",       # Яндекс Диск (международный)
-        "domain:alice.yandex.ru",       # Алиса
-        "domain:yandexpay.ru",          # Яндекс Пэй
-        "domain:yoomoney.ru",           # ЮMoney
-        # ── Карты и навигация ──────────────────────────────────────────────
-        "domain:2gis.ru", "domain:2gis.com", "domain:2gis.io",
-        "domain:api.2gis.ru", "domain:tile.maps.2gis.com",
-        # ── Транспорт ──────────────────────────────────────────────────────
-        "domain:rzd.ru", "domain:rzd-online.ru", "domain:ticket.rzd.ru",
-        "domain:aeroflot.ru",
-        "domain:s7.ru",
-        "domain:pobeda.aero",
-        "domain:utair.ru",
-        "domain:rossiya-airlines.com",
-        # ── Телеком ────────────────────────────────────────────────────────
-        "domain:mts.ru",
-        "domain:megafon.ru",
-        "domain:beeline.ru", "domain:veon.com",
-        "domain:tele2.ru",
-        "domain:rt.ru", "domain:rostelecom.ru",
-        "domain:ertelecom.ru",
-        "domain:dom.ru",
-        # ── Доставка и логистика ────────────────────────────────────────────
-        "domain:cdek.ru",
-        "domain:boxberry.ru",
-        "domain:pochta.ru",
-        "domain:dpd.ru",
-        "domain:pickpoint.ru",
-        "domain:nrg.ru",
-        # ── Каршеринг и такси ─────────────────────────────────────────────
-        "domain:delimobil.ru",
-        "domain:rentacar.ru",
-        "domain:cityrent.ru",
-        # ── Авто ──────────────────────────────────────────────────────────
-        "domain:auto.ru",
-        "domain:drom.ru",
-        "domain:cars.ru",
-        "domain:autostat.ru",
-        # ── Здоровье и медицина ────────────────────────────────────────────
-        "domain:gosuslugi.ru",
-        "domain:emias.info",
-        "domain:prodoctorov.ru",
-        "domain:napopravku.ru",
-        "domain:zdravcity.ru",
-        # ── Новости и медиа ────────────────────────────────────────────────
-        "domain:rbc.ru", "domain:rbk.ru",
-        "domain:ria.ru",
-        "domain:kommersant.ru",
-        "domain:gazeta.ru",
-        "domain:lenta.ru",
-        "domain:meduza.io",
-        # ── Прочее популярное ──────────────────────────────────────────────
-        "domain:hh.ru",
-        "domain:superjob.ru",
-        "domain:habr.com",
-        "domain:pikabu.ru",
-        "domain:sportmaster.ru",
-        "domain:letoile.ru",
-        "domain:loveplanet.ru",
-    ]
+    from ru_direct_routing import AD_SUFFIXES, XRAY_DOMAINS
 
     return {
         "log": {"loglevel": "warning"},
@@ -4309,6 +4196,7 @@ def _build_smart_xray_config(vless_link: str) -> dict:
                         "geosite:yandex",
                         "vk.com", "ok.ru", "mail.ru",
                         "2gis.com", "premier.one", "tbank.ru",
+                        "samokat.ru", "samokat.tech",
                     ],
                 },
                 "94.140.14.14",
@@ -4346,39 +4234,26 @@ def _build_smart_xray_config(vless_link: str) -> dict:
         "routing": {
             "domainStrategy": "IPIfNonMatch",
             "rules": [
-                # YouTube ad-domains → block
                 {
                     "type": "field",
-                    "domain": [
-                        "doubleclick.net",
-                        "googleadservices.com",
-                        "googlesyndication.com",
-                        "googletagservices.com",
-                        "adservice.google.com",
-                        "ads.youtube.com",
-                        "imasdk.googleapis.com",
-                    ],
+                    "domain": list(AD_SUFFIXES),
                     "outboundTag": "block",
                 },
-                # Явный список популярных РФ-сервисов → direct
                 {
                     "type": "field",
-                    "domain": _RU_EXPLICIT_DOMAINS,
+                    "domain": XRAY_DOMAINS,
                     "outboundTag": "direct",
                 },
-                # geosite catch-all для .ru / Яндекс → direct
                 {
                     "type": "field",
                     "domain": ["geosite:ru", "geosite:yandex", "geosite:category-ru"],
                     "outboundTag": "direct",
                 },
-                # РФ IP-диапазоны и частные сети → direct
                 {
                     "type": "field",
                     "ip": ["geoip:ru", "geoip:private"],
                     "outboundTag": "direct",
                 },
-                # Всё остальное → VPN
                 {
                     "type": "field",
                     "network": "tcp,udp",
@@ -4387,6 +4262,7 @@ def _build_smart_xray_config(vless_link: str) -> dict:
             ],
         },
     }
+
 
 
 def _build_clash_config(vless_link: str) -> str:
@@ -4456,38 +4332,20 @@ def _build_clash_config(vless_link: str) -> str:
 
     proxies_block = "\n".join(proxy_fields)
 
+    from ru_direct_routing import AD_SUFFIXES, CLASH_SUFFIXES
+
     # ── Routing rules ─────────────────────────────────────────────────────────
     # Порядок важен: первое совпавшее правило выигрывает.
     rules: list[str] = [
-        # Рекламные домены → REJECT (только ключевые SDK YouTube-рекламы)
-        "  - DOMAIN-SUFFIX,doubleclick.net,REJECT",
-        "  - DOMAIN-SUFFIX,googleadservices.com,REJECT",
-        "  - DOMAIN-SUFFIX,googlesyndication.com,REJECT",
-        "  - DOMAIN-SUFFIX,imasdk.googleapis.com,REJECT",
-        "  - DOMAIN-SUFFIX,ads.youtube.com,REJECT",
-        # Российские TLD → DIRECT (одно правило покрывает ALL .ru домены)
+        *[f"  - DOMAIN-SUFFIX,{s},REJECT" for s in AD_SUFFIXES],
+        # Российские TLD → DIRECT (покрывает все .ru/.su/.рф приложения)
         "  - DOMAIN-SUFFIX,ru,DIRECT",
         "  - DOMAIN-SUFFIX,su,DIRECT",
-        # Non-.ru домены российских сервисов → DIRECT
-        "  - DOMAIN-SUFFIX,yandex.com,DIRECT",
-        "  - DOMAIN-SUFFIX,yandex.net,DIRECT",
-        "  - DOMAIN-SUFFIX,yastatic.net,DIRECT",
-        "  - DOMAIN-SUFFIX,yandexcloud.net,DIRECT",
-        "  - DOMAIN-SUFFIX,dzen.ru,DIRECT",
-        "  - DOMAIN-SUFFIX,vk.com,DIRECT",
-        "  - DOMAIN-SUFFIX,vk.me,DIRECT",
-        "  - DOMAIN-SUFFIX,userapi.com,DIRECT",
-        "  - DOMAIN-SUFFIX,vk-cdn.net,DIRECT",
-        "  - DOMAIN-SUFFIX,vkuseraudio.com,DIRECT",
-        "  - DOMAIN-SUFFIX,wbstatic.net,DIRECT",
-        "  - DOMAIN-SUFFIX,wbbasket.ru,DIRECT",
-        "  - DOMAIN-SUFFIX,wbimg.ru,DIRECT",
-        "  - DOMAIN-SUFFIX,2gis.com,DIRECT",
-        "  - DOMAIN-SUFFIX,2gis.io,DIRECT",
-        "  - DOMAIN-SUFFIX,tbank.ru,DIRECT",
-        "  - DOMAIN-SUFFIX,premier.one,DIRECT",
-        "  - DOMAIN-SUFFIX,qiwi.com,DIRECT",
-        "  - DOMAIN-SUFFIX,mycdn.me,DIRECT",
+        "  - DOMAIN-SUFFIX,рф,DIRECT",
+        # Non-.ru домены топ-50 РФ-приложений → DIRECT
+        *[f"  - DOMAIN-SUFFIX,{s},DIRECT" for s in CLASH_SUFFIXES],
+        # РФ IP-диапазоны (приложения с прямым IP) → DIRECT
+        "  - GEOIP,RU,DIRECT,no-resolve",
         # Приватные адреса (LAN) → DIRECT
         "  - IP-CIDR,10.0.0.0/8,DIRECT",
         "  - IP-CIDR,172.16.0.0/12,DIRECT",
@@ -4582,42 +4440,11 @@ def _build_singbox_config(vless_link: str) -> dict:
             "service_name": q("serviceName", ""),
         }
 
+    from ru_direct_routing import AD_SUFFIXES, SINGBOX_EXTRA_SUFFIXES
+
     # Суффиксы TLD: покрывают ВСЕ .ru/.рф/.su домены одним правилом, без загрузки
     _RU_TLD_SUFFIXES: list[str] = [".ru", ".рф", ".su"]
-
-    # Non-.ru домены российских сервисов — только уникальные, которых нет в .ru
-    _RU_EXTRA_SUFFIXES: list[str] = [
-        # Яндекс CDN / международные
-        "yandex.com", "yandex.net", "yandex.eu", "yandex.kz",
-        "yastatic.net", "yandexcloud.net",
-        "dzen.ru",          # домен Дзена (технически .ru, но явно для надёжности)
-        # VK non-.ru
-        "vk.com", "vk.me",
-        "userapi.com", "vk-cdn.net", "vkuseraudio.com",
-        # Wildberries CDN
-        "wbstatic.net", "wbbasket.ru", "wbimg.ru",
-        # 2GIS
-        "2gis.com", "2gis.io",
-        # T-Bank
-        "tbank.ru",
-        # Стриминг non-.ru
-        "premier.one",
-        # QIWI
-        "qiwi.com",
-        # Mail.ru CDN (non-.ru)
-        "mycdn.me",
-        # Одноклассники CDN
-        "userapi.com",
-    ]
-
-    # Только самые важные рекламные домены (inline, без загрузки)
-    _AD_SUFFIXES: list[str] = [
-        "doubleclick.net",
-        "googleadservices.com",
-        "googlesyndication.com",
-        "imasdk.googleapis.com",    # YouTube player ads SDK
-        "ads.youtube.com",
-    ]
+    _RU_EXTRA_SUFFIXES: list[str] = list(SINGBOX_EXTRA_SUFFIXES)
 
     # Все прямые суффиксы в одном списке для DNS и route
     _ALL_DIRECT_SUFFIXES = _RU_TLD_SUFFIXES + _RU_EXTRA_SUFFIXES
@@ -4653,7 +4480,7 @@ def _build_singbox_config(vless_link: str) -> dict:
         "route": {
             "rules": [
                 # Рекламные домены → block (первая проверка, список короткий)
-                {"domain_suffix": _AD_SUFFIXES, "outbound": "block"},
+                {"domain_suffix": list(AD_SUFFIXES), "outbound": "block"},
                 # РФ TLD (.ru/.рф/.su) → direct
                 {"domain_suffix": _RU_TLD_SUFFIXES, "outbound": "direct"},
                 # Non-.ru РФ домены → direct
@@ -4779,12 +4606,8 @@ def vpn_subscription(
     token: str = "",
 ) -> PlainTextResponse:
     """
-    Возвращает base64-encoded список VLESS-ссылок.
-    Happ и Hiddify: «+» → «Subscription» → вставить URL.
-    Happ сам обновляет конфиг при смене ключа.
-
-    Авторизация: ?token=HMAC (бот передаёт автоматически)
-    или X-Internal-Token заголовок (мини-апп).
+    Clash YAML subscription с smart routing (РФ-приложения → DIRECT).
+    Happ: «+» → «Subscription» → вставить URL.
     """
     if INTERNAL_API_TOKEN and not _trusted_vpn_request(req, telegram_id, token):
         raise HTTPException(status_code=403, detail="Forbidden")
@@ -4800,12 +4623,12 @@ def vpn_subscription(
         raise HTTPException(status_code=503, detail="Creating VPN client, try in 30s")
 
     _, vless_link = result
-    encoded = base64.b64encode(vless_link.encode("utf-8")).decode("ascii")
+    yaml_config = _build_clash_config(vless_link)
     expires_ts = int(_active_sub_expires(telegram_id, db) or 0)
-    return PlainTextResponse(
-        encoded,
+    return Response(
+        content=yaml_config,
+        media_type="text/yaml; charset=utf-8",
         headers={
-            "Content-Type": "text/plain; charset=utf-8",
             "profile-title": "Frosty VPN",
             "support-url": "https://t.me/frosty_support",
             "subscription-userinfo": f"upload=0; download=0; total=0; expire={expires_ts}",
@@ -5785,12 +5608,13 @@ class AdminStatsResponse(BaseModel):
     total_users: int
     tg_users: int  # users with real Telegram ids (telegram_id > 0) — used for broadcast targeting
     marketing_opt_out_users: int
-    # Subscription metrics: unique telegram_id (TG bot only); multiple checkout rows no longer inflate counts
     active_subscriptions: int
     expired_subscriptions: int
     pending_payments: int
-    revenue_estimate: int
-    # Пробный день из бота: users.trial_consumed_at; конверсия — есть хотя бы одна оплаченная/истёкшая оплата
+    revenue_estimate: int  # подтверждённые оплаты (Lava/YooKassa) × цена
+    paying_customers: int  # уникальные tg-пользователи с подтверждённой оплатой
+    revenue_payments: int  # число подтверждённых платёжных периодов
+    manual_grants: int  # строки paid/expired без провайдера (ручные /admin/activate)
     trial_offers_claimed: int
     trial_converted_to_paid: int
     referrals: list[RefStat]
@@ -5851,14 +5675,14 @@ def admin_stats(req: Request, db: Session = Depends(get_db)) -> AdminStatsRespon
         .where(active_conds)
     ).scalar() or 0
 
-    # Users with at least one past-period row, excluding anyone who still has active access
+    # Users with verified payment history, expired, no active access
     expired = db.execute(
         select(func.count(Subscription.telegram_id.distinct()))
         .select_from(Subscription)
         .where(
             and_(
                 _sub_conds(
-                    _real_paid_subscription_clause(),
+                    _verified_payment_clause(),
                     Subscription.expires_at.is_not(None),
                     Subscription.expires_at <= now,
                 ),
@@ -5879,10 +5703,28 @@ def admin_stats(req: Request, db: Session = Depends(get_db)) -> AdminStatsRespon
         )
     ).scalar() or 0
 
-    # One row ≈ one completed payment period (renewals = multiple rows); TG bot only
-    total_paid = db.execute(
+    # Подтверждённые оплаты (Lava / YooKassa / billing_provider); без ручных /admin/activate
+    verified_periods = db.execute(
         select(func.count()).select_from(Subscription).where(
-            _sub_conds(_real_paid_subscription_clause())
+            _sub_conds(_verified_payment_clause())
+        )
+    ).scalar() or 0
+
+    paying_customers = db.execute(
+        select(func.count(Subscription.telegram_id.distinct()))
+        .select_from(Subscription)
+        .where(_sub_conds(_verified_payment_clause()))
+    ).scalar() or 0
+
+    has_payment_proof = or_(
+        and_(Subscription.billing_provider.is_not(None), Subscription.billing_provider != ""),
+        Subscription.lava_contract_id.is_not(None),
+        and_(Subscription.yookassa_payment_method_id.is_not(None), Subscription.yookassa_payment_method_id != ""),
+        and_(Subscription.yookassa_last_applied_payment_id.is_not(None), Subscription.yookassa_last_applied_payment_id != ""),
+    )
+    manual_grants = db.execute(
+        select(func.count()).select_from(Subscription).where(
+            _sub_conds(_real_paid_subscription_clause(), ~has_payment_proof)
         )
     ).scalar() or 0
 
@@ -5899,16 +5741,16 @@ def admin_stats(req: Request, db: Session = Depends(get_db)) -> AdminStatsRespon
     trial_claimed = (
         db.execute(select(func.count()).select_from(User).where(and_(*trial_user_conds))).scalar() or 0
     )
-    _paid_row_for_user = exists(
+    _verified_paid_row_for_user = exists(
         select(Subscription.id).where(
             Subscription.telegram_id == User.telegram_id,
-            _real_paid_subscription_clause(),
+            _verified_payment_clause(),
             Subscription.created_at >= User.trial_consumed_at,
         )
     )
     trial_converted = (
         db.execute(
-            select(func.count()).select_from(User).where(and_(*trial_user_conds, _paid_row_for_user))
+            select(func.count()).select_from(User).where(and_(*trial_user_conds, _verified_paid_row_for_user))
         ).scalar()
         or 0
     )
@@ -5920,7 +5762,10 @@ def admin_stats(req: Request, db: Session = Depends(get_db)) -> AdminStatsRespon
         active_subscriptions=active,
         expired_subscriptions=expired,
         pending_payments=pending,
-        revenue_estimate=total_paid * PAYMENT_AMOUNT_RUB,
+        revenue_estimate=verified_periods * PAYMENT_AMOUNT_RUB,
+        paying_customers=int(paying_customers),
+        revenue_payments=int(verified_periods),
+        manual_grants=int(manual_grants),
         trial_offers_claimed=int(trial_claimed),
         trial_converted_to_paid=int(trial_converted),
         referrals=referrals,
@@ -6013,18 +5858,18 @@ def admin_funnel(req: Request, db: Session = Depends(get_db)) -> FunnelStatsResp
         .where(and_(*payment_link_conds))
     ).scalar() or 0
 
-    # Paid (ever) = paid or expired; trial-only rows excluded by explicit marker.
+    # Paid (ever) = подтверждённая оплата через провайдера
     tg_paid = db.execute(
         select(func.count(Subscription.telegram_id.distinct()))
         .select_from(Subscription)
-        .where(sub_tg_cond, _real_paid_subscription_clause())
+        .where(sub_tg_cond, _verified_payment_clause())
     ).scalar() or 0
     tg_paid_7d = db.execute(
         select(func.count(Subscription.telegram_id.distinct()))
         .select_from(Subscription)
         .where(
             sub_tg_cond,
-            _real_paid_subscription_clause(),
+            _verified_payment_clause(),
             Subscription.created_at >= week_ago,
         )
     ).scalar() or 0
@@ -6058,7 +5903,7 @@ def admin_funnel(req: Request, db: Session = Depends(get_db)) -> FunnelStatsResp
             select(func.count(Subscription.telegram_id.distinct()))
             .select_from(Subscription)
             .where(
-                Subscription.telegram_id < 0, _real_paid_subscription_clause()
+                Subscription.telegram_id < 0, _verified_payment_clause()
             )
         ).scalar() or 0
 
@@ -6074,7 +5919,7 @@ def admin_funnel(req: Request, db: Session = Depends(get_db)) -> FunnelStatsResp
     source_paid_rows = db.execute(
         select(User.ref_source, func.count(User.telegram_id.distinct()).label("cnt"))
         .join(Subscription, Subscription.telegram_id == User.telegram_id)
-        .where(tg_user_cond, _real_paid_subscription_clause())
+        .where(tg_user_cond, _verified_payment_clause())
         .group_by(User.ref_source)
     ).all()
     paid_by_source: dict[str | None, int] = {r[0]: r[1] for r in source_paid_rows}
@@ -6107,7 +5952,7 @@ def admin_funnel(req: Request, db: Session = Depends(get_db)) -> FunnelStatsResp
         .where(
             _nu(
                 User.nudge_1_sent_at.is_not(None),
-                _real_paid_subscription_clause(),
+                _verified_payment_clause(),
             )
         )
     ).scalar() or 0
@@ -6134,6 +5979,60 @@ def admin_funnel(req: Request, db: Session = Depends(get_db)) -> FunnelStatsResp
         nudge_converted=nudge_converted,
         opted_out=opted_out,
         analytics_scoped=scoped,
+    )
+
+
+class CleanupTestDataResponse(BaseModel):
+    deleted_test_users: int
+    deleted_owner_test_subs: int
+    deleted_junk_subs: int
+
+
+@app.post("/admin/cleanup-test-data", response_model=CleanupTestDataResponse)
+def admin_cleanup_test_data(req: Request, db: Session = Depends(get_db)) -> CleanupTestDataResponse:
+    """
+    Удаляет тестовые записи: junk users (tg_id >= 999999990) и expired-подписки владельца
+    без следов оплаты (ручные /admin/activate).
+    """
+    _require_admin(req)
+    owner_raw = (os.getenv("BOT_ADMIN_TELEGRAM_IDS") or "231115635").strip()
+    owner_ids: set[int] = set()
+    for part in owner_raw.split(","):
+        p = part.strip()
+        if p.isdigit():
+            owner_ids.add(int(p))
+
+    has_payment_proof = or_(
+        and_(Subscription.billing_provider.is_not(None), Subscription.billing_provider != ""),
+        Subscription.lava_contract_id.is_not(None),
+        and_(Subscription.yookassa_payment_method_id.is_not(None), Subscription.yookassa_payment_method_id != ""),
+        and_(Subscription.yookassa_last_applied_payment_id.is_not(None), Subscription.yookassa_last_applied_payment_id != ""),
+    )
+
+    del_users = db.execute(delete(User).where(User.telegram_id >= 999999990))
+    deleted_test_users = int(del_users.rowcount or 0)
+
+    owner_test_subs = db.execute(
+        delete(Subscription).where(
+            Subscription.telegram_id.in_(owner_ids) if owner_ids else sa_false(),
+            Subscription.payment_status == "expired",
+            ~has_payment_proof,
+        )
+    )
+    deleted_owner_test_subs = int(owner_test_subs.rowcount or 0)
+
+    del_junk = db.execute(
+        delete(Subscription).where(
+            Subscription.telegram_id >= 999999990,
+        )
+    )
+    deleted_junk_subs = int(del_junk.rowcount or 0)
+    db.commit()
+
+    return CleanupTestDataResponse(
+        deleted_test_users=deleted_test_users,
+        deleted_owner_test_subs=deleted_owner_test_subs,
+        deleted_junk_subs=deleted_junk_subs,
     )
 
 
@@ -6421,7 +6320,7 @@ def admin_users_overview(
         users_table_total = db.execute(select(func.count()).select_from(User)).scalar() or 0
 
     paid_telegram_ids = select(Subscription.telegram_id).where(
-        _real_paid_subscription_clause()
+        _verified_payment_clause()
     )
     if scope is not None:
         paid_telegram_ids = paid_telegram_ids.where(Subscription.telegram_id.in_(scope))

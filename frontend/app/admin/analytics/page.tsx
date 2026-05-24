@@ -211,7 +211,7 @@ export default function AnalyticsPage() {
                 <MetricCard
                   label="Выручка"
                   value={formatRubles(stats.revenue_estimate)}
-                  hint="Оценка по завершённым оплаченным периодам"
+                  hint={`Платящих: ${formatNumber(stats.paying_customers ?? 0)} · ${formatNumber(stats.revenue_payments ?? 0)} оплат · только Lava/YooKassa`}
                   icon={DollarSign}
                 />
                 <MetricCard

@@ -1118,10 +1118,9 @@ export default function AdminPage() {
         <section>
           <h2 className="text-lg font-semibold mb-1 text-gray-300">Сводка</h2>
           <p className="text-xs text-gray-500 mb-4">
-            Подписки — уникальные пользователи Telegram (tg_id &gt; 0); веб-оформления не входят в эти числа. «Истекших» — без текущего доступа.
-            Выручка ≈ число завершённых оплат в БД × цена (продления — отдельные строки). Пробный день — по факту нажатия оффера в боте (
-            <code className="text-gray-400">trial_consumed_at</code>
-            ); продлившие — из них с хотя бы одной оплатой (paid/expired) в истории.
+            Подписки — уникальные Telegram-пользователи (tg_id &gt; 0). Выручка — только подтверждённые оплаты
+            (Lava / YooKassa), без ручных /admin/activate. «Платящих клиентов» — уникальные tg с реальной оплатой.
+            «Истекших» — оплатили, срок истёк, доступа нет.
           </p>
           <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-7 gap-4">
             {[
@@ -1168,11 +1167,23 @@ export default function AdminPage() {
                 color: "text-teal-400",
               },
               {
-                label: "Выручка (≈)",
-                value: stats ? `${stats.revenue_estimate.toLocaleString("ru-RU")} ₽` : "—",
-                sub: "по строкам оплат",
+                label: "Платящих клиентов",
+                value: stats?.paying_customers ?? "—",
+                sub: stats?.revenue_payments != null ? `${stats.revenue_payments} оплат × 299 ₽` : undefined,
                 color: "text-green-400",
               },
+              {
+                label: "Выручка",
+                value: stats ? `${stats.revenue_estimate.toLocaleString("ru-RU")} ₽` : "—",
+                sub: "только Lava/YooKassa",
+                color: "text-green-300",
+              },
+              ...(stats?.manual_grants ? [{
+                label: "Ручные активации",
+                value: stats.manual_grants,
+                sub: "без провайдера оплаты",
+                color: "text-gray-400",
+              }] : []),
             ].map(({ label, value, sub, color }) => (
               <div key={label} className="bg-gray-900 border border-gray-800 rounded-2xl p-5">
                 <div className="text-xs text-gray-400 mb-1">{label}</div>

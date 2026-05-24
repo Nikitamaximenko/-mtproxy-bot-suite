@@ -13,6 +13,9 @@ export type Stats = {
   expired_subscriptions: number
   pending_payments: number
   revenue_estimate: number
+  paying_customers?: number
+  revenue_payments?: number
+  manual_grants?: number
   trial_offers_claimed?: number
   trial_converted_to_paid?: number
   referrals: RefStat[]

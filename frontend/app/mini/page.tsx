@@ -27,6 +27,7 @@ type VpnData = {
   available: boolean
   reason?: string | null
   vless_link: string | null
+  subscription_url?: string | null
   uuid: string | null
 }
 
@@ -484,15 +485,18 @@ export default function MiniAppPage() {
   // пока ссылка не появится. Пользователю не нужно жать «обновить» руками.
   useEffect(() => {
     if (activeTab !== "vpn" || !vpn) return
-    if (vpn.available && !vpn.vless_link) {
+    const link = vpn.subscription_url || vpn.vless_link
+    if (vpn.available && !link) {
       const t = setTimeout(() => { void fetchVpn() }, 2000)
       return () => clearTimeout(t)
     }
   }, [activeTab, vpn, fetchVpn])
 
+  const vpnLink = vpn?.subscription_url || vpn?.vless_link || null
+
   const handleCopyVlessLink = () => {
-    if (!vpn?.vless_link) return
-    navigator.clipboard.writeText(vpn.vless_link)
+    if (!vpnLink) return
+    navigator.clipboard.writeText(vpnLink)
     setVpnLinkCopied(true)
     setTimeout(() => setVpnLinkCopied(false), 2000)
   }
@@ -934,7 +938,7 @@ export default function MiniAppPage() {
               )}
 
               {/* Стейт 5: готово — пошаговая инструкция + копирование ссылки (надёжнее deep link happ:// в WebView) */}
-              {vpn?.available && vpn.vless_link && (
+              {vpn?.available && vpnLink && (
                 <>
                   <div className="p-5" style={{ background: "#F7F8FA", borderRadius: "16px" }}>
                     <div className="flex items-center gap-3 mb-4">
@@ -986,7 +990,7 @@ export default function MiniAppPage() {
                       <li className="flex gap-2">
                         <span className="font-bold flex-shrink-0 w-5" style={{ color: "#2AABEE" }}>3</span>
                         <span style={{ color: "#374151" }}>
-                          Откройте Happ → нажмите <strong>+</strong> → выберите <strong>«Вставить из буфера обмена»</strong> (или «Импорт из буфера» — название может немного отличаться).
+                          Откройте Happ → <strong>+</strong> → <strong>Subscription</strong> → вставьте скопированную ссылку.
                         </span>
                       </li>
                       <li className="flex gap-2">
@@ -1018,7 +1022,7 @@ export default function MiniAppPage() {
                   </button>
 
                   <div className="p-3 font-mono text-[10px] break-all leading-relaxed max-h-28 overflow-y-auto" style={{ background: "#FFFFFF", borderRadius: "12px", border: "1px solid #E5E7EB", color: "#6B7280" }}>
-                    {vpn.vless_link}
+                    {vpnLink}
                   </div>
 
                   <details>
@@ -1034,7 +1038,7 @@ export default function MiniAppPage() {
                       <div className="p-3" style={{ background: "#FFFFFF", borderRadius: "14px", boxShadow: "0 1px 6px rgba(0,0,0,0.06)" }}>
                         {/* eslint-disable-next-line @next/next/no-img-element */}
                         <img
-                          src={`https://api.qrserver.com/v1/create-qr-code/?size=180x180&data=${encodeURIComponent(vpn.vless_link)}`}
+                          src={`https://api.qrserver.com/v1/create-qr-code/?size=180x180&data=${encodeURIComponent(vpnLink)}`}
                           alt="QR код VPN"
                           width={180}
                           height={180}

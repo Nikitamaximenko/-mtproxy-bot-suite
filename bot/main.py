@@ -444,16 +444,24 @@ async def _fetch_vpn_config(session: aiohttp.ClientSession, tg_id: int) -> dict:
         return {}
 
 
-async def _get_vless_link(session: aiohttp.ClientSession, tg_id: int) -> tuple[str | None, str | None]:
-    """Возвращает (vless_link :443, vless_link_alt :8443) или (None, None)."""
+async def _get_vpn_delivery(
+    session: aiohttp.ClientSession, tg_id: int
+) -> tuple[str | None, str | None]:
+    """Возвращает (subscription_url с smart routing, vless fallback) или (None, None)."""
     data = await _fetch_vpn_config(session, tg_id)
     if not data.get("available"):
         return None, None
+    sub_url = data.get("subscription_url")
     vless = data.get("vless_link")
-    vless_alt = data.get("vless_link_alt")
-    if not isinstance(vless, str) or not vless.strip():
-        return None, None
-    return vless.strip(), (vless_alt.strip() if isinstance(vless_alt, str) and vless_alt.strip() else None)
+    sub_out = sub_url.strip() if isinstance(sub_url, str) and sub_url.strip() else None
+    vless_out = vless.strip() if isinstance(vless, str) and vless.strip() else None
+    return sub_out, vless_out
+
+
+async def _get_vless_link(session: aiohttp.ClientSession, tg_id: int) -> tuple[str | None, str | None]:
+    """Обратная совместимость: vless fallback."""
+    _, vless = await _get_vpn_delivery(session, tg_id)
+    return vless, None
 
 
 async def _send_proxy_vpn_bundle(message: Message, session: aiohttp.ClientSession, tg_uid: int) -> None:
@@ -511,9 +519,8 @@ async def _send_proxy_vpn_bundle(message: Message, session: aiohttp.ClientSessio
         await asyncio.sleep(1.0)
         data = await _fetch_vpn_config(session, tg_uid)
 
-    vless = data.get("vless_link")
-    vless_alt = data.get("vless_link_alt")
-    if not data.get("available") or not isinstance(vless, str) or not vless.strip():
+    sub_url, vless = await _get_vpn_delivery(session, tg_uid)
+    if not sub_url and not vless:
         await message.answer(
             "⏳ <b>VPN ещё инициализируется</b>\n\n"
             "Подождите 15–20 секунд и нажмите «Обновить».\n"
@@ -527,7 +534,12 @@ async def _send_proxy_vpn_bundle(message: Message, session: aiohttp.ClientSessio
         )
         return
 
-    vless = vless.strip()
+    link_block = sub_url or vless or ""
+    step2 = (
+        "<b>Шаг 2.</b> В Happ: «+» → «Subscription» → вставьте ссылку ниже\n\n"
+        if sub_url
+        else "<b>Шаг 2.</b> Скопируйте VPN-ключ и вставьте в Happ: «+» → «Вставить из буфера»\n\n"
+    )
 
     await message.answer(
         "🛡 <b>Умный VPN Frosty</b>\n\n"
@@ -535,16 +547,16 @@ async def _send_proxy_vpn_bundle(message: Message, session: aiohttp.ClientSessio
         '• <a href="https://apps.apple.com/app/happ-proxy-utility/id6504287215">iOS (App Store)</a>\n'
         '• <a href="https://play.google.com/store/apps/details?id=com.happproxy">Android (Google Play)</a>\n'
         '• <a href="https://hiddify.com">Windows / Mac (Hiddify)</a>\n\n'
-        "<b>Шаг 2.</b> Скопируйте VPN-ключ и вставьте в Happ: «+» → «Вставить из буфера»\n\n"
-        f"<code>{vless}</code>\n\n"
-        "⚡ <b>Что умеет Frosty:</b>\n"
-        "• WB, Ozon, Avito, Сбер, Госуслуги, Яндекс, VK — напрямую\n"
+        f"{step2}"
+        f"<code>{html.escape(link_block)}</code>\n\n"
+        "⚡ <b>Smart routing:</b>\n"
+        "• Яндекс, Самокат, каршеринг, банки, WB, Ozon — напрямую (без VPN)\n"
         "• Instagram, TikTok, YouTube — через VPN автоматически\n"
         "• До 10 устройств · без лимитов по скорости и трафику",
         parse_mode="HTML",
         disable_web_page_preview=True,
         reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="📋 Скопировать VPN-код", callback_data="menu:copy_vpn")],
+            [InlineKeyboardButton(text="📋 Скопировать ссылку", callback_data="menu:copy_vpn")],
             [InlineKeyboardButton(text="🔄 Обновить данные", callback_data="menu:connect")],
             [InlineKeyboardButton(text="🏠 Главное меню", callback_data="menu:main")],
         ]),
@@ -570,18 +582,24 @@ async def _send_trial_direct_access(
     already_active: bool,
 ) -> None:
     # Иногда XRAY отдаёт конфиг через 1-2 секунды после активации.
-    vless_link, vless_link_alt = await _get_vless_link(session, tg_id)
-    if not vless_link:
+    sub_url, vless = await _get_vpn_delivery(session, tg_id)
+    if not sub_url and not vless:
         await asyncio.sleep(1.5)
-        vless_link, vless_link_alt = await _get_vless_link(session, tg_id)
+        sub_url, vless = await _get_vpn_delivery(session, tg_id)
 
     intro = "🎁 <b>Пробный период уже активен</b>" if already_active else "🎁 <b>Пробный день активирован!</b>"
-    if vless_link:
+    link = sub_url or vless
+    if link:
+        step = (
+            "В Happ: «+» → «Subscription» → вставьте ссылку:\n\n"
+            if sub_url
+            else "Скопируйте VPN-ключ и вставьте в Happ: «+» → «Вставить из буфера»\n\n"
+        )
         await message.answer(
             f"{intro}\n\n"
             f"Доступ до: <b>{exp_human}</b>\n\n"
-            "Скопируйте VPN-ключ и вставьте в Happ: «+» → «Вставить из буфера»\n\n"
-            f"<code>{vless_link}</code>\n\n"
+            f"{step}"
+            f"<code>{html.escape(link)}</code>\n\n"
             "❓ Нет Happ?\n"
             '<a href="https://apps.apple.com/app/happ-proxy-utility/id6504287215">iOS</a> · '
             '<a href="https://play.google.com/store/apps/details?id=com.happproxy">Android</a> · '
@@ -589,7 +607,7 @@ async def _send_trial_direct_access(
             parse_mode="HTML",
             disable_web_page_preview=True,
             reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-                [InlineKeyboardButton(text="📋 СКОПИРОВАТЬ VPN-КОД", callback_data="menu:trial_copy_vless")],
+                [InlineKeyboardButton(text="📋 СКОПИРОВАТЬ ССЫЛКУ", callback_data="menu:trial_copy_vless")],
                 [InlineKeyboardButton(text="💳 Купить полную подписку", callback_data="menu:buy_in_bot")],
                 [InlineKeyboardButton(text="🏠 Главное меню", callback_data="menu:main")],
             ]),
@@ -1145,17 +1163,18 @@ async def main() -> None:
             return
 
         if action == "copy_vpn":
-            await query.answer("Отправляю код для копирования")
+            await query.answer("Отправляю ссылку для копирования")
             tg_uid = query.from_user.id
-            vless, vless_alt = await _get_vless_link(session, tg_uid)
-            if not vless:
+            sub_url, vless = await _get_vpn_delivery(session, tg_uid)
+            link = sub_url or vless
+            if not link:
                 await msg.answer(
-                    "Код пока не получен. Нажмите «🛡 Подключить VPN» снова через 10–20 секунд.",
+                    "Ссылка пока не получена. Нажмите «🛡 Подключить VPN» снова через 10–20 секунд.",
                     reply_markup=main_menu_kb(tg_uid),
                 )
                 return
             await msg.answer(
-                f"Скопируйте строку ниже и вставьте в Happ:\n\n<code>{html.escape(vless)}</code>",
+                f"Скопируйте и вставьте в Happ (Subscription):\n\n<code>{html.escape(link)}</code>",
                 parse_mode="HTML",
                 reply_markup=InlineKeyboardMarkup(inline_keyboard=[
                     [InlineKeyboardButton(text="🛡 Подключить VPN", callback_data="menu:connect")],
@@ -1165,20 +1184,18 @@ async def main() -> None:
             return
 
         if action == "trial_copy_vless":
-            await query.answer("Готовлю код…")
+            await query.answer("Готовлю ссылку…")
             tg_uid = query.from_user.id
-            vless, vless_alt = await _get_vless_link(session, tg_uid)
-            if not vless:
+            sub_url, vless = await _get_vpn_delivery(session, tg_uid)
+            link = sub_url or vless
+            if not link:
                 await msg.answer(
-                    "Код ещё не готов. Подождите 10–20 секунд и нажмите кнопку снова или /status.",
+                    "Ссылка ещё не готова. Подождите 10–20 секунд и нажмите кнопку снова или /status.",
                     reply_markup=trial_direct_kb(tg_uid, show_copy_button=False),
                 )
                 return
-            alt_trial = (
-                f"\n\n🔄 <b>Не работает на WiFi?</b> Резервный:\n<code>{html.escape(vless_alt)}</code>"
-            ) if vless_alt else ""
             await msg.answer(
-                f"Скопируйте этот код и вставьте в Happ:\n\n<code>{html.escape(vless)}</code>{alt_trial}",
+                f"Скопируйте и вставьте в Happ (Subscription):\n\n<code>{html.escape(link)}</code>",
                 parse_mode="HTML",
                 reply_markup=trial_direct_kb(tg_uid, show_copy_button=True),
             )
