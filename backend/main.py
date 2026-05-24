@@ -3620,10 +3620,14 @@ def _xray_build_vless_link(client_uuid: str, port: int = 443) -> str:
 
 
 def _xray_client_exists(tg_id: int) -> bool:
-    """Check if a client with email frosty_{tg_id} already exists in any inbound."""
-    result = _xray_req("GET", f"/panel/api/inbounds/getClientTraffics/frosty_{tg_id}", timeout=5)
+    """Check if frosty_{tg_id} exists in 3X-UI (via inbounds list — надёжнее getClientTraffics)."""
+    email = f"frosty_{tg_id}"
+    result = _xray_req("GET", "/panel/api/inbounds/list", timeout=8)
     if isinstance(result, dict) and result.get("success"):
-        return result.get("obj") is not None
+        for inbound in result.get("obj") or []:
+            for stat in inbound.get("clientStats") or []:
+                if stat.get("email") == email:
+                    return True
     return False
 
 
@@ -4976,6 +4980,47 @@ def admin_reconcile_lava_payments(req: Request) -> OkResponse:
     _require_admin(req)
     n = _reconcile_lava_pending_payments()
     logger.info("Admin triggered Lava reconcile: activated=%d", n)
+    return OkResponse(ok=True)
+
+
+def _repair_all_xray_clients(db: Session) -> tuple[int, int]:
+    """Re-sync every active VPN client from DB into 3X-UI. Returns (repaired, failed)."""
+    global _xray_client_verified_at
+    _xray_client_verified_at.clear()
+    clients = db.execute(
+        select(VpnClient).where(VpnClient.active == True)  # noqa: E712
+    ).scalars().all()
+    repaired = 0
+    failed = 0
+    for client in clients:
+        tg_id = int(client.telegram_id)
+        try:
+            if not _xray_client_exists(tg_id):
+                logger.warning("Xray repair: missing client tg_id=%s — re-adding", tg_id)
+                result = _xray_add_client(tg_id, preferred_uuid=client.uuid)
+                if result:
+                    uid, link = result
+                    client.uuid = uid
+                    client.vless_link = link
+                    client.active = True
+                    repaired += 1
+                else:
+                    failed += 1
+            else:
+                repaired += 1
+        except Exception:
+            logger.exception("Xray repair failed tg_id=%s", tg_id)
+            failed += 1
+    db.commit()
+    return repaired, failed
+
+
+@app.post("/admin/repair-vpn", response_model=OkResponse)
+def admin_repair_vpn(req: Request, db: Session = Depends(get_db)) -> OkResponse:
+    """Принудительно восстановить всех активных VPN-клиентов в Xray."""
+    _require_admin(req)
+    repaired, failed = _repair_all_xray_clients(db)
+    logger.info("Admin VPN repair: ok=%d failed=%d", repaired, failed)
     return OkResponse(ok=True)
 
 
