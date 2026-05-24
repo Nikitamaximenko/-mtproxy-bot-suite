@@ -3656,10 +3656,10 @@ def deactivate_vpn_client(tg_id: int, db: Session) -> None:
 
 
 def _process_vpn_traffic_sync() -> None:
-    """Sync traffic stats from 3X-UI and deactivate over-limit clients.
+    """Sync traffic stats from 3X-UI via inbounds/list (bulk, single request).
 
-    Использует короткий таймаут (5s) на каждый запрос и пропускает
-    недоступные клиенты — не блокирует весь цикл если Xray API тормозит.
+    clientTraffics/{email} endpoint in some 3X-UI versions returns empty —
+    using the full inbounds list instead to get all client stats at once.
     """
     if not XRAY_API_URL:
         return
@@ -3670,18 +3670,33 @@ def _process_vpn_traffic_sync() -> None:
             select(VpnClient).where(VpnClient.active == True)  # noqa: E712
         ).scalars().all()
 
+        if not clients:
+            return
+
         deactivated = 0
         synced = 0
         errors = 0
+
+        # Fetch all traffic stats in one request via inbounds list
+        traffic_map: dict[str, tuple[int, int]] = {}
+        try:
+            result = _xray_req("GET", "/panel/api/inbounds/list", timeout=10)
+            if isinstance(result, dict) and result.get("success"):
+                for inbound in result.get("obj") or []:
+                    for stat in inbound.get("clientStats") or []:
+                        email = stat.get("email", "")
+                        up = int(stat.get("up") or 0)
+                        down = int(stat.get("down") or 0)
+                        traffic_map[email] = (up, down)
+        except Exception:
+            logger.exception("VPN traffic sync: failed to fetch inbounds list")
+            return
+
         for client in clients:
             email = f"frosty_{client.telegram_id}"
             try:
-                # Короткий таймаут: если Xray API не отвечает быстро — пропускаем
-                result = _xray_req("GET", f"/panel/api/inbounds/clientTraffics/{email}", timeout=5)
-                if isinstance(result, dict) and result.get("success"):
-                    obj = result.get("obj") or {}
-                    up = int(obj.get("up", 0)) if isinstance(obj, dict) else 0
-                    down = int(obj.get("down", 0)) if isinstance(obj, dict) else 0
+                if email in traffic_map:
+                    up, down = traffic_map[email]
                     total = up + down
                     client.traffic_used_bytes = total
                     client.last_sync_at = now
@@ -3694,9 +3709,10 @@ def _process_vpn_traffic_sync() -> None:
                             deactivated += 1
                 else:
                     errors += 1
+                    logger.debug("Traffic sync: no Xray entry for tg_id=%s email=%s", client.telegram_id, email)
             except Exception:
                 errors += 1
-                logger.debug("Traffic sync skip tg_id=%s (Xray API unavailable)", client.telegram_id)
+                logger.debug("Traffic sync skip tg_id=%s", client.telegram_id)
 
         db.commit()
         logger.info("VPN traffic sync: %d synced, %d deactivated, %d errors/skipped", synced, deactivated, errors)
