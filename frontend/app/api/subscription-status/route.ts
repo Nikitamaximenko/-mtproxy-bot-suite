@@ -1,9 +1,10 @@
 import { NextRequest, NextResponse } from "next/server"
+import { getBackendUrl } from "@/lib/backend-url"
 
 export async function GET(req: NextRequest) {
   const token = req.nextUrl.searchParams.get("token")
   const email = req.nextUrl.searchParams.get("email")
-  const backendUrl = (process.env.BACKEND_URL || "https://138-124-80-97.sslip.io:9443").replace(/\/+$/, "")
+  const backendUrl = getBackendUrl()
   try {
     if (token) {
       const res = await fetch(`${backendUrl}/subscription/token/${token}`)

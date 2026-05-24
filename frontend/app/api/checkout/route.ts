@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server"
+import { getBackendUrl } from "@/lib/backend-url"
 
 function backendHeaders(): Record<string, string> {
   return {
@@ -57,10 +58,10 @@ async function writeCheckoutLog(
 }
 
 function badBackendConfig(): string | null {
-  const u = process.env.BACKEND_URL || ""
+  const u = getBackendUrl()
   const isProd = process.env.NODE_ENV === "production" || process.env.VERCEL === "1" || !!process.env.RAILWAY_ENVIRONMENT
   if (isProd && (!u || u.includes("localhost") || u.includes("127.0.0.1"))) {
-    return "BACKEND_URL не задан или указывает на localhost — в Railway/Vercel добавь публичный URL бэкенда (например https://xxx.up.railway.app)."
+    return "BACKEND_URL не задан — укажите публичный URL VPS-бэкенда."
   }
   return null
 }
@@ -74,7 +75,7 @@ export async function POST(req: NextRequest) {
     customer_email?: unknown
     payment_provider?: unknown
   }
-  const backendUrl = (process.env.BACKEND_URL || "https://138-124-80-97.sslip.io:9443").replace(/\/+$/, "")
+  const backendUrl = getBackendUrl()
   const tgIdNum = Number(telegram_id)
   const normalizedUsername = typeof username === "string" && username.trim() ? username.trim() : null
   const normalizedEmail = typeof email === "string" && email.trim() ? email.trim() : null

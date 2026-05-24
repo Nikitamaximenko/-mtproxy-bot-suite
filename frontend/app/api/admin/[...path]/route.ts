@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
+import { getBackendUrl } from "@/lib/backend-url"
 
-const BACKEND_URL = (process.env.BACKEND_URL || "https://138-124-80-97.sslip.io:9443").replace(/\/+$/, "")
+const BACKEND_URL = getBackendUrl()
 
 async function proxyJsonResponse(res: Response) {
   const text = await res.text()
