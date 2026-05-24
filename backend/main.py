@@ -5988,13 +5988,139 @@ class CleanupTestDataResponse(BaseModel):
     deleted_junk_subs: int
 
 
+class CoreDataExportResponse(BaseModel):
+    users: list[dict[str, Any]]
+    subscriptions: list[dict[str, Any]]
+    vpn_clients: list[dict[str, Any]]
+
+
+@app.get("/admin/export-core-data", response_model=CoreDataExportResponse)
+def admin_export_core_data(req: Request, db: Session = Depends(get_db)) -> CoreDataExportResponse:
+    """Полный дамп users/subscriptions/vpn_clients для миграции между инстансами."""
+    _require_admin(req)
+
+    def _dt(v: datetime | None) -> str | None:
+        return v.isoformat() if v else None
+
+    users = db.execute(select(User).order_by(User.id)).scalars().all()
+    subs = db.execute(select(Subscription).order_by(Subscription.id)).scalars().all()
+    vcs = db.execute(select(VpnClient).order_by(VpnClient.id)).scalars().all()
+
+    return CoreDataExportResponse(
+        users=[
+            {
+                "telegram_id": int(u.telegram_id),
+                "username": u.username,
+                "email": u.email,
+                "first_name": u.first_name,
+                "ref_source": u.ref_source,
+                "created_at": _dt(u.created_at),
+                "marketing_opt_out": bool(u.marketing_opt_out),
+                "trial_consumed_at": _dt(u.trial_consumed_at),
+            }
+            for u in users
+        ],
+        subscriptions=[
+            {
+                "telegram_id": int(s.telegram_id),
+                "payment_token": s.payment_token,
+                "payment_status": s.payment_status,
+                "is_trial_offer": bool(s.is_trial_offer),
+                "expires_at": _dt(s.expires_at),
+                "billing_provider": s.billing_provider,
+                "lava_contract_id": s.lava_contract_id,
+                "yookassa_payment_method_id": s.yookassa_payment_method_id,
+                "yookassa_last_applied_payment_id": s.yookassa_last_applied_payment_id,
+                "access_suspended": bool(s.access_suspended),
+                "access_blocked_reason": s.access_blocked_reason,
+                "created_at": _dt(s.created_at),
+            }
+            for s in subs
+        ],
+        vpn_clients=[
+            {
+                "telegram_id": int(v.telegram_id),
+                "uuid": v.uuid,
+                "active": bool(v.active),
+            }
+            for v in vcs
+        ],
+    )
+
+
+@app.post("/admin/import-core-data", response_model=OkResponse)
+def admin_import_core_data(
+    req: Request,
+    body: CoreDataExportResponse,
+    db: Session = Depends(get_db),
+) -> OkResponse:
+    """Merge users/subscriptions/vpn_clients из дампа (не перезаписывает существующие payment_token)."""
+    _require_admin(req)
+    added_users = 0
+    added_subs = 0
+
+    for row in body.users:
+        tg = int(row["telegram_id"])
+        exists = db.execute(select(User.id).where(User.telegram_id == tg)).scalar_one_or_none()
+        if exists:
+            continue
+        db.add(
+            User(
+                telegram_id=tg,
+                username=row.get("username"),
+                email=row.get("email"),
+                first_name=row.get("first_name"),
+                ref_source=row.get("ref_source"),
+                marketing_opt_out=bool(row.get("marketing_opt_out")),
+            )
+        )
+        added_users += 1
+
+    for row in body.subscriptions:
+        token = str(row["payment_token"])
+        exists = db.execute(select(Subscription.id).where(Subscription.payment_token == token)).scalar_one_or_none()
+        if exists:
+            continue
+        db.add(
+            Subscription(
+                telegram_id=int(row["telegram_id"]),
+                payment_token=token,
+                payment_status=str(row["payment_status"]),
+                is_trial_offer=bool(row.get("is_trial_offer")),
+                expires_at=row.get("expires_at"),
+                billing_provider=row.get("billing_provider"),
+                lava_contract_id=row.get("lava_contract_id"),
+                yookassa_payment_method_id=row.get("yookassa_payment_method_id"),
+                yookassa_last_applied_payment_id=row.get("yookassa_last_applied_payment_id"),
+                access_suspended=bool(row.get("access_suspended")),
+                access_blocked_reason=row.get("access_blocked_reason"),
+            )
+        )
+        added_subs += 1
+
+    db.commit()
+    return OkResponse(ok=True, detail=f"imported users={added_users} subscriptions={added_subs}")
+
+
+def _junk_test_telegram_ids() -> set[int]:
+    """Явный список тестовых tg_id — не использовать порог, т.к. реальные id > 1e9."""
+    raw = (os.getenv("JUNK_TEST_TELEGRAM_IDS") or "999999991").strip()
+    out: set[int] = set()
+    for part in raw.split(","):
+        p = part.strip()
+        if p.isdigit():
+            out.add(int(p))
+    return out
+
+
 @app.post("/admin/cleanup-test-data", response_model=CleanupTestDataResponse)
 def admin_cleanup_test_data(req: Request, db: Session = Depends(get_db)) -> CleanupTestDataResponse:
     """
-    Удаляет тестовые записи: junk users (tg_id >= 999999990) и expired-подписки владельца
-    без следов оплаты (ручные /admin/activate).
+    Удаляет только явно помеченные тестовые записи (JUNK_TEST_TELEGRAM_IDS, по умолчанию 999999991)
+    и expired-подписки владельца без следов оплаты (ручные /admin/activate).
     """
     _require_admin(req)
+    junk_ids = _junk_test_telegram_ids()
     owner_raw = (os.getenv("BOT_ADMIN_TELEGRAM_IDS") or "231115635").strip()
     owner_ids: set[int] = set()
     for part in owner_raw.split(","):
@@ -6009,24 +6135,24 @@ def admin_cleanup_test_data(req: Request, db: Session = Depends(get_db)) -> Clea
         and_(Subscription.yookassa_last_applied_payment_id.is_not(None), Subscription.yookassa_last_applied_payment_id != ""),
     )
 
-    del_users = db.execute(delete(User).where(User.telegram_id >= 999999990))
-    deleted_test_users = int(del_users.rowcount or 0)
+    deleted_test_users = 0
+    deleted_junk_subs = 0
+    if junk_ids:
+        del_users = db.execute(delete(User).where(User.telegram_id.in_(junk_ids)))
+        deleted_test_users = int(del_users.rowcount or 0)
+        del_junk = db.execute(delete(Subscription).where(Subscription.telegram_id.in_(junk_ids)))
+        deleted_junk_subs = int(del_junk.rowcount or 0)
 
-    owner_test_subs = db.execute(
-        delete(Subscription).where(
-            Subscription.telegram_id.in_(owner_ids) if owner_ids else sa_false(),
-            Subscription.payment_status == "expired",
-            ~has_payment_proof,
+    deleted_owner_test_subs = 0
+    if owner_ids:
+        owner_test_subs = db.execute(
+            delete(Subscription).where(
+                Subscription.telegram_id.in_(owner_ids),
+                Subscription.payment_status == "expired",
+                ~has_payment_proof,
+            )
         )
-    )
-    deleted_owner_test_subs = int(owner_test_subs.rowcount or 0)
-
-    del_junk = db.execute(
-        delete(Subscription).where(
-            Subscription.telegram_id >= 999999990,
-        )
-    )
-    deleted_junk_subs = int(del_junk.rowcount or 0)
+        deleted_owner_test_subs = int(owner_test_subs.rowcount or 0)
     db.commit()
 
     return CleanupTestDataResponse(
