@@ -433,9 +433,9 @@ def _verified_payment_clause(model: type[Subscription] = Subscription):
 
 
 def _vpn_subscription_url(telegram_id: int) -> str:
-    """Clash subscription URL с smart routing для Happ / Hiddify."""
+    """Subscription URL: base64 VLESS для Happ auto-update."""
     token = _vpn_sub_token(telegram_id)
-    return f"{PUBLIC_BASE_URL}/vpn/clash/{telegram_id}?token={token}"
+    return f"{PUBLIC_BASE_URL}/vpn/subscription/{telegram_id}?token={token}"
 
 
 def _backfill_trial_offer_rows() -> None:
@@ -4606,8 +4606,8 @@ def vpn_subscription(
     token: str = "",
 ) -> PlainTextResponse:
     """
-    Clash YAML subscription с smart routing (РФ-приложения → DIRECT).
-    Happ: «+» → «Subscription» → вставить URL.
+    Base64-encoded VLESS для Happ/Hiddify subscription (auto-update).
+    Для smart routing см. /vpn/clash/{telegram_id}.
     """
     if INTERNAL_API_TOKEN and not _trusted_vpn_request(req, telegram_id, token):
         raise HTTPException(status_code=403, detail="Forbidden")
@@ -4623,12 +4623,12 @@ def vpn_subscription(
         raise HTTPException(status_code=503, detail="Creating VPN client, try in 30s")
 
     _, vless_link = result
-    yaml_config = _build_clash_config(vless_link)
+    encoded = base64.b64encode(vless_link.encode("utf-8")).decode("ascii")
     expires_ts = int(_active_sub_expires(telegram_id, db) or 0)
-    return Response(
-        content=yaml_config,
-        media_type="text/yaml; charset=utf-8",
+    return PlainTextResponse(
+        encoded,
         headers={
+            "Content-Type": "text/plain; charset=utf-8",
             "profile-title": "Frosty VPN",
             "support-url": "https://t.me/frosty_support",
             "subscription-userinfo": f"upload=0; download=0; total=0; expire={expires_ts}",

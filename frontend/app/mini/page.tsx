@@ -485,14 +485,14 @@ export default function MiniAppPage() {
   // пока ссылка не появится. Пользователю не нужно жать «обновить» руками.
   useEffect(() => {
     if (activeTab !== "vpn" || !vpn) return
-    const link = vpn.subscription_url || vpn.vless_link
+    const link = vpn.vless_link
     if (vpn.available && !link) {
       const t = setTimeout(() => { void fetchVpn() }, 2000)
       return () => clearTimeout(t)
     }
   }, [activeTab, vpn, fetchVpn])
 
-  const vpnLink = vpn?.subscription_url || vpn?.vless_link || null
+  const vpnLink = vpn?.vless_link || null
 
   const handleCopyVlessLink = () => {
     if (!vpnLink) return
@@ -990,7 +990,7 @@ export default function MiniAppPage() {
                       <li className="flex gap-2">
                         <span className="font-bold flex-shrink-0 w-5" style={{ color: "#2AABEE" }}>3</span>
                         <span style={{ color: "#374151" }}>
-                          Откройте Happ → <strong>+</strong> → <strong>Subscription</strong> → вставьте скопированную ссылку.
+                          Откройте Happ → нажмите <strong>+</strong> → выберите <strong>«Вставить из буфера обмена»</strong>.
                         </span>
                       </li>
                       <li className="flex gap-2">
