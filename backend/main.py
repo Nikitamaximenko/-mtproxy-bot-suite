@@ -6048,6 +6048,19 @@ def admin_export_core_data(req: Request, db: Session = Depends(get_db)) -> CoreD
     )
 
 
+def _parse_import_dt(raw: str | None) -> datetime | None:
+    if not raw:
+        return None
+    s = str(raw).replace("Z", "+00:00")
+    try:
+        dt = datetime.fromisoformat(s)
+    except ValueError:
+        return None
+    if dt.tzinfo is not None:
+        return dt.astimezone(timezone.utc).replace(tzinfo=None)
+    return dt
+
+
 @app.post("/admin/import-core-data", response_model=OkResponse)
 def admin_import_core_data(
     req: Request,
@@ -6072,6 +6085,8 @@ def admin_import_core_data(
                 first_name=row.get("first_name"),
                 ref_source=row.get("ref_source"),
                 marketing_opt_out=bool(row.get("marketing_opt_out")),
+                trial_consumed_at=_parse_import_dt(row.get("trial_consumed_at")),
+                created_at=_parse_import_dt(row.get("created_at")) or utcnow(),
             )
         )
         added_users += 1
@@ -6087,19 +6102,21 @@ def admin_import_core_data(
                 payment_token=token,
                 payment_status=str(row["payment_status"]),
                 is_trial_offer=bool(row.get("is_trial_offer")),
-                expires_at=row.get("expires_at"),
+                expires_at=_parse_import_dt(row.get("expires_at")),
                 billing_provider=row.get("billing_provider"),
                 lava_contract_id=row.get("lava_contract_id"),
                 yookassa_payment_method_id=row.get("yookassa_payment_method_id"),
                 yookassa_last_applied_payment_id=row.get("yookassa_last_applied_payment_id"),
                 access_suspended=bool(row.get("access_suspended")),
                 access_blocked_reason=row.get("access_blocked_reason"),
+                created_at=_parse_import_dt(row.get("created_at")) or utcnow(),
             )
         )
         added_subs += 1
 
     db.commit()
-    return OkResponse(ok=True, detail=f"imported users={added_users} subscriptions={added_subs}")
+    logger.info("import-core-data: users=%s subscriptions=%s", added_users, added_subs)
+    return OkResponse(ok=True)
 
 
 def _junk_test_telegram_ids() -> set[int]:
