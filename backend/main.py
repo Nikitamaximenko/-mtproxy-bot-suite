@@ -662,7 +662,7 @@ async def lifespan(application: FastAPI) -> AsyncGenerator[None, None]:
             "RAILWAY: DATABASE_URL missing/empty — using bundled sqlite; set Postgres DATABASE_URL in Railway Variables."
         )
     try:
-    Base.metadata.create_all(bind=engine)
+        Base.metadata.create_all(bind=engine)
         _migrate()
     except Exception:
         logger.exception("Startup failed during create_all / _migrate — check DATABASE_URL and DB reachability")
@@ -1749,7 +1749,7 @@ def activate_subscription(sub: Subscription, *, recurring: bool = False) -> None
         if sub.expires_at and sub.expires_at > base:
             base = sub.expires_at
         _apply_proxy_credentials(sub)
-    sub.payment_status = "paid"
+        sub.payment_status = "paid"
         sub.expires_at = base + timedelta(days=30)
         sub.access_suspended = False
         sub.access_blocked_reason = None
@@ -3138,7 +3138,7 @@ def get_subscription(telegram_id: int, req: Request, db: Session = Depends(get_d
 
     proxy_link: str | None = None
     if has_token:
-    proxy_link = f"tg://proxy?server={sub.proxy_server}&port={sub.proxy_port}&secret={sub.proxy_secret}"
+        proxy_link = f"tg://proxy?server={sub.proxy_server}&port={sub.proxy_port}&secret={sub.proxy_secret}"
     return SubscriptionResponse(
         active=True,
         expires_at=sub.expires_at,
@@ -4786,7 +4786,7 @@ def lava_test(payload: LavaTestRequest, req: Request, db: Session = Depends(get_
         raise HTTPException(status_code=404, detail="Subscription not found for payment_token")
 
     try:
-    activate_subscription(sub)
+        activate_subscription(sub)
     except RuntimeError as e:
         raise HTTPException(status_code=503, detail=str(e))
 
