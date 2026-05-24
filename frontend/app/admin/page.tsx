@@ -1026,6 +1026,11 @@ export default function AdminPage() {
             <div className="bg-gray-900 border border-gray-800 rounded-2xl p-6">
               <div className="text-xs text-gray-400 mb-3 font-medium">📡 MTProxy</div>
               {proxy ? (
+                proxy.handshake === "not_configured" ? (
+                  <div className="text-sm text-gray-400">
+                    MTProxy отключён — сервис работает только через VLESS VPN.
+                  </div>
+                ) : (
                 <div className="space-y-3">
                   <div className="flex items-center justify-between flex-wrap gap-4">
                     <div className="flex items-center gap-3">
@@ -1089,6 +1094,7 @@ export default function AdminPage() {
                     </div>
                   )}
                 </div>
+                )
               ) : (
                 <div className="text-gray-500">Загрузка…</div>
               )}
