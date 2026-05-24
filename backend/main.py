@@ -669,6 +669,17 @@ async def lifespan(application: FastAPI) -> AsyncGenerator[None, None]:
         raise
     task = asyncio.create_task(_expiration_loop())
     vpn_task = asyncio.create_task(_vpn_maintenance_loop())
+
+    async def _startup_reconcile() -> None:
+        await asyncio.sleep(15)
+        loop = asyncio.get_event_loop()
+        try:
+            n = await loop.run_in_executor(None, _reconcile_lava_pending_payments)
+            logger.info("Startup Lava reconcile: activated=%d", n)
+        except Exception:
+            logger.exception("Startup Lava reconcile failed")
+
+    asyncio.create_task(_startup_reconcile())
     yield
     task.cancel()
     vpn_task.cancel()
@@ -1080,6 +1091,66 @@ def _create_lava_top_invoice(
     if not payment_url:
         raise RuntimeError(f"lava.top did not return paymentUrl, response keys: {list(data.keys())}")
     return payment_url, contract_id
+
+
+def _lava_get_invoice(contract_id: str) -> dict | None:
+    """GET /api/v2/invoices/{id} — статус контракта в Lava."""
+    cid = (contract_id or "").strip()
+    if not (LAVA_TOP_API_KEY and cid):
+        return None
+    try:
+        req = urllib.request.Request(
+            f"{_lava_api_root()}/api/v2/invoices/{cid}",
+            headers={"X-Api-Key": LAVA_TOP_API_KEY, "Accept": "application/json"},
+        )
+        with urllib.request.urlopen(req, timeout=12) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+            return data if isinstance(data, dict) else None
+    except Exception as e:
+        logger.debug("Lava invoice lookup failed contract=%s: %s", cid, e)
+        return None
+
+
+def _reconcile_lava_pending_payments() -> int:
+    """Активировать pending-подписки, если Lava уже COMPLETED, а вебхук не дошёл до VPS."""
+    if not LAVA_TOP_API_KEY:
+        return 0
+    db = SessionLocal()
+    activated = 0
+    try:
+        pending = db.execute(
+            select(Subscription).where(
+                Subscription.payment_status == "pending",
+                Subscription.lava_contract_id.is_not(None),
+                func.length(func.trim(Subscription.lava_contract_id)) > 0,
+            )
+        ).scalars().all()
+        for sub in pending:
+            cid = (sub.lava_contract_id or "").strip()
+            if not cid:
+                continue
+            inv = _lava_get_invoice(cid)
+            if not isinstance(inv, dict):
+                continue
+            status = str(inv.get("status") or "").upper()
+            if status not in ("COMPLETED", "SUCCESS", "PAID"):
+                continue
+            try:
+                activate_subscription(sub)
+            except RuntimeError as e:
+                logger.error("Reconcile activate failed tg_id=%s: %s", sub.telegram_id, e)
+                continue
+            db.commit()
+            _provision_vpn_after_payment(int(sub.telegram_id), db)
+            proxy_link = f"tg://proxy?server={sub.proxy_server}&port={sub.proxy_port}&secret={sub.proxy_secret}"
+            _notify_payment_success(sub.telegram_id, proxy_link)
+            activated += 1
+            logger.info("Reconciled Lava payment tg_id=%s contract=%s", sub.telegram_id, cid)
+        if activated:
+            logger.info("Lava reconcile: activated %d pending subscriptions", activated)
+    finally:
+        db.close()
+    return activated
 
 
 def _lava_cancel_subscription_api(contract_id: str, email: str) -> None:
@@ -2420,6 +2491,10 @@ async def _expiration_loop() -> None:
             await loop.run_in_executor(None, _process_sales_nudges)
         except Exception:
             logger.exception("Sales nudges failed")
+        try:
+            await loop.run_in_executor(None, _reconcile_lava_pending_payments)
+        except Exception:
+            logger.exception("Lava payment reconcile failed")
         await asyncio.sleep(3600)
 
 
@@ -4892,6 +4967,15 @@ def lava_test(payload: LavaTestRequest, req: Request, db: Session = Depends(get_
 def admin_check_expirations(req: Request) -> OkResponse:
     _require_admin(req)
     _process_expiration_notifications()
+    return OkResponse(ok=True)
+
+
+@app.post("/admin/reconcile-lava-payments", response_model=OkResponse)
+def admin_reconcile_lava_payments(req: Request) -> OkResponse:
+    """Проверить pending-подписки в Lava API и активировать оплаченные (если вебхук не дошёл)."""
+    _require_admin(req)
+    n = _reconcile_lava_pending_payments()
+    logger.info("Admin triggered Lava reconcile: activated=%d", n)
     return OkResponse(ok=True)
 
 
