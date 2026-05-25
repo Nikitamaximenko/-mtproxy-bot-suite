@@ -172,6 +172,7 @@ XRAY_PUBLIC_KEY = (os.getenv("XRAY_PUBLIC_KEY") or "").strip()
 XRAY_SHORT_ID = (os.getenv("XRAY_SHORT_ID") or "").strip()
 XRAY_SNI = (os.getenv("XRAY_SNI") or "www.microsoft.com").strip()
 XRAY_SERVER_IP = (os.getenv("XRAY_SERVER_IP") or "").strip()
+XRAY_CLIENT_PORT = int((os.getenv("XRAY_CLIENT_PORT") or "443").strip() or "443")
 
 # Internal API token for frontend-to-backend calls (prevents direct public access)
 INTERNAL_API_TOKEN = (os.getenv("INTERNAL_API_TOKEN") or "").strip()
@@ -3792,16 +3793,40 @@ def _xray_req(method: str, path: str, body: dict | None = None, timeout: int = 8
         return result if status < 300 else None
 
 
-def _xray_build_vless_link(client_uuid: str, port: int = 443) -> str:
+def _xray_build_vless_link(client_uuid: str, port: int | None = None) -> str:
     if not (XRAY_SERVER_IP and XRAY_PUBLIC_KEY):
         return ""
+    client_port = int(port if port is not None else XRAY_CLIENT_PORT)
     params = (
         f"security=reality&encryption=none&pbk={XRAY_PUBLIC_KEY}"
         f"&fp=chrome&type=tcp&flow=xtls-rprx-vision"
         f"&sni={XRAY_SNI}&sid={XRAY_SHORT_ID}&spx=%2F"
     )
-    label = "Frosty VPN" if port == 443 else f"Frosty VPN ({port})"
-    return f"vless://{client_uuid}@{XRAY_SERVER_IP}:{port}?{params}#{label}"
+    label = "Frosty VPN" if client_port == 443 else f"Frosty VPN ({client_port})"
+    return f"vless://{client_uuid}@{XRAY_SERVER_IP}:{client_port}?{params}#{label}"
+
+
+def _vless_link_port(link: str) -> int | None:
+    try:
+        parsed = urlsplit(link)
+        if parsed.port is not None:
+            return int(parsed.port)
+        if parsed.scheme == "vless" and parsed.netloc:
+            host_part = parsed.netloc.rsplit("@", 1)[-1]
+            if ":" in host_part:
+                return int(host_part.rsplit(":", 1)[-1])
+    except (ValueError, IndexError):
+        return None
+    return 443 if link.startswith("vless://") else None
+
+
+def _vless_link_needs_refresh(link: str | None) -> bool:
+    if not link or not link.strip():
+        return True
+    if "flow=" not in link:
+        return True
+    port = _vless_link_port(link)
+    return port is None or port != XRAY_CLIENT_PORT
 
 
 def _xray_client_exists(tg_id: int) -> bool:
@@ -3934,8 +3959,8 @@ def _ensure_xray_client(tg_id: int, db: Session) -> tuple[str, str] | None:
     existing = db.execute(select(VpnClient).where(VpnClient.telegram_id == tg_id)).scalar_one_or_none()
 
     if existing:
-        # Обновляем ссылку если старая (без flow=xtls-rprx-vision)
-        if existing.uuid and "flow=" not in (existing.vless_link or ""):
+        # Обновляем ссылку если устарела (нет flow или неверный порт после смены inbound)
+        if existing.uuid and _vless_link_needs_refresh(existing.vless_link):
             refreshed = _xray_build_vless_link(existing.uuid)
             if refreshed:
                 existing.vless_link = refreshed
@@ -4995,6 +5020,10 @@ def _repair_all_xray_clients(db: Session) -> tuple[int, int]:
     for client in clients:
         tg_id = int(client.telegram_id)
         try:
+            if client.uuid:
+                refreshed = _xray_build_vless_link(client.uuid)
+                if refreshed and refreshed != (client.vless_link or ""):
+                    client.vless_link = refreshed
             if not _xray_client_exists(tg_id):
                 logger.warning("Xray repair: missing client tg_id=%s — re-adding", tg_id)
                 result = _xray_add_client(tg_id, preferred_uuid=client.uuid)
@@ -5015,6 +5044,41 @@ def _repair_all_xray_clients(db: Session) -> tuple[int, int]:
     return repaired, failed
 
 
+def _notify_active_vpn_users_vless_refresh(db: Session) -> tuple[int, int]:
+    """Отправить каждому активному VPN-пользователю обновлённый vless:// для Happ."""
+    if not BOT_TOKEN:
+        return 0, 0
+    clients = db.execute(
+        select(VpnClient).where(VpnClient.active == True)  # noqa: E712
+    ).scalars().all()
+    sent = 0
+    failed = 0
+    text_intro = (
+        "🔄 Обновили VPN-код — вставьте новый в Happ (старый на порту 443 больше не работает).\n\n"
+        "1. Откройте Happ → удалите старый профиль или обновите подписку\n"
+        "2. Скопируйте код ниже и вставьте через «+» → «Вставить из буфера»\n\n"
+    )
+    for client in clients:
+        tg_id = int(client.telegram_id)
+        if tg_id <= 0:
+            continue
+        link = (client.vless_link or "").strip()
+        if not link and client.uuid:
+            link = _xray_build_vless_link(client.uuid)
+            if link:
+                client.vless_link = link
+        if not link:
+            failed += 1
+            continue
+        msg = f"{text_intro}<code>{link}</code>"
+        if _send_tg(tg_id, msg):
+            sent += 1
+        else:
+            failed += 1
+    db.commit()
+    return sent, failed
+
+
 @app.post("/admin/repair-vpn", response_model=OkResponse)
 def admin_repair_vpn(req: Request, db: Session = Depends(get_db)) -> OkResponse:
     """Принудительно восстановить всех активных VPN-клиентов в Xray."""
@@ -5022,6 +5086,43 @@ def admin_repair_vpn(req: Request, db: Session = Depends(get_db)) -> OkResponse:
     repaired, failed = _repair_all_xray_clients(db)
     logger.info("Admin VPN repair: ok=%d failed=%d", repaired, failed)
     return OkResponse(ok=True)
+
+
+class AdminVpnRefreshNotifyResponse(BaseModel):
+    ok: bool
+    repaired: int
+    repair_failed: int
+    notified: int
+    notify_failed: int
+
+
+@app.post("/admin/refresh-vpn-links", response_model=AdminVpnRefreshNotifyResponse)
+def admin_refresh_vpn_links(
+    req: Request,
+    db: Session = Depends(get_db),
+    notify: bool = Query(True, description="Отправить каждому пользователю новый vless:// в Telegram"),
+) -> AdminVpnRefreshNotifyResponse:
+    """Обновить vless:// (порт/параметры) для всех активных клиентов и опционально уведомить в Telegram."""
+    _require_admin(req)
+    repaired, repair_failed = _repair_all_xray_clients(db)
+    notified = 0
+    notify_failed = 0
+    if notify:
+        notified, notify_failed = _notify_active_vpn_users_vless_refresh(db)
+    logger.info(
+        "Admin VPN link refresh: repaired=%d repair_failed=%d notified=%d notify_failed=%d",
+        repaired,
+        repair_failed,
+        notified,
+        notify_failed,
+    )
+    return AdminVpnRefreshNotifyResponse(
+        ok=True,
+        repaired=repaired,
+        repair_failed=repair_failed,
+        notified=notified,
+        notify_failed=notify_failed,
+    )
 
 
 class AdminNotifyUserRequest(BaseModel):
