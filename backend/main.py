@@ -73,7 +73,8 @@ LAVA_TOP_PAYMENT_METHOD = (os.getenv("LAVA_TOP_PAYMENT_METHOD") or "").strip()  
 LAVA_TOP_WEBHOOK_API_KEY = (os.getenv("LAVA_TOP_WEBHOOK_API_KEY") or "").strip()
 
 # ЮKassa (YooMoney): СБП, SberPay, карты и др. через единую форму; автоплатежи после save_payment_method.
-# В личном кабинете укажите URL уведомлений: {PUBLIC_BASE_URL}/webhooks/yookassa
+# В личном кабинете URL уведомлений — только https:// и порт 443 или 8443 (не 9443).
+# VPS: https://138-124-80-97.sslip.io:8443/webhooks/yookassa
 # Реальные автосписания в проде включаются в кабинете ЮKassa (см. их доку «Автоплатежи»).
 YOOKASSA_SHOP_ID = (os.getenv("YOOKASSA_SHOP_ID") or "").strip()
 YOOKASSA_SECRET_KEY = (os.getenv("YOOKASSA_SECRET_KEY") or "").strip()
@@ -695,6 +696,11 @@ async def lifespan(application: FastAPI) -> AsyncGenerator[None, None]:
             logger.info("Startup Lava reconcile: activated=%d", n)
         except Exception:
             logger.exception("Startup Lava reconcile failed")
+        try:
+            ny = await loop.run_in_executor(None, _reconcile_yookassa_pending_payments)
+            logger.info("Startup YooKassa reconcile: applied=%d", ny)
+        except Exception:
+            logger.exception("Startup YooKassa reconcile failed")
 
     asyncio.create_task(_startup_reconcile())
     yield
@@ -1168,6 +1174,163 @@ def _reconcile_lava_pending_payments() -> int:
     finally:
         db.close()
     return activated
+
+
+YOOKASSA_RECONCILE_LOOKBACK_DAYS = int(os.getenv("YOOKASSA_RECONCILE_LOOKBACK_DAYS", "14").strip() or "14")
+
+
+def _yookassa_iso8601(dt: datetime) -> str:
+    return dt.strftime("%Y-%m-%dT%H:%M:%S.000Z")
+
+
+def _yookassa_list_succeeded_payments(since: datetime) -> list[dict[str, Any]]:
+    """Список успешных платежей ЮKassa с пагинацией (для reconcile без webhook)."""
+    items: list[dict[str, Any]] = []
+    cursor: str | None = None
+    since_iso = _yookassa_iso8601(since)
+    for _ in range(20):
+        q = f"?status=succeeded&created_at.gte={quote(since_iso)}&limit=100"
+        if cursor:
+            q += f"&cursor={quote(cursor)}"
+        data = _yookassa_request("GET", f"/payments{q}")
+        if not isinstance(data, dict):
+            break
+        batch = data.get("items")
+        if isinstance(batch, list):
+            for row in batch:
+                if isinstance(row, dict):
+                    items.append(row)
+        next_cursor = data.get("next_cursor")
+        if not next_cursor or not isinstance(next_cursor, str):
+            break
+        cursor = next_cursor.strip() or None
+        if not cursor:
+            break
+    return items
+
+
+def _yookassa_checkout_payment_id(db: Session, payment_token: str) -> str | None:
+    """payment_id из checkout_logs (если webhook не дошёл, но checkout был через ЮKassa)."""
+    token = (payment_token or "").strip()
+    if not token:
+        return None
+    row = db.execute(
+        select(CheckoutLog)
+        .where(
+            CheckoutLog.payment_token == token,
+            CheckoutLog.provider == "yookassa",
+            CheckoutLog.ok == True,  # noqa: E712
+        )
+        .order_by(CheckoutLog.created_at.desc(), CheckoutLog.id.desc())
+        .limit(1)
+    ).scalar_one_or_none()
+    if row is None or not row.details:
+        return None
+    try:
+        parsed = json.loads(row.details)
+    except json.JSONDecodeError:
+        return None
+    if not isinstance(parsed, dict):
+        return None
+    pay_id = str(parsed.get("payment_id") or "").strip()
+    return pay_id or None
+
+
+def _reconcile_yookassa_pending_payments() -> int:
+    """Активировать pending/renewal, если ЮKassa уже succeeded, а webhook не дошёл до VPS."""
+    if not _yookassa_configured():
+        return 0
+    db = SessionLocal()
+    applied = 0
+    seen_pay_ids: set[str] = set()
+    try:
+        pending_rows = db.execute(
+            select(Subscription).where(
+                Subscription.payment_status == "pending",
+                or_(
+                    Subscription.lava_contract_id.is_(None),
+                    func.trim(Subscription.lava_contract_id) == "",
+                ),
+            )
+        ).scalars().all()
+        pending_tokens = {
+            (s.payment_token or "").strip()
+            for s in pending_rows
+            if (s.payment_token or "").strip()
+        }
+
+        candidates: list[dict[str, Any]] = []
+        for sub in pending_rows:
+            token = (sub.payment_token or "").strip()
+            if not token:
+                continue
+            pay_id = _yookassa_checkout_payment_id(db, token)
+            if pay_id:
+                verified = _yookassa_get_payment(pay_id)
+                if isinstance(verified, dict) and str(verified.get("status") or "") == "succeeded":
+                    candidates.append(verified)
+
+        since = utcnow() - timedelta(days=max(1, YOOKASSA_RECONCILE_LOOKBACK_DAYS))
+        for payment in _yookassa_list_succeeded_payments(since):
+            meta = payment.get("metadata")
+            if not isinstance(meta, dict):
+                continue
+            token = str(meta.get("payment_token") or "").strip()
+            is_renewal = str(meta.get("renewal") or "").strip() == "1"
+            if token in pending_tokens or is_renewal:
+                pay_id = str(payment.get("id") or "").strip()
+                if pay_id:
+                    verified = _yookassa_get_payment(pay_id)
+                    if isinstance(verified, dict) and str(verified.get("status") or "") == "succeeded":
+                        candidates.append(verified)
+
+        for payment in candidates:
+            pay_id = str(payment.get("id") or "").strip()
+            if not pay_id or pay_id in seen_pay_ids:
+                continue
+            seen_pay_ids.add(pay_id)
+            meta = payment.get("metadata")
+            if not isinstance(meta, dict):
+                continue
+            token = str(meta.get("payment_token") or "").strip()
+            if not token:
+                continue
+            sub = db.execute(
+                select(Subscription).where(Subscription.payment_token == token)
+            ).scalar_one_or_none()
+            if sub is None:
+                continue
+            if pay_id and (sub.yookassa_last_applied_payment_id or "") == pay_id:
+                continue
+            is_renewal = str(meta.get("renewal") or "").strip() == "1"
+            if sub.payment_status == "pending" and not is_renewal:
+                pass
+            elif sub.payment_status == "paid" and is_renewal:
+                pass
+            else:
+                continue
+            before = sub.payment_status
+            try:
+                _apply_yookassa_payment_object(db, payment)
+            except Exception as e:
+                logger.error("YooKassa reconcile apply failed pay_id=%s token=%s: %s", pay_id, token, e)
+                db.rollback()
+                continue
+            db.refresh(sub)
+            if sub.payment_status != before or (sub.yookassa_last_applied_payment_id or "") == pay_id:
+                applied += 1
+                logger.info(
+                    "Reconciled YooKassa payment tg_id=%s pay_id=%s renewal=%s",
+                    sub.telegram_id,
+                    pay_id,
+                    is_renewal,
+                )
+
+        if applied:
+            logger.info("YooKassa reconcile: applied %d payments", applied)
+    finally:
+        db.close()
+    return applied
 
 
 def _lava_cancel_subscription_api(contract_id: str, email: str) -> None:
@@ -1773,7 +1936,7 @@ def checkout_create(payload: CheckoutCreateRequest, db: Session = Depends(get_db
             )
         return_url = f"{FRONTEND_URL.rstrip('/')}/success?token={token}"
         try:
-            payment_url_yk, _ = _yookassa_create_initial_payment(
+            payment_url_yk, yk_payment_id = _yookassa_create_initial_payment(
                 payment_token=str(token),
                 email=effective_email,
                 return_url=return_url,
@@ -1804,6 +1967,7 @@ def checkout_create(payload: CheckoutCreateRequest, db: Session = Depends(get_db
             payment_token=str(token),
             ok=True,
             payment_url=payment_url,
+            details={"payment_id": yk_payment_id},
         )
         logger.info("Checkout YooKassa: tg_id=%s token=%s", tg_id, token)
     return CheckoutCreateResponse(payment_url=payment_url, payment_token=token)
@@ -2512,6 +2676,10 @@ async def _expiration_loop() -> None:
             await loop.run_in_executor(None, _reconcile_lava_pending_payments)
         except Exception:
             logger.exception("Lava payment reconcile failed")
+        try:
+            await loop.run_in_executor(None, _reconcile_yookassa_pending_payments)
+        except Exception:
+            logger.exception("YooKassa payment reconcile failed")
         await asyncio.sleep(3600)
 
 
@@ -4803,6 +4971,15 @@ def admin_reconcile_lava_payments(req: Request) -> OkResponse:
     _require_admin(req)
     n = _reconcile_lava_pending_payments()
     logger.info("Admin triggered Lava reconcile: activated=%d", n)
+    return OkResponse(ok=True)
+
+
+@app.post("/admin/reconcile-yookassa-payments", response_model=OkResponse)
+def admin_reconcile_yookassa_payments(req: Request) -> OkResponse:
+    """Проверить succeeded-платежи в ЮKassa и активировать подписки (если webhook не дошёл)."""
+    _require_admin(req)
+    n = _reconcile_yookassa_pending_payments()
+    logger.info("Admin triggered YooKassa reconcile: applied=%d", n)
     return OkResponse(ok=True)
 
 
