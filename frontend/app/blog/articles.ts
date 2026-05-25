@@ -1,21 +1,10 @@
-export type Article = {
-  slug: string
-  title: string
-  description: string
-  keywords: string[]
-  content: string
-  publishedAt: string
-}
+import type { Article } from "./article-types"
+import { CTA } from "./cta"
+import { articlesBatch2026 } from "./articles-batch-2026"
 
-const CTA = `
-<div style="background:#EFF6FF;border-radius:16px;padding:24px;margin-top:32px">
-<h3 style="color:#1d4ed8;margin:0 0 8px">Попробуйте Frosty — личный MTProxy для Telegram</h3>
-<p style="color:#374151;margin:0 0 16px">Работает без VPN, только ваш трафик, 299 ₽/мес. Подключение за 30 секунд.</p>
-<a href="/mini" style="display:inline-block;background:#2AABEE;color:white;padding:12px 24px;border-radius:12px;text-decoration:none;font-weight:700">Подключить за 299 ₽ →</a>
-</div>
-`
+export type { Article } from "./article-types"
 
-export const articles: Article[] = [
+const legacyArticles: Article[] = [
   {
     slug: "kak-obojti-blokirovku-telegram-2025",
     title: "Как обойти блокировку Telegram в России в 2025 году",
@@ -2074,3 +2063,7 @@ ${CTA}
 `,
   },
 ]
+
+export const articles: Article[] = [...legacyArticles, ...articlesBatch2026].sort((a, b) =>
+  b.publishedAt.localeCompare(a.publishedAt),
+)

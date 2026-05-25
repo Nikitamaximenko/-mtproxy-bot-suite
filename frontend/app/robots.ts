@@ -19,3 +19,5 @@ export default function robots(): MetadataRoute.Robots {
     host: SITE_URL,
   }
 }
+
+// RSS для Яндекса и агрегаторов — /blog/rss.xml

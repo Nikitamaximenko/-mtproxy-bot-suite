@@ -61,6 +61,7 @@ export default async function ArticlePage({
   // Related: ближайшие по дате статьи, без текущей
   const related = articles
     .filter((a) => a.slug !== article.slug)
+    .sort((a, b) => b.publishedAt.localeCompare(a.publishedAt))
     .slice(0, 4)
 
   const articleJsonLd = {

@@ -6,7 +6,7 @@ import { SITE_URL } from "@/lib/site"
 export const metadata: Metadata = {
   title: "Блог Frosty — Telegram, MTProxy и VPN в России",
   description:
-    "Гайды и разборы про обход блокировок Telegram, настройку MTProxy на iOS и Android, VPN для Instagram, YouTube, TikTok и ChatGPT в 2025 году.",
+    "75+ гайдов, топов и разборов мифов про Telegram, MTProxy и VPN в России: регионы, Happ, YouTube, Instagram, ChatGPT.",
   keywords: [
     "блог telegram",
     "mtproxy гайды",
@@ -14,6 +14,8 @@ export const metadata: Metadata = {
     "настройка прокси телеграм",
     "обход блокировки instagram",
     "vpn для youtube",
+    "telegram москва",
+    "telegram спб",
   ].join(", "),
   alternates: { canonical: `${SITE_URL}/blog` },
   openGraph: {
@@ -125,9 +127,17 @@ export default function BlogPage() {
         >
           Блог Frosty — Telegram, прокси и VPN в России
         </h1>
-        <p style={{ color: "#6B7280", fontSize: "16px", margin: "0 0 40px", lineHeight: 1.6 }}>
-          Объясняем как работает MTProxy, какой VPN выбрать в 2025 году, как починить Telegram,
-          Instagram и YouTube в России. Без воды и партнёрских ссылок.
+        <p style={{ color: "#6B7280", fontSize: "16px", margin: "0 0 24px", lineHeight: 1.6 }}>
+          {articles.length} статей: гайды, топы, мифы и региональные инструкции для России. MTProxy,
+          Happ, YouTube, Instagram — без воды.
+        </p>
+        <p style={{ margin: "0 0 40px" }}>
+          <a
+            href="/blog/rss.xml"
+            style={{ color: "#2AABEE", fontSize: "14px", fontWeight: 600, textDecoration: "none" }}
+          >
+            RSS-лента →
+          </a>
         </p>
 
         <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
