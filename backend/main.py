@@ -2588,11 +2588,7 @@ def _process_expiration_notifications() -> None:
         ).scalars().all()
 
         for sub in expired:
-            logger.info("Sending expired notification to tg_id=%s trial=%s", sub.telegram_id, sub.payment_status)
-            if sub.payment_status == "trial":
-                _notify_trial_expired(sub.telegram_id)
-            else:
-                _notify_expired(sub.telegram_id)
+            prev_status = sub.payment_status
             sub.notified_expired = True
             sub.payment_status = "expired"
             sub.renewal_failed_notified = False
@@ -2602,7 +2598,21 @@ def _process_expiration_notifications() -> None:
             sub.proxy_server = None
             sub.proxy_port = None
             sub.proxy_secret = None
-            # Deactivate VPN client when subscription expires
+            # У пользователя может быть несколько строк (trial + paid). Не рубим VPN,
+            # если после истечения этой строки остаётся другая активная подписка.
+            if _active_sub_for_vpn(int(sub.telegram_id), db):
+                logger.info(
+                    "Subscription row expired but user still has access tg_id=%s row_id=%s was=%s",
+                    sub.telegram_id,
+                    sub.id,
+                    prev_status,
+                )
+                continue
+            logger.info("Sending expired notification to tg_id=%s was=%s", sub.telegram_id, prev_status)
+            if prev_status == "trial":
+                _notify_trial_expired(sub.telegram_id)
+            else:
+                _notify_expired(sub.telegram_id)
             try:
                 _deactivate_vpn_client_no_commit(int(sub.telegram_id), db)
             except Exception:
@@ -2627,6 +2637,13 @@ def _process_expiration_notifications() -> None:
             sub.proxy_server = None
             sub.proxy_port = None
             sub.proxy_secret = None
+            if _active_sub_for_vpn(int(sub.telegram_id), db):
+                logger.info(
+                    "Backfill: skip VPN deactivate — user still has access tg_id=%s row_id=%s",
+                    sub.telegram_id,
+                    sub.id,
+                )
+                continue
             try:
                 _deactivate_vpn_client_no_commit(int(sub.telegram_id), db)
             except Exception:
