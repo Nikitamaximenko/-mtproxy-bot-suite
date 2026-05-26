@@ -5026,14 +5026,45 @@ def admin_reconcile_yookassa_payments(req: Request) -> OkResponse:
 
 
 def _repair_all_xray_clients(db: Session) -> tuple[int, int]:
-    """Re-sync every active VPN client from DB into 3X-UI. Returns (repaired, failed)."""
+    """Re-sync VPN clients in 3X-UI. Also re-provision paid users wrongly marked inactive."""
     global _xray_client_verified_at
     _xray_client_verified_at.clear()
+    repaired = 0
+    failed = 0
+
+    inactive_paid_tg: list[int] = []
+    for (tg_id,) in db.execute(
+        select(Subscription.telegram_id)
+        .where(
+            Subscription.payment_status == "paid",
+            Subscription.expires_at.is_not(None),
+            Subscription.expires_at > utcnow(),
+            Subscription.access_suspended == False,  # noqa: E712
+            Subscription.access_blocked_reason.is_(None),
+        )
+        .distinct()
+    ).all():
+        client = db.execute(
+            select(VpnClient).where(VpnClient.telegram_id == int(tg_id))
+        ).scalar_one_or_none()
+        if client is None or not client.active:
+            inactive_paid_tg.append(int(tg_id))
+
+    for tg_id in inactive_paid_tg:
+        try:
+            ok, _ = _provision_vpn_after_payment(tg_id, db, source="repair")
+            if ok:
+                repaired += 1
+                logger.info("Xray repair: re-provisioned inactive paid tg_id=%s", tg_id)
+            else:
+                failed += 1
+        except Exception:
+            logger.exception("Xray repair: re-provision failed tg_id=%s", tg_id)
+            failed += 1
+
     clients = db.execute(
         select(VpnClient).where(VpnClient.active == True)  # noqa: E712
     ).scalars().all()
-    repaired = 0
-    failed = 0
     for client in clients:
         tg_id = int(client.telegram_id)
         try:
