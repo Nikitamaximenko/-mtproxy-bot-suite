@@ -17,6 +17,7 @@ from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.types import (
+    BufferedInputFile,
     CallbackQuery,
     InlineKeyboardButton,
     InlineKeyboardMarkup,
@@ -134,7 +135,7 @@ def main_menu_kb(tg_id: int, *, show_amnezia: bool = False) -> InlineKeyboardMar
     ]
     if show_amnezia:
         rows.append(
-            [InlineKeyboardButton(text="🌿 Amnezia VPN (RU+)", callback_data="menu:amnezia")]
+            [InlineKeyboardButton(text="🌿 AmneziaWG (RU+)", callback_data="menu:amnezia")]
         )
     rows.extend(
         [
@@ -471,40 +472,56 @@ async def _fetch_amnezia_config(session: aiohttp.ClientSession, tg_id: int) -> d
         return {}
 
 
+async def _send_amnezia_conf_file(msg: Message, tg_uid: int, conf: str) -> None:
+    doc = BufferedInputFile(conf.encode("utf-8"), filename="frosty_amneziawg.conf")
+    await msg.answer_document(
+        doc,
+        caption=(
+            "📄 <b>Конфиг AmneziaWG 2.0</b>\n\n"
+            "В приложении <b>AmneziaWG</b>: «+» → «Создать из файла или архива» → "
+            "выберите этот файл."
+        ),
+        parse_mode="HTML",
+    )
+
+
 async def _send_amnezia_vpn(msg: Message, session: aiohttp.ClientSession, tg_uid: int) -> None:
     data = await _fetch_amnezia_config(session, tg_uid)
     if not data.get("available"):
         reason = data.get("reason")
         if reason == "no_key":
             text = (
-                "🌿 <b>Amnezia VPN</b>\n\n"
-                "Доступ для вас включён, но ключ ещё не выдан. Напишите администратору."
+                "🌿 <b>AmneziaWG</b>\n\n"
+                "Доступ включён, но конфиг ещё не выдан. Напишите администратору."
             )
         else:
             text = "Этот раздел недоступен для вашего аккаунта."
         await msg.answer(text, parse_mode="HTML", reply_markup=await main_menu_kb_for(session, tg_uid))
         return
-    key = str(data.get("vpn_key") or "").strip()
+    conf = str(data.get("wg_conf") or "").strip()
     steps = data.get("install_steps") or []
-    app_url = data.get("app_url") or "https://amnezia.org/ru"
+    docs_url = data.get("docs_url") or "https://docs.amnezia.org/ru/documentation/amnezia-wg/"
     steps_txt = "\n".join(f"{i + 1}. {s}" for i, s in enumerate(steps[:5]))
     body = (
-        "🌿 <b>Amnezia VPN</b> — отдельный канал (лучше в РФ), не заменяет Frosty VLESS.\n\n"
+        "🌿 <b>AmneziaWG 2.0</b> — защищённый протокол (обфускация, устойчив в РФ).\n"
+        "Отдельно от Frosty VLESS (Happ).\n\n"
         f"{steps_txt}\n\n"
-        f"Скачать: <a href=\"{html.escape(app_url)}\">amnezia.org</a>\n\n"
-        f"<code>{html.escape(key)}</code>"
+        f"<a href=\"{html.escape(docs_url)}\">О протоколе AmneziaWG</a>"
     )
+    rows: list[list[InlineKeyboardButton]] = []
+    if conf:
+        rows.append(
+            [InlineKeyboardButton(text="📄 Получить файл .conf", callback_data="menu:amnezia_conf")]
+        )
+    rows.append([InlineKeyboardButton(text="🏠 Главное меню", callback_data="menu:main")])
     await msg.answer(
         body,
         parse_mode="HTML",
         disable_web_page_preview=True,
-        reply_markup=InlineKeyboardMarkup(
-            inline_keyboard=[
-                [InlineKeyboardButton(text="📋 Ключ Amnezia", callback_data="menu:amnezia_copy")],
-                [InlineKeyboardButton(text="🏠 Главное меню", callback_data="menu:main")],
-            ]
-        ),
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=rows),
     )
+    if conf:
+        await _send_amnezia_conf_file(msg, tg_uid, conf)
 
 
 async def _get_vless_link(session: aiohttp.ClientSession, tg_id: int) -> tuple[str | None, str | None]:
@@ -1160,27 +1177,18 @@ async def main() -> None:
             await _send_amnezia_vpn(msg, session, tg_uid)
             return
 
-        if action == "amnezia_copy":
-            await query.answer("Ключ Amnezia…")
+        if action == "amnezia_conf":
+            await query.answer("Отправляю .conf…")
             tg_uid = query.from_user.id
             data = await _fetch_amnezia_config(session, tg_uid)
-            key = str(data.get("vpn_key") or "").strip()
-            if not key:
+            conf = str(data.get("wg_conf") or "").strip()
+            if not conf:
                 await msg.answer(
-                    "Ключ Amnezia ещё не выдан. Напишите администратору.",
+                    "Файл AmneziaWG ещё не готов. Напишите администратору.",
                     reply_markup=await main_menu_kb_for(session, tg_uid),
                 )
                 return
-            await msg.answer(
-                f"Скопируйте ключ и вставьте в AmneziaVPN:\n\n<code>{html.escape(key)}</code>",
-                parse_mode="HTML",
-                reply_markup=InlineKeyboardMarkup(
-                    inline_keyboard=[
-                        [InlineKeyboardButton(text="🌿 Amnezia VPN", callback_data="menu:amnezia")],
-                        [InlineKeyboardButton(text="🏠 Главное меню", callback_data="menu:main")],
-                    ]
-                ),
-            )
+            await _send_amnezia_conf_file(msg, tg_uid, conf)
             return
 
         if action in ("buy_in_bot", "subscribe"):

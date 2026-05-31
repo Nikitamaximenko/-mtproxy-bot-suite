@@ -315,6 +315,7 @@ class AmneziaAccess(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     telegram_id: Mapped[int] = mapped_column(BigInteger, unique=True, index=True, nullable=False)
     vpn_key: Mapped[str] = mapped_column(String(8192), default="", nullable=False)
+    wg_conf: Mapped[str] = mapped_column(String(8192), default="", nullable=False)
     key_format: Mapped[str] = mapped_column(String(16), default="vpn", nullable=False)  # vpn | conf
     label: Mapped[str | None] = mapped_column(String(128), nullable=True)
     active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
@@ -663,6 +664,12 @@ def _migrate() -> None:
                     conn.execute(text("ALTER TABLE vpn_clients ADD COLUMN last_sync_at TIMESTAMP WITH TIME ZONE"))
                 else:
                     conn.execute(text("ALTER TABLE vpn_clients ADD COLUMN last_sync_at DATETIME"))
+
+    if "amnezia_access" in tables:
+        existing = {c["name"] for c in inspector.get_columns("amnezia_access")}
+        with engine.begin() as conn:
+            if "wg_conf" not in existing:
+                conn.execute(text("ALTER TABLE amnezia_access ADD COLUMN wg_conf VARCHAR(8192) NOT NULL DEFAULT ''"))
 
     # PostgreSQL: принудительно BIGINT для telegram_id (уже BIGINT — будет ошибка, игнорируем).
     if engine.dialect.name == "postgresql":
@@ -4414,6 +4421,7 @@ class AmneziaConfigResponse(BaseModel):
     reason: str | None = None  # not_allowed | no_key | internal_token_required
     protocol: str = "AmneziaWG"
     vpn_key: str | None = None
+    wg_conf: str | None = None
     key_format: str | None = None
     server_ip: str | None = None
     app_url: str | None = None
@@ -4425,7 +4433,7 @@ class AmneziaConfigResponse(BaseModel):
 def amnezia_eligible(telegram_id: int, db: Session = Depends(get_db)) -> AmneziaEligibleResponse:
     row = _amnezia_access_row(db, telegram_id)
     eligible = row is not None
-    has_key = bool((row.vpn_key or "").strip()) if row else False
+    has_key = bool(row and ((row.vpn_key or "").strip() or (row.wg_conf or "").strip()))
     return AmneziaEligibleResponse(eligible=eligible, has_key=has_key, show_menu=eligible)
 
 
@@ -4437,21 +4445,24 @@ def amnezia_config(telegram_id: int, req: Request, db: Session = Depends(get_db)
     if not row:
         return AmneziaConfigResponse(available=False, reason="not_allowed")
     key = (row.vpn_key or "").strip()
-    if not key:
+    conf = (row.wg_conf or "").strip()
+    if not key and not conf:
         return AmneziaConfigResponse(available=False, reason="no_key")
     fmt = (row.key_format or "vpn").strip().lower()
     steps = [
-        "Установите AmneziaVPN (протокол AmneziaWG 2.0)",
-        "«+» → «У меня есть данные для подключения»",
-        "Вставьте ключ ниже или импортируйте QR",
-        "Включите туннель — отдельно от Frosty VLESS (Happ)",
+        "Приложение: AmneziaWG (именно оно, не Happ)",
+        "«+» → «Создать из файла или архива»",
+        "Выберите файл frosty_amneziawg.conf из Telegram (кнопка ниже в боте)",
+        "Включите туннель — протокол AmneziaWG 2.0 с обфускацией",
     ]
-    if fmt == "conf":
-        steps[2] = "Импортируйте файл .conf в AmneziaVPN / AmneziaWG"
+    if conf:
+        steps[1] = "«+» → «Создать из файла» или «Создать из QR-кода»"
+        steps[2] = "Файл .conf из бота или QR из мини-апп"
     return AmneziaConfigResponse(
         available=True,
         protocol="AmneziaWG",
-        vpn_key=key,
+        vpn_key=key or None,
+        wg_conf=conf or None,
         key_format=fmt,
         server_ip=AMNEZIA_SERVER_IP or None,
         app_url=AMNEZIA_APP_URL,
@@ -4473,6 +4484,7 @@ class AdminAmneziaAccessItem(BaseModel):
 class AdminAmneziaAccessUpsertRequest(BaseModel):
     telegram_id: int = Field(..., gt=0)
     vpn_key: str | None = None
+    wg_conf: str | None = None
     key_format: str | None = None
     label: str | None = None
     active: bool | None = None
@@ -4494,7 +4506,8 @@ def admin_list_amnezia_access(req: Request, db: Session = Depends(get_db)) -> Ad
             key_format=r.key_format or "vpn",
             label=r.label,
             active=bool(r.active),
-            has_key=bool((r.vpn_key or "").strip()),
+            has_key=bool((r.vpn_key or "").strip() or (r.wg_conf or "").strip()),
+            has_conf=bool((r.wg_conf or "").strip()),
             updated_at=r.updated_at,
         )
         for r in rows
@@ -4525,6 +4538,8 @@ def admin_upsert_amnezia_access(
         db.add(row)
     if payload.vpn_key is not None:
         row.vpn_key = payload.vpn_key.strip()
+    if payload.wg_conf is not None:
+        row.wg_conf = payload.wg_conf.strip()
     if payload.key_format is not None:
         fmt = payload.key_format.strip().lower()
         if fmt not in ("vpn", "conf"):
@@ -4551,7 +4566,8 @@ def admin_upsert_amnezia_access(
         key_format=row.key_format or "vpn",
         label=row.label,
         active=bool(row.active),
-        has_key=bool((row.vpn_key or "").strip()),
+        has_key=bool((row.vpn_key or "").strip() or (row.wg_conf or "").strip()),
+        has_conf=bool((row.wg_conf or "").strip()),
         updated_at=row.updated_at,
     )
 
