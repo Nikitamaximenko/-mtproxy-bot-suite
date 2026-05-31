@@ -17,6 +17,7 @@ import urllib.request
 from urllib.parse import parse_qsl, quote, urljoin, urlsplit, urlunsplit
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 from typing import Any, AsyncGenerator, Generator, Literal
 from uuid import UUID, uuid4
 
@@ -316,6 +317,7 @@ class AmneziaAccess(Base):
     telegram_id: Mapped[int] = mapped_column(BigInteger, unique=True, index=True, nullable=False)
     vpn_key: Mapped[str] = mapped_column(String(8192), default="", nullable=False)
     wg_conf: Mapped[str] = mapped_column(String(8192), default="", nullable=False)
+    awg_peer_name: Mapped[str] = mapped_column(String(64), default="", nullable=False)
     key_format: Mapped[str] = mapped_column(String(16), default="vpn", nullable=False)  # vpn | conf
     label: Mapped[str | None] = mapped_column(String(128), nullable=True)
     active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
@@ -670,6 +672,8 @@ def _migrate() -> None:
         with engine.begin() as conn:
             if "wg_conf" not in existing:
                 conn.execute(text("ALTER TABLE amnezia_access ADD COLUMN wg_conf VARCHAR(8192) NOT NULL DEFAULT ''"))
+            if "awg_peer_name" not in existing:
+                conn.execute(text("ALTER TABLE amnezia_access ADD COLUMN awg_peer_name VARCHAR(64) NOT NULL DEFAULT ''"))
 
     # PostgreSQL: принудительно BIGINT для telegram_id (уже BIGINT — будет ошибка, игнорируем).
     if engine.dialect.name == "postgresql":
@@ -4410,6 +4414,13 @@ def _amnezia_access_row(db: Session, telegram_id: int) -> AmneziaAccess | None:
     ).scalar_one_or_none()
 
 
+def _amnezia_peer_name(row: AmneziaAccess) -> str:
+    custom = (row.awg_peer_name or "").strip()
+    if custom:
+        return custom
+    return f"tg_{int(row.telegram_id)}"
+
+
 class AmneziaEligibleResponse(BaseModel):
     eligible: bool
     has_key: bool
@@ -4423,6 +4434,8 @@ class AmneziaConfigResponse(BaseModel):
     vpn_key: str | None = None
     wg_conf: str | None = None
     qr_image_url: str | None = None
+    awg_peer_name: str | None = None
+    has_vpn_qr_png: bool = False
     key_format: str | None = None
     server_ip: str | None = None
     app_url: str | None = None
@@ -4464,12 +4477,18 @@ def amnezia_config(telegram_id: int, req: Request, db: Session = Depends(get_db)
         "QR → AmneziaWG: «+» → «Создать из QR-кода» → сканировать QR из бота/мини-апп",
         "Включите туннель (протокол AmneziaWG 2.0)",
     ]
+    peer = _amnezia_peer_name(row)
+    awg_dir = Path(os.getenv("AMNEZIA_AWG_DIR") or "/root/awg")
+    has_vpn_qr = (awg_dir / f"{peer}.vpnuri.png").is_file()
+
     return AmneziaConfigResponse(
         available=True,
         protocol="AmneziaWG",
         vpn_key=key or None,
         wg_conf=conf or None,
         qr_image_url=qr_url,
+        awg_peer_name=peer,
+        has_vpn_qr_png=has_vpn_qr,
         key_format=fmt,
         server_ip=AMNEZIA_SERVER_IP or None,
         app_url=AMNEZIA_APP_URL,
@@ -4541,8 +4560,19 @@ def admin_upsert_amnezia_access(
                 status_code=400,
                 detail="Лимит 7 активных слотов Amnezia. Отключите кого-то или удалите запись.",
             )
-        row = AmneziaAccess(telegram_id=tg, vpn_key="", key_format="vpn", active=True, created_at=now, updated_at=now)
+        row = AmneziaAccess(
+            telegram_id=tg,
+            vpn_key="",
+            wg_conf="",
+            awg_peer_name=f"tg_{tg}",
+            key_format="vpn",
+            active=True,
+            created_at=now,
+            updated_at=now,
+        )
         db.add(row)
+    if not (row.awg_peer_name or "").strip():
+        row.awg_peer_name = f"tg_{tg}"
     if payload.vpn_key is not None:
         row.vpn_key = payload.vpn_key.strip()
     if payload.wg_conf is not None:

@@ -520,19 +520,25 @@ async def _send_amnezia_qr_photo(msg: Message, conf: str, qr_url: str | None = N
     )
 
 
-def _amnezia_vpnuri_png_path(tg_uid: int) -> Path | None:
+def _amnezia_vpnuri_png_path(tg_uid: int, *, peer_name: str | None = None) -> Path | None:
     """QR для импорта в AmneziaVPN (надёжнее, чем вставка длинного vpn://)."""
-    for name in (f"tg_{tg_uid}.vpnuri.png", f"nikita_frosty.vpnuri.png" if tg_uid == 231115635 else ""):
-        if not name:
-            continue
+    candidates = []
+    if peer_name:
+        candidates.append(f"{peer_name}.vpnuri.png")
+    candidates.append(f"tg_{tg_uid}.vpnuri.png")
+    if tg_uid == 231115635:
+        candidates.append("nikita_frosty.vpnuri.png")
+    for name in candidates:
         p = Path(AMNEZIA_AWG_DIR) / name
         if p.is_file():
             return p
     return None
 
 
-async def _send_amnezia_vpn_key(msg: Message, vpn_key: str, app_url: str, tg_uid: int) -> None:
-    png = _amnezia_vpnuri_png_path(tg_uid)
+async def _send_amnezia_vpn_key(
+    msg: Message, vpn_key: str, app_url: str, tg_uid: int, *, peer_name: str | None = None
+) -> None:
+    png = _amnezia_vpnuri_png_path(tg_uid, peer_name=peer_name)
     await msg.answer(
         "📱 <b>Ветка A — AmneziaVPN</b>\n\n"
         f"1. Установите <a href=\"{html.escape(app_url)}\">AmneziaVPN</a>\n"
@@ -1263,7 +1269,11 @@ async def main() -> None:
                 )
                 return
             await _send_amnezia_vpn_key(
-                msg, vpn_key, data.get("app_url") or "https://amnezia.org/ru", tg_uid
+                msg,
+                vpn_key,
+                data.get("app_url") or "https://amnezia.org/ru",
+                tg_uid,
+                peer_name=str(data.get("awg_peer_name") or "").strip() or None,
             )
             return
 
