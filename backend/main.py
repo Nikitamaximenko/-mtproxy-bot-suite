@@ -4472,10 +4472,10 @@ def amnezia_config(telegram_id: int, req: Request, db: Session = Depends(get_db)
             + quote(conf, safe="")
         )
     steps = [
-        "Файл: в боте придут .conf и QR-картинка (или мини-апп ниже)",
-        "Файл → AmneziaWG: «+» → «Создать из файла» → frosty_amneziawg.conf",
-        "QR → AmneziaWG: «+» → «Создать из QR-кода» → сканировать QR из бота/мини-апп",
-        "Включите туннель (протокол AmneziaWG 2.0)",
+        "Удалите старый профиль AmneziaVPN на устройстве (если был)",
+        "AmneziaVPN → «+» → импорт по QR из бота (основной способ)",
+        "Запасной: «+» → вставить ключ vpn:// из бота",
+        "Если не подключается: AmneziaWG → файл .conf или QR (ветки B/C в боте)",
     ]
     peer = _amnezia_peer_name(row)
     awg_dir = Path(os.getenv("AMNEZIA_AWG_DIR") or "/root/awg")
@@ -7041,12 +7041,10 @@ def admin_users_overview(
     else:
         users_table_total = db.execute(select(func.count()).select_from(User)).scalar() or 0
 
-    paid_telegram_ids = select(Subscription.telegram_id).where(
-        _verified_payment_clause()
+    # Платные подписчики — всегда по всей базе (операционный список), не по ANALYTICS_PRODUCTION_TG_IDS.
+    paid_telegram_ids = (
+        select(Subscription.telegram_id).where(_verified_payment_clause()).distinct()
     )
-    if scope is not None:
-        paid_telegram_ids = paid_telegram_ids.where(Subscription.telegram_id.in_(scope))
-    paid_telegram_ids = paid_telegram_ids.distinct()
 
     nu_conds = [User.telegram_id.notin_(paid_telegram_ids)]
     if scope is not None:
@@ -7079,7 +7077,7 @@ def admin_users_overview(
         username_map = {int(tg): uname for tg, uname in users_rows}
         effective_rows = list(_effective_subscription_map(paid_tg_ids, db).values())
 
-    effective_rows.sort(key=lambda s: s.created_at, reverse=True)
+    effective_rows.sort(key=lambda s: (s.created_at, s.id or 0), reverse=True)
     effective_rows = effective_rows[:limit]
     vpn_map = _vpn_state_map([int(s.telegram_id) for s in effective_rows], db)
     subscribers = [_sub_info(s, username_map.get(int(s.telegram_id)), vpn_map) for s in effective_rows]
@@ -7310,6 +7308,7 @@ def admin_checkout_logs(
     tg_id: int | None = None,
     only_errors: bool = False,
     provider: str | None = None,
+    search: str | None = Query(None, description="payment_id, token, email, username"),
 ) -> CheckoutLogsResponse:
     _require_admin(req)
     limit = max(1, min(int(limit or 100), 500))
@@ -7328,6 +7327,19 @@ def admin_checkout_logs(
         clean_provider = provider.strip().lower()
         total_q = total_q.where(func.lower(CheckoutLog.provider) == clean_provider)
         list_q = list_q.where(func.lower(CheckoutLog.provider) == clean_provider)
+    search_clean = (search or "").strip()
+    if search_clean:
+        like = f"%{search_clean}%"
+        search_cond = or_(
+            CheckoutLog.details.ilike(like),
+            CheckoutLog.payment_token.ilike(like),
+            CheckoutLog.error.ilike(like),
+            CheckoutLog.username.ilike(like),
+            CheckoutLog.email.ilike(like),
+            CheckoutLog.customer_email.ilike(like),
+        )
+        total_q = total_q.where(search_cond)
+        list_q = list_q.where(search_cond)
 
     total = int(db.execute(total_q).scalar() or 0)
     rows = (

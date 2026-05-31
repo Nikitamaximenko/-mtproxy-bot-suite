@@ -384,7 +384,7 @@ export default function AdminPage() {
   const [vpnDeactivatingId, setVpnDeactivatingId] = useState<number | null>(null)
   const [overview, setOverview] = useState<UsersOverview | null>(null)
   const [funnel, setFunnel] = useState<FunnelStats | null>(null)
-  const [userTab, setUserTab] = useState<"new" | "subscribers">("new")
+  const [userTab, setUserTab] = useState<"new" | "subscribers">("subscribers")
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState("")
   const [remember, setRemember] = useState(true)
@@ -416,8 +416,9 @@ export default function AdminPage() {
   const [supportExpandedId, setSupportExpandedId] = useState<number | null>(null)
   const [checkoutStats, setCheckoutStats] = useState<CheckoutStats | null>(null)
   const [checkoutLogs, setCheckoutLogs] = useState<CheckoutLogsData | null>(null)
-  const [checkoutOnlyErrors, setCheckoutOnlyErrors] = useState(true)
+  const [checkoutOnlyErrors, setCheckoutOnlyErrors] = useState(false)
   const [checkoutTgFilter, setCheckoutTgFilter] = useState("")
+  const [checkoutSearch, setCheckoutSearch] = useState("")
   const [checkoutExpandedId, setCheckoutExpandedId] = useState<number | null>(null)
   const [purgeResult, setPurgeResult] = useState<{
     deleted_users: number
@@ -474,7 +475,7 @@ export default function AdminPage() {
           fetch("/api/admin/support/stats", { headers: headers(activeKey), cache: "no-store" }),
           fetch("/api/admin/support/messages?limit=100", { headers: headers(activeKey), cache: "no-store" }),
           fetch("/api/admin/checkout/stats", { headers: headers(activeKey), cache: "no-store" }),
-          fetch("/api/admin/checkout/logs?limit=100&only_errors=true", { headers: headers(activeKey), cache: "no-store" }),
+          fetch("/api/admin/checkout/logs?limit=100", { headers: headers(activeKey), cache: "no-store" }),
         ])
 
         if (sRes.status === 403 || ovRes.status === 403) {
@@ -761,13 +762,15 @@ export default function AdminPage() {
   )
 
   const fetchCheckoutLogs = useCallback(
-    async (opts?: { tgId?: string; onlyErrors?: boolean }) => {
+    async (opts?: { tgId?: string; onlyErrors?: boolean; search?: string }) => {
       const q = new URLSearchParams({ limit: "100" })
       const tgRaw = (opts?.tgId ?? checkoutTgFilter).trim()
       if (tgRaw) {
         const asNum = Number(tgRaw)
         if (Number.isFinite(asNum) && asNum > 0) q.set("tg_id", String(asNum))
       }
+      const searchRaw = (opts?.search ?? checkoutSearch).trim()
+      if (searchRaw) q.set("search", searchRaw)
       if (opts?.onlyErrors ?? checkoutOnlyErrors) q.set("only_errors", "true")
       try {
         const [logsRes, statsRes] = await Promise.all([
@@ -792,7 +795,7 @@ export default function AdminPage() {
         /* ignore */
       }
     },
-    [checkoutOnlyErrors, checkoutTgFilter, headers],
+    [checkoutOnlyErrors, checkoutTgFilter, checkoutSearch, headers],
   )
 
   const runSelfTest = useCallback(async () => {
@@ -1654,9 +1657,13 @@ export default function AdminPage() {
             </div>
           </div>
           <p className="text-xs text-gray-500 mb-3">
-            <strong>Новые</strong> — записи в <code className="text-gray-400">users</code> без оплаченной или
-            истёкшей подписки (только pending или без подписок). <strong>Платные</strong> — когда-либо оплатили
-            (paid/expired); показана последняя запись подписки.
+            <strong>Платные</strong> — все подтверждённые оплаты (ЮKassa/Lava), вся база. После оплаты пользователь
+            уходит из «Новых» сюда. <strong>Новые</strong> — ещё без подтверждённой оплаты.
+            {analyticsScoped ? (
+              <span className="block mt-1 text-amber-400/90">
+                Счётчики «Новых» и воронка ограничены ANALYTICS_PRODUCTION_TG_IDS; список платных — полный.
+              </span>
+            ) : null}
             <span className="block mt-1">
               Тумблер <strong>Доступ</strong>: выкл — только снять прокси (оплаченные даты не меняются); вкл — вернуть
               доступ по текущему сроку или +30 дней, если период уже истёк.
@@ -1940,8 +1947,8 @@ export default function AdminPage() {
         <section>
           <h2 className="text-lg font-semibold mb-1 text-gray-300">Checkout / платежи</h2>
           <p className="text-xs text-gray-500 mb-4">
-            Живые логи создания оплат. Здесь видно, где именно ломается checkout: backend, Lava, fallback
-            или фронт, который не получил <code className="font-mono">payment_url</code>.
+            Логи checkout и успешных оплат (по умолчанию все события, не только ошибки). Ищите по{" "}
+            <code className="font-mono">payment_id</code> ЮKassa, Telegram ID или токену.
           </p>
 
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-4">
@@ -2025,8 +2032,18 @@ export default function AdminPage() {
               onKeyDown={(e) => {
                 if (e.key === "Enter") void fetchCheckoutLogs()
               }}
-              placeholder="Фильтр по Telegram ID…"
-              className="px-3 py-2 text-sm bg-gray-900 border border-gray-700 rounded-lg text-white placeholder:text-gray-500 outline-none focus:border-blue-500 w-56"
+              placeholder="Telegram ID…"
+              className="px-3 py-2 text-sm bg-gray-900 border border-gray-700 rounded-lg text-white placeholder:text-gray-500 outline-none focus:border-blue-500 w-40"
+            />
+            <input
+              type="text"
+              value={checkoutSearch}
+              onChange={(e) => setCheckoutSearch(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") void fetchCheckoutLogs()
+              }}
+              placeholder="payment_id / token…"
+              className="px-3 py-2 text-sm bg-gray-900 border border-gray-700 rounded-lg text-white placeholder:text-gray-500 outline-none focus:border-blue-500 w-72 font-mono text-xs"
             />
             <button
               type="button"

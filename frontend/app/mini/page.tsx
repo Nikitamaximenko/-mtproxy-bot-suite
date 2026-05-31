@@ -1161,8 +1161,8 @@ export default function MiniAppPage() {
                       🌿 AmneziaWG — VPN для России
                     </p>
                     <p className="text-[11px] mt-1 leading-relaxed" style={{ color: "#374151" }}>
-                      Один протокол AmneziaWG 2.0 — три способа подключения:{" "}
-                      <strong>AmneziaVPN + ключ</strong>, <strong>файл .conf</strong> или <strong>QR</strong> в AmneziaWG.
+                      Основной способ — <strong>AmneziaVPN</strong> (QR в боте). Запасной — <strong>AmneziaWG</strong> (файл или QR).
+                      После обновления ключа удалите старый профиль в приложении.
                     </p>
                   </div>
 
@@ -1197,11 +1197,11 @@ export default function MiniAppPage() {
                     <div className="space-y-3">
                       {amneziaVpnKey && (
                         <div className="p-4 space-y-2" style={{ background: "#FFFFFF", borderRadius: "14px", border: "1px solid #93C5FD" }}>
-                          <p className="text-sm font-bold" style={{ color: "#1D4ED8" }}>A — AmneziaVPN + ключ</p>
+                          <p className="text-sm font-bold" style={{ color: "#1D4ED8" }}>Основной — AmneziaVPN</p>
                           <p className="text-xs leading-relaxed" style={{ color: "#374151" }}>
-                            Приложение <a href={amnezia.app_url || "https://amnezia.org/ru"} target="_blank" rel="noreferrer" className="underline" style={{ color: "#2563EB" }}>AmneziaVPN</a>
-                            : в боте «📱 AmneziaVPN + ключ» придёт <b>QR для импорта</b> (надёжнее, чем вставка vpn://).
-                            Если крутит загрузку — используйте B или C в <b>AmneziaWG</b>.
+                            <a href={amnezia.app_url || "https://amnezia.org/ru"} target="_blank" rel="noreferrer" className="underline" style={{ color: "#2563EB" }}>AmneziaVPN</a>
+                            : в боте «📱 AmneziaVPN + QR» — сканируйте QR (лучше, чем вставка vpn://).
+                            Удалите старый профиль перед импортом. Запасной — AmneziaWG ниже.
                           </p>
                           <button
                             type="button"
@@ -1227,7 +1227,7 @@ export default function MiniAppPage() {
 
                       {amneziaConf && (
                       <div className="p-4 space-y-2" style={{ background: "#FFFFFF", borderRadius: "14px", border: "1px solid #A7F3D0" }}>
-                        <p className="text-sm font-bold" style={{ color: "#047857" }}>B — AmneziaWG, файл .conf</p>
+                        <p className="text-sm font-bold" style={{ color: "#047857" }}>Запасной — AmneziaWG, файл</p>
                         <p className="text-xs leading-relaxed" style={{ color: "#374151" }}>
                           В боте: «🌿 AmneziaWG» — придёт <b>frosty_amneziawg.conf</b>.
                           <br />
@@ -1250,7 +1250,7 @@ export default function MiniAppPage() {
 
                       {amneziaConf && amneziaQrUrl && (
                         <div className="p-4 space-y-3" style={{ background: "#FFFFFF", borderRadius: "14px", border: "1px solid #A7F3D0" }}>
-                          <p className="text-sm font-bold" style={{ color: "#047857" }}>C — AmneziaWG, QR-код</p>
+                          <p className="text-sm font-bold" style={{ color: "#047857" }}>Запасной — AmneziaWG, QR</p>
                           <p className="text-xs leading-relaxed" style={{ color: "#374151" }}>
                             AmneziaWG → «+» → <b>Создать из QR-кода</b> → наведите камеру на код ниже
                             (или на QR-картинку из бота).

@@ -481,7 +481,7 @@ def _amnezia_branch_kb(*, has_vpn_key: bool, has_conf: bool) -> InlineKeyboardMa
     rows: list[list[InlineKeyboardButton]] = []
     if has_vpn_key:
         rows.append(
-            [InlineKeyboardButton(text="📱 AmneziaVPN + ключ", callback_data="menu:amnezia_vpn")]
+            [InlineKeyboardButton(text="📱 AmneziaVPN + QR (основной)", callback_data="menu:amnezia_vpn")]
         )
     if has_conf:
         rows.append(
@@ -499,8 +499,9 @@ async def _send_amnezia_conf_file(msg: Message, conf: str) -> None:
     await msg.answer_document(
         doc,
         caption=(
-            "📄 <b>Ветка B — AmneziaWG, файл</b>\n\n"
-            "Приложение <b>AmneziaWG</b> → «+» → <b>Создать из файла или архива</b> → этот файл."
+            "📄 <b>Запасной способ — AmneziaWG, файл</b>\n\n"
+            "Если <b>AmneziaVPN</b> не подключается: приложение <b>AmneziaWG</b> → «+» → "
+            "<b>Создать из файла</b> → этот файл."
         ),
         parse_mode="HTML",
     )
@@ -513,8 +514,8 @@ async def _send_amnezia_qr_photo(msg: Message, conf: str, qr_url: str | None = N
     await msg.answer_photo(
         url,
         caption=(
-            "📷 <b>Ветка C — AmneziaWG, QR</b>\n\n"
-            "Приложение <b>AmneziaWG</b> → «+» → <b>Создать из QR-кода</b> → сканируйте этот код."
+            "📷 <b>Запасной способ — AmneziaWG, QR</b>\n\n"
+            "<b>AmneziaWG</b> → «+» → <b>Создать из QR-кода</b> → сканируйте."
         ),
         parse_mode="HTML",
     )
@@ -540,12 +541,13 @@ async def _send_amnezia_vpn_key(
 ) -> None:
     png = _amnezia_vpnuri_png_path(tg_uid, peer_name=peer_name)
     await msg.answer(
-        "📱 <b>Ветка A — AmneziaVPN</b>\n\n"
-        f"1. Установите <a href=\"{html.escape(app_url)}\">AmneziaVPN</a>\n"
-        "2. Если вставка ключа <code>vpn://</code> крутится бесконечно — "
-        "<b>импортируйте через QR</b> (сообщение ниже).\n"
-        "3. Или: «+» → «У меня есть данные» → вставить ключ (запасной вариант).\n\n"
-        "Если снова зависает — используйте <b>B</b> (файл) или <b>C</b> (QR) в приложении <b>AmneziaWG</b>.",
+        "📱 <b>AmneziaVPN — основной способ</b>\n\n"
+        f"1. Установите <a href=\"{html.escape(app_url)}\">AmneziaVPN</a> (не AmneziaWG).\n"
+        "2. <b>Удалите старый профиль</b> Frosty на сервере в приложении (если был).\n"
+        "3. <b>Импорт по QR</b> (картинка ниже) или файл <code>amnezia_config.vpn</code>.\n"
+        "4. Если крутит загрузку — удалите профиль и импортируйте заново (не старый QR из чата).\n"
+        "5. Запасной — кнопка «Ключ vpn://» или AmneziaWG в меню.\n\n"
+        "⚠️ Вечная загрузка почти всегда = <b>старый ключ</b> в приложении, не ошибка сервера.",
         parse_mode="HTML",
         disable_web_page_preview=True,
         reply_markup=InlineKeyboardMarkup(
@@ -555,12 +557,22 @@ async def _send_amnezia_vpn_key(
             ]
         ),
     )
+    vpn_doc = BufferedInputFile(vpn_key.encode("utf-8"), filename="amnezia_config.vpn")
+    await msg.answer_document(
+        vpn_doc,
+        caption=(
+            "📎 <b>Файл для AmneziaVPN</b>\n\n"
+            "«+» → импорт из файла → выберите <code>amnezia_config.vpn</code> "
+            "(если QR зависает)."
+        ),
+        parse_mode="HTML",
+    )
     if png:
         await msg.answer_photo(
             FSInputFile(png),
             caption=(
                 "📷 <b>QR для AmneziaVPN</b>\n\n"
-                "«+» → сканировать QR / импорт из галереи → выберите это изображение."
+                "«+» → сканировать QR / из галереи → это изображение."
             ),
             parse_mode="HTML",
         )
@@ -590,10 +602,11 @@ async def _send_amnezia_hub(msg: Message, session: aiohttp.ClientSession, tg_uid
     docs_url = data.get("docs_url") or "https://docs.amnezia.org/ru/documentation/amnezia-wg/"
     body = (
         "🌿 <b>Amnezia VPN (RU+)</b> — отдельно от Frosty/Happ.\n"
-        "Протокол <b>AmneziaWG 2.0</b> на сервере. Выберите <b>один</b> способ:\n\n"
-        "📱 <b>A — AmneziaVPN</b> — вставить ключ <code>vpn://…</code>\n"
-        "📄 <b>B — AmneziaWG</b> — импорт файла <code>.conf</code>\n"
-        "📷 <b>C — AmneziaWG</b> — сканировать QR\n\n"
+        "Протокол <b>AmneziaWG 2.0</b>, порт <b>UDP 3568</b>.\n\n"
+        "📱 <b>Основной способ — AmneziaVPN</b>: QR или ключ <code>vpn://</code>\n"
+        "📄 <b>Запасной — AmneziaWG</b>: файл <code>.conf</code> или QR\n\n"
+        "⚠️ После обновления ключей <b>удалите старый профиль</b> в AmneziaVPN "
+        "и импортируйте заново (лучше по QR).\n\n"
         f'<a href="{html.escape(docs_url)}">О протоколе AmneziaWG</a>'
     )
     await msg.answer(
