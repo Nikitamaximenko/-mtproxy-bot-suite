@@ -174,6 +174,10 @@ XRAY_SNI = (os.getenv("XRAY_SNI") or "www.microsoft.com").strip()
 XRAY_SERVER_IP = (os.getenv("XRAY_SERVER_IP") or "").strip()
 XRAY_CLIENT_PORT = int((os.getenv("XRAY_CLIENT_PORT") or "443").strip() or "443")
 
+# Amnezia VPN (отдельная ветка, whitelist в таблице amnezia_access)
+AMNEZIA_SERVER_IP = (os.getenv("AMNEZIA_SERVER_IP") or XRAY_SERVER_IP or "").strip()
+AMNEZIA_APP_URL = (os.getenv("AMNEZIA_APP_URL") or "https://amnezia.org/ru").strip()
+
 # Internal API token for frontend-to-backend calls (prevents direct public access)
 INTERNAL_API_TOKEN = (os.getenv("INTERNAL_API_TOKEN") or "").strip()
 
@@ -301,6 +305,21 @@ class VpnClient(Base):
     traffic_used_bytes: Mapped[int] = mapped_column(BigInteger, default=0, nullable=False)
     last_sync_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
+
+
+class AmneziaAccess(Base):
+    """Отдельная ветка Amnezia VPN — только для вручную добавленных telegram_id."""
+
+    __tablename__ = "amnezia_access"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    telegram_id: Mapped[int] = mapped_column(BigInteger, unique=True, index=True, nullable=False)
+    vpn_key: Mapped[str] = mapped_column(String(8192), default="", nullable=False)
+    key_format: Mapped[str] = mapped_column(String(16), default="vpn", nullable=False)  # vpn | conf
+    label: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow, nullable=False)
 
 
 class SupportAiMessage(Base):
@@ -4372,6 +4391,179 @@ def vpn_config(telegram_id: int, req: Request, db: Session = Depends(get_db)) ->
     )
 
 
+# ── Amnezia VPN (отдельная ветка, whitelist) ─────────────────────────────────
+
+
+def _amnezia_access_row(db: Session, telegram_id: int) -> AmneziaAccess | None:
+    return db.execute(
+        select(AmneziaAccess).where(
+            AmneziaAccess.telegram_id == int(telegram_id),
+            AmneziaAccess.active == True,  # noqa: E712
+        )
+    ).scalar_one_or_none()
+
+
+class AmneziaEligibleResponse(BaseModel):
+    eligible: bool
+    has_key: bool
+    show_menu: bool
+
+
+class AmneziaConfigResponse(BaseModel):
+    available: bool
+    reason: str | None = None  # not_allowed | no_key
+    vpn_key: str | None = None
+    key_format: str | None = None
+    server_ip: str | None = None
+    app_url: str | None = None
+    install_steps: list[str] | None = None
+
+
+@app.get("/vpn/amnezia/eligible/{telegram_id}", response_model=AmneziaEligibleResponse)
+def amnezia_eligible(telegram_id: int, db: Session = Depends(get_db)) -> AmneziaEligibleResponse:
+    row = _amnezia_access_row(db, telegram_id)
+    eligible = row is not None
+    has_key = bool((row.vpn_key or "").strip()) if row else False
+    return AmneziaEligibleResponse(eligible=eligible, has_key=has_key, show_menu=eligible)
+
+
+@app.get("/vpn/amnezia/config/{telegram_id}", response_model=AmneziaConfigResponse)
+def amnezia_config(telegram_id: int, db: Session = Depends(get_db)) -> AmneziaConfigResponse:
+    row = _amnezia_access_row(db, telegram_id)
+    if not row:
+        return AmneziaConfigResponse(available=False, reason="not_allowed")
+    key = (row.vpn_key or "").strip()
+    if not key:
+        return AmneziaConfigResponse(available=False, reason="no_key")
+    fmt = (row.key_format or "vpn").strip().lower()
+    steps = [
+        "Скачайте AmneziaVPN: https://amnezia.org/ru",
+        "В приложении: «+» → «У меня есть данные для подключения»",
+        "Вставьте ключ ниже (или отсканируйте QR из файла, если выдали .conf)",
+        "Подключитесь — это отдельный VPN, не Frosty/Happ VLESS",
+    ]
+    if fmt == "conf":
+        steps[2] = "Импортируйте файл .conf в AmneziaWG или AmneziaVPN"
+    return AmneziaConfigResponse(
+        available=True,
+        vpn_key=key,
+        key_format=fmt,
+        server_ip=AMNEZIA_SERVER_IP or None,
+        app_url=AMNEZIA_APP_URL,
+        install_steps=steps,
+    )
+
+
+class AdminAmneziaAccessItem(BaseModel):
+    telegram_id: int
+    vpn_key: str = ""
+    key_format: str = "vpn"
+    label: str | None = None
+    active: bool = True
+    has_key: bool = False
+    updated_at: datetime | None = None
+
+
+class AdminAmneziaAccessUpsertRequest(BaseModel):
+    telegram_id: int = Field(..., gt=0)
+    vpn_key: str | None = None
+    key_format: str | None = None
+    label: str | None = None
+    active: bool | None = None
+
+
+class AdminAmneziaAccessListResponse(BaseModel):
+    items: list[AdminAmneziaAccessItem]
+    max_slots: int = 7
+
+
+@app.get("/admin/amnezia-access", response_model=AdminAmneziaAccessListResponse)
+def admin_list_amnezia_access(req: Request, db: Session = Depends(get_db)) -> AdminAmneziaAccessListResponse:
+    _require_admin(req)
+    rows = db.execute(select(AmneziaAccess).order_by(AmneziaAccess.telegram_id)).scalars().all()
+    items = [
+        AdminAmneziaAccessItem(
+            telegram_id=int(r.telegram_id),
+            vpn_key=(r.vpn_key or "")[:80] + ("…" if len(r.vpn_key or "") > 80 else ""),
+            key_format=r.key_format or "vpn",
+            label=r.label,
+            active=bool(r.active),
+            has_key=bool((r.vpn_key or "").strip()),
+            updated_at=r.updated_at,
+        )
+        for r in rows
+    ]
+    return AdminAmneziaAccessListResponse(items=items)
+
+
+@app.post("/admin/amnezia-access", response_model=AdminAmneziaAccessItem)
+def admin_upsert_amnezia_access(
+    req: Request,
+    payload: AdminAmneziaAccessUpsertRequest,
+    db: Session = Depends(get_db),
+) -> AdminAmneziaAccessItem:
+    _require_admin(req)
+    tg = int(payload.telegram_id)
+    row = db.execute(select(AmneziaAccess).where(AmneziaAccess.telegram_id == tg)).scalar_one_or_none()
+    now = utcnow()
+    if row is None:
+        active_rows = db.execute(
+            select(func.count()).select_from(AmneziaAccess).where(AmneziaAccess.active == True)  # noqa: E712
+        ).scalar_one()
+        if int(active_rows or 0) >= 7:
+            raise HTTPException(
+                status_code=400,
+                detail="Лимит 7 активных слотов Amnezia. Отключите кого-то или удалите запись.",
+            )
+        row = AmneziaAccess(telegram_id=tg, vpn_key="", key_format="vpn", active=True, created_at=now, updated_at=now)
+        db.add(row)
+    if payload.vpn_key is not None:
+        row.vpn_key = payload.vpn_key.strip()
+    if payload.key_format is not None:
+        fmt = payload.key_format.strip().lower()
+        if fmt not in ("vpn", "conf"):
+            raise HTTPException(status_code=400, detail="key_format must be vpn or conf")
+        row.key_format = fmt
+    if payload.label is not None:
+        row.label = payload.label.strip() or None
+    if payload.active is not None:
+        if payload.active and not row.active:
+            active_rows = db.execute(
+                select(func.count())
+                .select_from(AmneziaAccess)
+                .where(AmneziaAccess.active == True, AmneziaAccess.telegram_id != tg)  # noqa: E712
+            ).scalar_one()
+            if int(active_rows or 0) >= 7:
+                raise HTTPException(status_code=400, detail="Лимит 7 активных слотов Amnezia.")
+        row.active = bool(payload.active)
+    row.updated_at = now
+    db.commit()
+    db.refresh(row)
+    return AdminAmneziaAccessItem(
+        telegram_id=int(row.telegram_id),
+        vpn_key=row.vpn_key or "",
+        key_format=row.key_format or "vpn",
+        label=row.label,
+        active=bool(row.active),
+        has_key=bool((row.vpn_key or "").strip()),
+        updated_at=row.updated_at,
+    )
+
+
+@app.delete("/admin/amnezia-access/{telegram_id}", response_model=OkResponse)
+def admin_delete_amnezia_access(
+    telegram_id: int,
+    req: Request,
+    db: Session = Depends(get_db),
+) -> OkResponse:
+    _require_admin(req)
+    row = db.execute(select(AmneziaAccess).where(AmneziaAccess.telegram_id == telegram_id)).scalar_one_or_none()
+    if row:
+        db.delete(row)
+        db.commit()
+    return OkResponse(ok=True)
+
+
 class VpnOnlineResponse(BaseModel):
     online: int
 
@@ -5102,9 +5294,8 @@ def _notify_active_vpn_users_vless_refresh(db: Session) -> tuple[int, int]:
     sent = 0
     failed = 0
     text_intro = (
-        "🔄 Обновили VPN-код — вставьте новый в Happ (старый на порту 443 больше не работает).\n\n"
-        "1. Откройте Happ → удалите старый профиль или обновите подписку\n"
-        "2. Скопируйте код ниже и вставьте через «+» → «Вставить из буфера»\n\n"
+        "🔄 Обновлён VPN-код (если не подключается — замените профиль в Happ).\n\n"
+        "Скопируйте код ниже → Happ → «+» → «Вставить из буфера»\n\n"
     )
     for client in clients:
         tg_id = int(client.telegram_id)
@@ -5148,7 +5339,10 @@ class AdminVpnRefreshNotifyResponse(BaseModel):
 def admin_refresh_vpn_links(
     req: Request,
     db: Session = Depends(get_db),
-    notify: bool = Query(True, description="Отправить каждому пользователю новый vless:// в Telegram"),
+    notify: bool = Query(
+        False,
+        description="Массовая рассылка vless в Telegram — только при явном notify=true",
+    ),
 ) -> AdminVpnRefreshNotifyResponse:
     """Обновить vless:// (порт/параметры) для всех активных клиентов и опционально уведомить в Telegram."""
     _require_admin(req)

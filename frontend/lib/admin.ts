@@ -164,9 +164,18 @@ function getErrorMessage(payload: unknown, status: number): string {
   return `Ошибка ${status}`
 }
 
-export async function fetchAdminJson<T>(path: string, key: string): Promise<T> {
+export async function fetchAdminJson<T>(
+  path: string,
+  key: string,
+  init?: RequestInit
+): Promise<T> {
+  const headers: Record<string, string> = { "x-admin-key": key }
+  if (init?.body) {
+    headers["Content-Type"] = "application/json"
+  }
   const res = await fetch(path, {
-    headers: { "x-admin-key": key },
+    ...init,
+    headers: { ...headers, ...(init?.headers as Record<string, string> | undefined) },
     cache: "no-store",
   })
   const text = await res.text()

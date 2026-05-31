@@ -6,6 +6,7 @@ import {
   LayoutDashboard,
   Server,
   Users,
+  Leaf,
   BarChart3,
   Snowflake,
   LogOut,
@@ -19,6 +20,7 @@ const navItems = [
   { href: "/admin/analytics", label: "Аналитика", icon: BarChart3 },
   { href: "/admin/servers", label: "Серверы", icon: Server },
   { href: "/admin/users", label: "Пользователи", icon: Users },
+  { href: "/admin/amnezia", label: "Amnezia VPN", icon: Leaf },
 ]
 
 export function AdminSidebar() {

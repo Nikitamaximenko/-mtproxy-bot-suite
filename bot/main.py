@@ -126,17 +126,37 @@ def _miniapp_url(tg_id: int) -> str:
     return f"{base}{path}?tg_id={tg_id}&v={v}"
 
 
-def main_menu_kb(tg_id: int) -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(
-        inline_keyboard=[
-            [InlineKeyboardButton(text="🎁 Бесплатный день", callback_data="menu:trial")],
-            [InlineKeyboardButton(text="💳 Купить / продлить подписку", callback_data="menu:buy_in_bot")],
-            [InlineKeyboardButton(text="🛡 Подключить VPN", callback_data="menu:connect")],
+def main_menu_kb(tg_id: int, *, show_amnezia: bool = False) -> InlineKeyboardMarkup:
+    rows: list[list[InlineKeyboardButton]] = [
+        [InlineKeyboardButton(text="🎁 Бесплатный день", callback_data="menu:trial")],
+        [InlineKeyboardButton(text="💳 Купить / продлить подписку", callback_data="menu:buy_in_bot")],
+        [InlineKeyboardButton(text="🛡 Подключить VPN (Frosty)", callback_data="menu:connect")],
+    ]
+    if show_amnezia:
+        rows.append(
+            [InlineKeyboardButton(text="🌿 Amnezia VPN (RU+)", callback_data="menu:amnezia")]
+        )
+    rows.extend(
+        [
             [InlineKeyboardButton(text="🧊 Открыть мини-апп", web_app=WebAppInfo(url=_miniapp_url(tg_id)))],
             [InlineKeyboardButton(text="✅ Статус", callback_data="menu:status")],
             [InlineKeyboardButton(text="🚫 Отменить автопродление", callback_data="menu:cancel_recurring")],
         ]
     )
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+async def _amnezia_menu_visible(session: aiohttp.ClientSession, tg_id: int) -> bool:
+    try:
+        data = await backend_get(session, f"/vpn/amnezia/eligible/{tg_id}")
+        return bool(data.get("show_menu"))
+    except Exception:
+        return False
+
+
+async def main_menu_kb_for(session: aiohttp.ClientSession, tg_id: int) -> InlineKeyboardMarkup:
+    show = await _amnezia_menu_visible(session, tg_id)
+    return main_menu_kb(tg_id, show_amnezia=show)
 
 
 def checkout_provider_kb(tg_id: int) -> InlineKeyboardMarkup:
@@ -442,6 +462,49 @@ async def _fetch_vpn_config(session: aiohttp.ClientSession, tg_id: int) -> dict:
         return await backend_get(session, f"/vpn/config/{tg_id}")
     except Exception:
         return {}
+
+
+async def _fetch_amnezia_config(session: aiohttp.ClientSession, tg_id: int) -> dict:
+    try:
+        return await backend_get(session, f"/vpn/amnezia/config/{tg_id}")
+    except Exception:
+        return {}
+
+
+async def _send_amnezia_vpn(msg: Message, session: aiohttp.ClientSession, tg_uid: int) -> None:
+    data = await _fetch_amnezia_config(session, tg_uid)
+    if not data.get("available"):
+        reason = data.get("reason")
+        if reason == "no_key":
+            text = (
+                "🌿 <b>Amnezia VPN</b>\n\n"
+                "Доступ для вас включён, но ключ ещё не выдан. Напишите администратору."
+            )
+        else:
+            text = "Этот раздел недоступен для вашего аккаунта."
+        await msg.answer(text, parse_mode="HTML", reply_markup=await main_menu_kb_for(session, tg_uid))
+        return
+    key = str(data.get("vpn_key") or "").strip()
+    steps = data.get("install_steps") or []
+    app_url = data.get("app_url") or "https://amnezia.org/ru"
+    steps_txt = "\n".join(f"{i + 1}. {s}" for i, s in enumerate(steps[:5]))
+    body = (
+        "🌿 <b>Amnezia VPN</b> — отдельный канал (лучше в РФ), не заменяет Frosty VLESS.\n\n"
+        f"{steps_txt}\n\n"
+        f"Скачать: <a href=\"{html.escape(app_url)}\">amnezia.org</a>\n\n"
+        f"<code>{html.escape(key)}</code>"
+    )
+    await msg.answer(
+        body,
+        parse_mode="HTML",
+        disable_web_page_preview=True,
+        reply_markup=InlineKeyboardMarkup(
+            inline_keyboard=[
+                [InlineKeyboardButton(text="📋 Ключ Amnezia", callback_data="menu:amnezia_copy")],
+                [InlineKeyboardButton(text="🏠 Главное меню", callback_data="menu:main")],
+            ]
+        ),
+    )
 
 
 async def _get_vless_link(session: aiohttp.ClientSession, tg_id: int) -> tuple[str | None, str | None]:
@@ -755,7 +818,7 @@ async def cmd_start(message: Message, session: aiohttp.ClientSession, state: FSM
                     "🧊 <b>Frosty — умный VPN активирован!</b>\n\n"
                     "✅ Нажми «🛡 Подключить VPN» — и ты готов. Один клик открывает Happ с настроенным сервером.",
                     parse_mode="HTML",
-                    reply_markup=main_menu_kb(tg_id),
+                    reply_markup=await main_menu_kb_for(session, tg_id),
                 )
                 return
         # Некорректный или чужой токен — показываем обычный стартовый экран
@@ -772,7 +835,7 @@ async def cmd_start(message: Message, session: aiohttp.ClientSession, state: FSM
             await message.answer(
                 f"✅ Умный VPN Frosty активен до {expires_at}.\n\n"
                 "Нажми «🛡 Подключить VPN» — всё настроится автоматически.",
-                reply_markup=main_menu_kb(tg_id),
+                reply_markup=await main_menu_kb_for(session, tg_id),
             )
             return
 
@@ -787,7 +850,7 @@ async def cmd_start(message: Message, session: aiohttp.ClientSession, state: FSM
         f"<b>10 ₽/день · {PRICE_RUB} ₽/мес · Отмена в любой момент</b>\n\n"
         "🎁 Один <b>бесплатный день</b> — в меню ниже. Поддержка: /support",
         parse_mode="HTML",
-        reply_markup=main_menu_kb(tg_id),
+        reply_markup=await main_menu_kb_for(session, tg_id),
     )
 
 
@@ -1086,9 +1149,38 @@ async def main() -> None:
             tg_id = query.from_user.id
             await msg.answer(
                 "Выбери действие:",
-                reply_markup=main_menu_kb(tg_id),
+                reply_markup=await main_menu_kb_for(session, tg_id),
             )
             await query.answer()
+            return
+
+        if action == "amnezia":
+            await query.answer("Amnezia VPN…")
+            tg_uid = query.from_user.id if query.from_user else 0
+            await _send_amnezia_vpn(msg, session, tg_uid)
+            return
+
+        if action == "amnezia_copy":
+            await query.answer("Ключ Amnezia…")
+            tg_uid = query.from_user.id
+            data = await _fetch_amnezia_config(session, tg_uid)
+            key = str(data.get("vpn_key") or "").strip()
+            if not key:
+                await msg.answer(
+                    "Ключ Amnezia ещё не выдан. Напишите администратору.",
+                    reply_markup=await main_menu_kb_for(session, tg_uid),
+                )
+                return
+            await msg.answer(
+                f"Скопируйте ключ и вставьте в AmneziaVPN:\n\n<code>{html.escape(key)}</code>",
+                parse_mode="HTML",
+                reply_markup=InlineKeyboardMarkup(
+                    inline_keyboard=[
+                        [InlineKeyboardButton(text="🌿 Amnezia VPN", callback_data="menu:amnezia")],
+                        [InlineKeyboardButton(text="🏠 Главное меню", callback_data="menu:main")],
+                    ]
+                ),
+            )
             return
 
         if action in ("buy_in_bot", "subscribe"):
@@ -1134,7 +1226,7 @@ async def main() -> None:
                 _log.exception("_send_proxy_vpn_bundle failed tg_id=%s: %s", tg_uid, exc)
                 await msg.answer(
                     "Не удалось загрузить VPN-данные. Попробуйте через минуту или напишите /support.",
-                    reply_markup=main_menu_kb(tg_uid),
+                    reply_markup=await main_menu_kb_for(session, tg_uid),
                 )
             return
 
@@ -1145,7 +1237,7 @@ async def main() -> None:
             if not vless:
                 await msg.answer(
                     "Код пока не получен. Нажмите «🛡 Подключить VPN» снова через 10–20 секунд.",
-                    reply_markup=main_menu_kb(tg_uid),
+                    reply_markup=await main_menu_kb_for(session, tg_uid),
                 )
                 return
             await msg.answer(
@@ -1213,7 +1305,7 @@ async def main() -> None:
             else:
                 await msg.answer(
                     "Оставляем автопродление как есть.",
-                    reply_markup=main_menu_kb(tg_uid),
+                    reply_markup=await main_menu_kb_for(session, tg_uid),
                 )
             return
 
@@ -1239,7 +1331,7 @@ async def main() -> None:
                 await state.update_data(support_show_cancel=sc)
                 reply_kb = support_chat_kb(show_cancel_autopay=sc)
             else:
-                reply_kb = main_menu_kb(tg_uid)
+                reply_kb = await main_menu_kb_for(session, tg_uid)
             await msg.answer(text, reply_markup=reply_kb)
             return
 
@@ -1249,7 +1341,7 @@ async def main() -> None:
             tg_id = query.from_user.id
             await msg.answer(
                 "Диалог закрыт. Снова поддержка: команда /support. Главное меню: /start.",
-                reply_markup=main_menu_kb(tg_id),
+                reply_markup=await main_menu_kb_for(session, tg_id),
             )
             return
 
