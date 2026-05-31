@@ -136,7 +136,7 @@ def main_menu_kb(tg_id: int, *, show_amnezia: bool = False) -> InlineKeyboardMar
     ]
     if show_amnezia:
         rows.append(
-            [InlineKeyboardButton(text="🌿 AmneziaWG (RU+)", callback_data="menu:amnezia")]
+            [InlineKeyboardButton(text="🌿 Amnezia VPN (RU+)", callback_data="menu:amnezia")]
         )
     rows.extend(
         [
@@ -473,13 +473,30 @@ async def _fetch_amnezia_config(session: aiohttp.ClientSession, tg_id: int) -> d
         return {}
 
 
+def _amnezia_branch_kb(*, has_vpn_key: bool, has_conf: bool) -> InlineKeyboardMarkup:
+    rows: list[list[InlineKeyboardButton]] = []
+    if has_vpn_key:
+        rows.append(
+            [InlineKeyboardButton(text="📱 AmneziaVPN + ключ", callback_data="menu:amnezia_vpn")]
+        )
+    if has_conf:
+        rows.append(
+            [
+                InlineKeyboardButton(text="📄 AmneziaWG — файл", callback_data="menu:amnezia_conf"),
+                InlineKeyboardButton(text="📷 AmneziaWG — QR", callback_data="menu:amnezia_qr"),
+            ]
+        )
+    rows.append([InlineKeyboardButton(text="🏠 Главное меню", callback_data="menu:main")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
 async def _send_amnezia_conf_file(msg: Message, conf: str) -> None:
     doc = BufferedInputFile(conf.encode("utf-8"), filename="frosty_amneziawg.conf")
     await msg.answer_document(
         doc,
         caption=(
-            "📄 <b>Способ 1 — файл</b>\n\n"
-            "AmneziaWG → «+» → <b>Создать из файла или архива</b> → выберите этот файл."
+            "📄 <b>Ветка B — AmneziaWG, файл</b>\n\n"
+            "Приложение <b>AmneziaWG</b> → «+» → <b>Создать из файла или архива</b> → этот файл."
         ),
         parse_mode="HTML",
     )
@@ -492,56 +509,62 @@ async def _send_amnezia_qr_photo(msg: Message, conf: str, qr_url: str | None = N
     await msg.answer_photo(
         url,
         caption=(
-            "📷 <b>Способ 2 — QR-код</b>\n\n"
-            "AmneziaWG → «+» → <b>Создать из QR-кода</b> → наведите камеру на этот код."
+            "📷 <b>Ветка C — AmneziaWG, QR</b>\n\n"
+            "Приложение <b>AmneziaWG</b> → «+» → <b>Создать из QR-кода</b> → сканируйте этот код."
         ),
         parse_mode="HTML",
     )
 
 
-async def _send_amnezia_vpn(msg: Message, session: aiohttp.ClientSession, tg_uid: int) -> None:
+async def _send_amnezia_vpn_key(msg: Message, vpn_key: str, app_url: str) -> None:
+    await msg.answer(
+        "📱 <b>Ветка A — AmneziaVPN + ключ</b>\n\n"
+        f"1. Установите <a href=\"{html.escape(app_url)}\">AmneziaVPN</a> (не AmneziaWG)\n"
+        "2. «+» → «У меня есть данные для подключения»\n"
+        "3. Вставьте ключ ниже → Подключиться\n\n"
+        f"<code>{html.escape(vpn_key)}</code>",
+        parse_mode="HTML",
+        disable_web_page_preview=True,
+        reply_markup=InlineKeyboardMarkup(
+            inline_keyboard=[
+                [InlineKeyboardButton(text="📋 Скопировать ключ vpn://", callback_data="menu:amnezia_copy")],
+                [InlineKeyboardButton(text="↩️ Выбор способа", callback_data="menu:amnezia")],
+            ]
+        ),
+    )
+
+
+async def _send_amnezia_hub(msg: Message, session: aiohttp.ClientSession, tg_uid: int) -> None:
     data = await _fetch_amnezia_config(session, tg_uid)
     if not data.get("available"):
         reason = data.get("reason")
         if reason == "no_key":
             text = (
-                "🌿 <b>AmneziaWG</b>\n\n"
-                "Доступ включён, но конфиг ещё не выдан. Напишите администратору."
+                "🌿 <b>Amnezia VPN</b>\n\n"
+                "Доступ включён, но ключи ещё не выданы. Напишите администратору."
             )
         else:
             text = "Этот раздел недоступен для вашего аккаунта."
         await msg.answer(text, parse_mode="HTML", reply_markup=await main_menu_kb_for(session, tg_uid))
         return
     conf = str(data.get("wg_conf") or "").strip()
-    steps = data.get("install_steps") or []
+    vpn_key = str(data.get("vpn_key") or "").strip()
+    app_url = data.get("app_url") or "https://amnezia.org/ru"
     docs_url = data.get("docs_url") or "https://docs.amnezia.org/ru/documentation/amnezia-wg/"
-    steps_txt = "\n".join(f"{i + 1}. {s}" for i, s in enumerate(steps[:5]))
-    qr_url = str(data.get("qr_image_url") or "").strip() or None
     body = (
-        "🌿 <b>AmneziaWG 2.0</b> — защищённый протокол (обфускация, устойчив в РФ).\n"
-        "Отдельно от Frosty VLESS (Happ).\n\n"
-        f"{steps_txt}\n\n"
-        "Ниже пришлю <b>файл .conf</b> и <b>QR-картинку</b> — выберите удобный способ.\n\n"
+        "🌿 <b>Amnezia VPN (RU+)</b> — отдельно от Frosty/Happ.\n"
+        "Протокол <b>AmneziaWG 2.0</b> на сервере. Выберите <b>один</b> способ:\n\n"
+        "📱 <b>A — AmneziaVPN</b> — вставить ключ <code>vpn://…</code>\n"
+        "📄 <b>B — AmneziaWG</b> — импорт файла <code>.conf</code>\n"
+        "📷 <b>C — AmneziaWG</b> — сканировать QR\n\n"
         f'<a href="{html.escape(docs_url)}">О протоколе AmneziaWG</a>'
     )
-    rows: list[list[InlineKeyboardButton]] = []
-    if conf:
-        rows.append(
-            [
-                InlineKeyboardButton(text="📄 Файл .conf", callback_data="menu:amnezia_conf"),
-                InlineKeyboardButton(text="📷 QR-код", callback_data="menu:amnezia_qr"),
-            ]
-        )
-    rows.append([InlineKeyboardButton(text="🏠 Главное меню", callback_data="menu:main")])
     await msg.answer(
         body,
         parse_mode="HTML",
         disable_web_page_preview=True,
-        reply_markup=InlineKeyboardMarkup(inline_keyboard=rows),
+        reply_markup=_amnezia_branch_kb(has_vpn_key=bool(vpn_key), has_conf=bool(conf)),
     )
-    if conf:
-        await _send_amnezia_conf_file(msg, conf)
-        await _send_amnezia_qr_photo(msg, conf, qr_url)
 
 
 async def _get_vless_link(session: aiohttp.ClientSession, tg_id: int) -> tuple[str | None, str | None]:
@@ -1192,9 +1215,42 @@ async def main() -> None:
             return
 
         if action == "amnezia":
-            await query.answer("Amnezia VPN…")
+            await query.answer("Выбор способа…")
             tg_uid = query.from_user.id if query.from_user else 0
-            await _send_amnezia_vpn(msg, session, tg_uid)
+            await _send_amnezia_hub(msg, session, tg_uid)
+            return
+
+        if action == "amnezia_vpn":
+            await query.answer("AmneziaVPN…")
+            tg_uid = query.from_user.id
+            data = await _fetch_amnezia_config(session, tg_uid)
+            vpn_key = str(data.get("vpn_key") or "").strip()
+            if not vpn_key:
+                await msg.answer(
+                    "Ключ vpn:// ещё не выдан. Используйте ветку B (файл) или C (QR).",
+                    reply_markup=_amnezia_branch_kb(has_vpn_key=False, has_conf=bool(data.get("wg_conf"))),
+                )
+                return
+            await _send_amnezia_vpn_key(msg, vpn_key, data.get("app_url") or "https://amnezia.org/ru")
+            return
+
+        if action == "amnezia_copy":
+            await query.answer("Ключ vpn://…")
+            tg_uid = query.from_user.id
+            data = await _fetch_amnezia_config(session, tg_uid)
+            vpn_key = str(data.get("vpn_key") or "").strip()
+            if not vpn_key:
+                await msg.answer("Ключ не найден.", reply_markup=await main_menu_kb_for(session, tg_uid))
+                return
+            await msg.answer(
+                f"Скопируйте и вставьте в <b>AmneziaVPN</b>:\n\n<code>{html.escape(vpn_key)}</code>",
+                parse_mode="HTML",
+                reply_markup=InlineKeyboardMarkup(
+                    inline_keyboard=[
+                        [InlineKeyboardButton(text="↩️ Выбор способа", callback_data="menu:amnezia")],
+                    ]
+                ),
+            )
             return
 
         if action == "amnezia_conf":
@@ -1209,6 +1265,13 @@ async def main() -> None:
                 )
                 return
             await _send_amnezia_conf_file(msg, conf)
+            await msg.answer(
+                "↩️ Другой способ подключения:",
+                reply_markup=_amnezia_branch_kb(
+                    has_vpn_key=bool(str(data.get("vpn_key") or "").strip()),
+                    has_conf=True,
+                ),
+            )
             return
 
         if action == "amnezia_qr":
@@ -1224,6 +1287,13 @@ async def main() -> None:
                 return
             qr_url = str(data.get("qr_image_url") or "").strip() or None
             await _send_amnezia_qr_photo(msg, conf, qr_url)
+            await msg.answer(
+                "↩️ Другой способ подключения:",
+                reply_markup=_amnezia_branch_kb(
+                    has_vpn_key=bool(str(data.get("vpn_key") or "").strip()),
+                    has_conf=True,
+                ),
+            )
             return
 
         if action in ("buy_in_bot", "subscribe"):

@@ -336,6 +336,7 @@ export default function MiniAppPage() {
   const [amneziaLoading, setAmneziaLoading] = useState(false)
   const [amneziaError, setAmneziaError] = useState<string | null>(null)
   const [amneziaKeyCopied, setAmneziaKeyCopied] = useState(false)
+  const [amneziaVpnKeyCopied, setAmneziaVpnKeyCopied] = useState(false)
   const [proxyBusy, setProxyBusy] = useState(false)
   const [proxyConnectError, setProxyConnectError] = useState<string | null>(null)
 
@@ -568,6 +569,7 @@ export default function MiniAppPage() {
 
   const vpnLink = vpn?.vless_link || null
   const amneziaConf = amnezia?.wg_conf?.trim() || null
+  const amneziaVpnKey = amnezia?.vpn_key?.trim() || null
   const amneziaQrUrl =
     amnezia?.qr_image_url?.trim() ||
     (amneziaConf
@@ -579,6 +581,13 @@ export default function MiniAppPage() {
     navigator.clipboard.writeText(amneziaConf)
     setAmneziaKeyCopied(true)
     setTimeout(() => setAmneziaKeyCopied(false), 2000)
+  }
+
+  const handleCopyAmneziaVpnKey = () => {
+    if (!amneziaVpnKey) return
+    navigator.clipboard.writeText(amneziaVpnKey)
+    setAmneziaVpnKeyCopied(true)
+    setTimeout(() => setAmneziaVpnKeyCopied(false), 2000)
   }
 
   const handleCopyVlessLink = () => {
@@ -1152,17 +1161,8 @@ export default function MiniAppPage() {
                       🌿 AmneziaWG — VPN для России
                     </p>
                     <p className="text-[11px] mt-1 leading-relaxed" style={{ color: "#374151" }}>
-                      Протокол AmneziaWG 2.0 с обфускацией (
-                      <a
-                        href="https://docs.amnezia.org/ru/documentation/amnezia-wg/"
-                        target="_blank"
-                        rel="noreferrer"
-                        className="underline"
-                        style={{ color: "#059669" }}
-                      >
-                        подробнее
-                      </a>
-                      ). Импорт в приложение <strong>AmneziaWG</strong>: файл .conf или QR.
+                      Один протокол AmneziaWG 2.0 — три способа подключения:{" "}
+                      <strong>AmneziaVPN + ключ</strong>, <strong>файл .conf</strong> или <strong>QR</strong> в AmneziaWG.
                     </p>
                   </div>
 
@@ -1193,10 +1193,40 @@ export default function MiniAppPage() {
                     </p>
                   )}
 
-                  {amnezia?.available && amneziaConf && (
+                  {amnezia?.available && (amneziaVpnKey || amneziaConf) && (
                     <div className="space-y-3">
+                      {amneziaVpnKey && (
+                        <div className="p-4 space-y-2" style={{ background: "#FFFFFF", borderRadius: "14px", border: "1px solid #93C5FD" }}>
+                          <p className="text-sm font-bold" style={{ color: "#1D4ED8" }}>A — AmneziaVPN + ключ</p>
+                          <p className="text-xs leading-relaxed" style={{ color: "#374151" }}>
+                            Приложение <a href={amnezia.app_url || "https://amnezia.org/ru"} target="_blank" rel="noreferrer" className="underline" style={{ color: "#2563EB" }}>AmneziaVPN</a>
+                            {" "}→ «+» → «У меня есть данные» → вставить ключ.
+                          </p>
+                          <button
+                            type="button"
+                            onClick={handleCopyAmneziaVpnKey}
+                            className="w-full font-bold text-sm touch-manipulation"
+                            style={{
+                              height: "48px",
+                              borderRadius: "12px",
+                              background: amneziaVpnKeyCopied ? "#1D4ED8" : "#3B82F6",
+                              color: "#fff",
+                            }}
+                          >
+                            {amneziaVpnKeyCopied ? "Ключ vpn:// скопирован ✓" : "Скопировать ключ vpn://"}
+                          </button>
+                          <div
+                            className="text-[10px] font-mono break-all p-2 max-h-16 overflow-y-auto"
+                            style={{ background: "#F7F8FA", borderRadius: "8px", color: "#6B7280" }}
+                          >
+                            {amneziaVpnKey}
+                          </div>
+                        </div>
+                      )}
+
+                      {amneziaConf && (
                       <div className="p-4 space-y-2" style={{ background: "#FFFFFF", borderRadius: "14px", border: "1px solid #A7F3D0" }}>
-                        <p className="text-sm font-bold" style={{ color: "#047857" }}>① Файл .conf</p>
+                        <p className="text-sm font-bold" style={{ color: "#047857" }}>B — AmneziaWG, файл .conf</p>
                         <p className="text-xs leading-relaxed" style={{ color: "#374151" }}>
                           В боте: «🌿 AmneziaWG» — придёт <b>frosty_amneziawg.conf</b>.
                           <br />
@@ -1215,10 +1245,11 @@ export default function MiniAppPage() {
                           {amneziaKeyCopied ? "Текст конфига скопирован ✓" : "Скопировать текст .conf (запасной вариант)"}
                         </button>
                       </div>
+                      )}
 
-                      {amneziaQrUrl && (
+                      {amneziaConf && amneziaQrUrl && (
                         <div className="p-4 space-y-3" style={{ background: "#FFFFFF", borderRadius: "14px", border: "1px solid #A7F3D0" }}>
-                          <p className="text-sm font-bold" style={{ color: "#047857" }}>② QR-код</p>
+                          <p className="text-sm font-bold" style={{ color: "#047857" }}>C — AmneziaWG, QR-код</p>
                           <p className="text-xs leading-relaxed" style={{ color: "#374151" }}>
                             AmneziaWG → «+» → <b>Создать из QR-кода</b> → наведите камеру на код ниже
                             (или на QR-картинку из бота).
@@ -1270,11 +1301,11 @@ export default function MiniAppPage() {
             </div>
           )}
 
-          {amneziaEligible?.show_menu && amnezia?.available && amneziaConf && (
+          {amneziaEligible?.show_menu && amnezia?.available && (amneziaConf || amneziaVpnKey) && (
             <div className="mb-6 p-4 space-y-2" style={{ background: "#ECFDF5", borderRadius: "16px", border: "1px solid #A7F3D0" }}>
-              <p className="text-sm font-semibold" style={{ color: "#047857" }}>🌿 AmneziaWG готов</p>
+              <p className="text-sm font-semibold" style={{ color: "#047857" }}>🌿 Amnezia VPN готов</p>
               <p className="text-xs leading-relaxed" style={{ color: "#374151" }}>
-                В боте «🌿 AmneziaWG» — файл и QR. В мини-апп после оплаты — те же два способа.
+                В боте «🌿 Amnezia VPN» — выберите A, B или C. Здесь те же три ветки ниже.
               </p>
             </div>
           )}
