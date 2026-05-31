@@ -17,7 +17,11 @@ _log = logging.getLogger(__name__)
 # Ключи НЕ кэшируем на уровне модуля: на Railway env иногда виден только после полного старта процесса;
 # повторное чтение через os.getenv гарантирует актуальное значение в run_support_reply.
 def llm_api_key() -> str:
-    return (os.getenv("OPENROUTER_API_KEY") or os.getenv("OPENAI_API_KEY") or "").strip()
+    """Inference key for chat; may be set at startup by openrouter_provision.ensure_inference_key."""
+    return (
+        (os.getenv("OPENROUTER_API_KEY") or "").strip()
+        or (os.getenv("OPENAI_API_KEY") or "").strip()
+    )
 
 OPENAI_BASE_URL = (os.getenv("OPENAI_BASE_URL") or "https://openrouter.ai/api/v1").rstrip("/")
 # openrouter/free — free-роутер OpenRouter: сам выбирает живую free-модель с tools-support,

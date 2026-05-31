@@ -46,8 +46,12 @@ _log = logging.getLogger(__name__)
 
 
 def _has_llm_api_key() -> bool:
-    """Ключ LLM: только из окружения (Railway Variables), без кэша при импорте support_ai."""
-    return bool((os.getenv("OPENROUTER_API_KEY") or os.getenv("OPENAI_API_KEY") or "").strip())
+    """Ключ LLM: inference или management (дочерний ключ создаётся при старте)."""
+    return bool(
+        (os.getenv("OPENROUTER_API_KEY") or "").strip()
+        or (os.getenv("OPENROUTER_MANAGEMENT_KEY") or "").strip()
+        or (os.getenv("OPENAI_API_KEY") or "").strip()
+    )
 
 
 def _ai_support_enabled() -> bool:
@@ -1116,6 +1120,17 @@ async def main() -> None:
             bool(os.getenv("OPENAI_API_KEY", "").strip()),
             os.getenv("SUPPORT_AI_ENABLED", ""),
         )
+        try:
+            from openrouter_provision import ensure_inference_key
+
+            session = dp["http_session"]
+            if _has_llm_api_key():
+                try:
+                    await ensure_inference_key(session)
+                except Exception as e:
+                    _log.error("openrouter ensure_inference_key failed: %s", e)
+        except Exception as e:
+            _log.error("openrouter_provision import failed: %s", e)
         try:
             import support_ai as _sa
 
