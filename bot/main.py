@@ -8,6 +8,7 @@ import os
 import time
 from datetime import datetime, timezone
 from typing import Any
+from urllib.parse import quote
 from uuid import UUID
 
 import aiohttp
@@ -472,14 +473,27 @@ async def _fetch_amnezia_config(session: aiohttp.ClientSession, tg_id: int) -> d
         return {}
 
 
-async def _send_amnezia_conf_file(msg: Message, tg_uid: int, conf: str) -> None:
+async def _send_amnezia_conf_file(msg: Message, conf: str) -> None:
     doc = BufferedInputFile(conf.encode("utf-8"), filename="frosty_amneziawg.conf")
     await msg.answer_document(
         doc,
         caption=(
-            "📄 <b>Конфиг AmneziaWG 2.0</b>\n\n"
-            "В приложении <b>AmneziaWG</b>: «+» → «Создать из файла или архива» → "
-            "выберите этот файл."
+            "📄 <b>Способ 1 — файл</b>\n\n"
+            "AmneziaWG → «+» → <b>Создать из файла или архива</b> → выберите этот файл."
+        ),
+        parse_mode="HTML",
+    )
+
+
+async def _send_amnezia_qr_photo(msg: Message, conf: str, qr_url: str | None = None) -> None:
+    url = qr_url or (
+        "https://api.qrserver.com/v1/create-qr-code/?size=512x512&data=" + quote(conf, safe="")
+    )
+    await msg.answer_photo(
+        url,
+        caption=(
+            "📷 <b>Способ 2 — QR-код</b>\n\n"
+            "AmneziaWG → «+» → <b>Создать из QR-кода</b> → наведите камеру на этот код."
         ),
         parse_mode="HTML",
     )
@@ -502,16 +516,21 @@ async def _send_amnezia_vpn(msg: Message, session: aiohttp.ClientSession, tg_uid
     steps = data.get("install_steps") or []
     docs_url = data.get("docs_url") or "https://docs.amnezia.org/ru/documentation/amnezia-wg/"
     steps_txt = "\n".join(f"{i + 1}. {s}" for i, s in enumerate(steps[:5]))
+    qr_url = str(data.get("qr_image_url") or "").strip() or None
     body = (
         "🌿 <b>AmneziaWG 2.0</b> — защищённый протокол (обфускация, устойчив в РФ).\n"
         "Отдельно от Frosty VLESS (Happ).\n\n"
         f"{steps_txt}\n\n"
-        f"<a href=\"{html.escape(docs_url)}\">О протоколе AmneziaWG</a>"
+        "Ниже пришлю <b>файл .conf</b> и <b>QR-картинку</b> — выберите удобный способ.\n\n"
+        f'<a href="{html.escape(docs_url)}">О протоколе AmneziaWG</a>'
     )
     rows: list[list[InlineKeyboardButton]] = []
     if conf:
         rows.append(
-            [InlineKeyboardButton(text="📄 Получить файл .conf", callback_data="menu:amnezia_conf")]
+            [
+                InlineKeyboardButton(text="📄 Файл .conf", callback_data="menu:amnezia_conf"),
+                InlineKeyboardButton(text="📷 QR-код", callback_data="menu:amnezia_qr"),
+            ]
         )
     rows.append([InlineKeyboardButton(text="🏠 Главное меню", callback_data="menu:main")])
     await msg.answer(
@@ -521,7 +540,8 @@ async def _send_amnezia_vpn(msg: Message, session: aiohttp.ClientSession, tg_uid
         reply_markup=InlineKeyboardMarkup(inline_keyboard=rows),
     )
     if conf:
-        await _send_amnezia_conf_file(msg, tg_uid, conf)
+        await _send_amnezia_conf_file(msg, conf)
+        await _send_amnezia_qr_photo(msg, conf, qr_url)
 
 
 async def _get_vless_link(session: aiohttp.ClientSession, tg_id: int) -> tuple[str | None, str | None]:
@@ -1188,7 +1208,22 @@ async def main() -> None:
                     reply_markup=await main_menu_kb_for(session, tg_uid),
                 )
                 return
-            await _send_amnezia_conf_file(msg, tg_uid, conf)
+            await _send_amnezia_conf_file(msg, conf)
+            return
+
+        if action == "amnezia_qr":
+            await query.answer("Отправляю QR…")
+            tg_uid = query.from_user.id
+            data = await _fetch_amnezia_config(session, tg_uid)
+            conf = str(data.get("wg_conf") or "").strip()
+            if not conf:
+                await msg.answer(
+                    "QR ещё не готов. Напишите администратору.",
+                    reply_markup=await main_menu_kb_for(session, tg_uid),
+                )
+                return
+            qr_url = str(data.get("qr_image_url") or "").strip() or None
+            await _send_amnezia_qr_photo(msg, conf, qr_url)
             return
 
         if action in ("buy_in_bot", "subscribe"):

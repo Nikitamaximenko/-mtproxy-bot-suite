@@ -4422,6 +4422,7 @@ class AmneziaConfigResponse(BaseModel):
     protocol: str = "AmneziaWG"
     vpn_key: str | None = None
     wg_conf: str | None = None
+    qr_image_url: str | None = None
     key_format: str | None = None
     server_ip: str | None = None
     app_url: str | None = None
@@ -4449,20 +4450,26 @@ def amnezia_config(telegram_id: int, req: Request, db: Session = Depends(get_db)
     if not key and not conf:
         return AmneziaConfigResponse(available=False, reason="no_key")
     fmt = (row.key_format or "vpn").strip().lower()
-    steps = [
-        "Приложение: AmneziaWG (именно оно, не Happ)",
-        "«+» → «Создать из файла или архива»",
-        "Выберите файл frosty_amneziawg.conf из Telegram (кнопка ниже в боте)",
-        "Включите туннель — протокол AmneziaWG 2.0 с обфускацией",
-    ]
+    from urllib.parse import quote
+
+    qr_url: str | None = None
     if conf:
-        steps[1] = "«+» → «Создать из файла» или «Создать из QR-кода»"
-        steps[2] = "Файл .conf из бота или QR из мини-апп"
+        qr_url = (
+            "https://api.qrserver.com/v1/create-qr-code/?size=512x512&data="
+            + quote(conf, safe="")
+        )
+    steps = [
+        "Файл: в боте придут .conf и QR-картинка (или мини-апп ниже)",
+        "Файл → AmneziaWG: «+» → «Создать из файла» → frosty_amneziawg.conf",
+        "QR → AmneziaWG: «+» → «Создать из QR-кода» → сканировать QR из бота/мини-апп",
+        "Включите туннель (протокол AmneziaWG 2.0)",
+    ]
     return AmneziaConfigResponse(
         available=True,
         protocol="AmneziaWG",
         vpn_key=key or None,
         wg_conf=conf or None,
+        qr_image_url=qr_url,
         key_format=fmt,
         server_ip=AMNEZIA_SERVER_IP or None,
         app_url=AMNEZIA_APP_URL,

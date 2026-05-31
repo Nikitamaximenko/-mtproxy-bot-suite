@@ -43,6 +43,7 @@ type AmneziaData = {
   protocol?: string
   vpn_key?: string | null
   wg_conf?: string | null
+  qr_image_url?: string | null
   key_format?: string | null
   app_url?: string | null
   docs_url?: string | null
@@ -567,7 +568,11 @@ export default function MiniAppPage() {
 
   const vpnLink = vpn?.vless_link || null
   const amneziaConf = amnezia?.wg_conf?.trim() || null
-  const amneziaQrPayload = amneziaConf || amnezia?.vpn_key?.trim() || null
+  const amneziaQrUrl =
+    amnezia?.qr_image_url?.trim() ||
+    (amneziaConf
+      ? `https://api.qrserver.com/v1/create-qr-code/?size=400x400&data=${encodeURIComponent(amneziaConf)}`
+      : null)
 
   const handleCopyAmneziaConf = () => {
     if (!amneziaConf) return
@@ -1188,69 +1193,49 @@ export default function MiniAppPage() {
                     </p>
                   )}
 
-                  {amnezia?.available && (amneziaConf || amneziaQrPayload) && (
-                    <>
-                      <ol className="text-xs space-y-1.5 pl-4 list-decimal" style={{ color: "#374151" }}>
-                        {(amnezia.install_steps || []).map((step, i) => (
-                          <li key={i}>{step}</li>
-                        ))}
-                      </ol>
-                      <p className="text-xs px-1" style={{ color: "#047857" }}>
-                        В AmneziaWG: «+» → «Создать из файла» (файл из бота) или «Создать из QR-кода» (ниже).
-                      </p>
-                      {amneziaConf && (
+                  {amnezia?.available && amneziaConf && (
+                    <div className="space-y-3">
+                      <div className="p-4 space-y-2" style={{ background: "#FFFFFF", borderRadius: "14px", border: "1px solid #A7F3D0" }}>
+                        <p className="text-sm font-bold" style={{ color: "#047857" }}>① Файл .conf</p>
+                        <p className="text-xs leading-relaxed" style={{ color: "#374151" }}>
+                          В боте: «🌿 AmneziaWG» — придёт <b>frosty_amneziawg.conf</b>.
+                          <br />
+                          AmneziaWG → «+» → <b>Создать из файла или архива</b> → выберите файл.
+                        </p>
                         <button
                           type="button"
                           onClick={handleCopyAmneziaConf}
-                          className="w-full flex items-center justify-center gap-2 font-bold touch-manipulation"
+                          className="w-full text-xs font-semibold py-2.5 touch-manipulation"
                           style={{
-                            height: "52px",
-                            borderRadius: "14px",
-                            background: amneziaKeyCopied ? "#047857" : "#10B981",
-                            color: "#FFFFFF",
-                            fontSize: "15px",
+                            borderRadius: "10px",
+                            background: amneziaKeyCopied ? "#047857" : "#D1FAE5",
+                            color: amneziaKeyCopied ? "#fff" : "#047857",
                           }}
                         >
-                          {amneziaKeyCopied ? (
-                            <>
-                              <Check className="w-5 h-5" />
-                              Текст .conf скопирован
-                            </>
-                          ) : (
-                            <>
-                              <Copy className="w-5 h-5" />
-                              Скопировать текст .conf
-                            </>
-                          )}
+                          {amneziaKeyCopied ? "Текст конфига скопирован ✓" : "Скопировать текст .conf (запасной вариант)"}
                         </button>
-                      )}
-                      {amneziaQrPayload && (
-                      <details>
-                        <summary
-                          className="flex items-center justify-between px-4 py-3 cursor-pointer list-none text-sm font-semibold"
-                          style={{ background: "#F7F8FA", borderRadius: "14px", color: "#6B7280" }}
-                        >
-                          QR для AmneziaWG
-                          <span className="text-xs font-normal" style={{ color: "#059669" }}>↓</span>
-                        </summary>
-                        <div className="mt-2 flex flex-col items-center p-4" style={{ background: "#F7F8FA", borderRadius: "14px" }}>
-                          <p className="text-[11px] text-center mb-2" style={{ color: "#6B7280" }}>
-                            AmneziaWG → «+» → «Создать из QR-кода»
+                      </div>
+
+                      {amneziaQrUrl && (
+                        <div className="p-4 space-y-3" style={{ background: "#FFFFFF", borderRadius: "14px", border: "1px solid #A7F3D0" }}>
+                          <p className="text-sm font-bold" style={{ color: "#047857" }}>② QR-код</p>
+                          <p className="text-xs leading-relaxed" style={{ color: "#374151" }}>
+                            AmneziaWG → «+» → <b>Создать из QR-кода</b> → наведите камеру на код ниже
+                            (или на QR-картинку из бота).
                           </p>
-                          <div className="p-3" style={{ background: "#FFFFFF", borderRadius: "14px" }}>
+                          <div className="flex flex-col items-center p-3" style={{ background: "#F7F8FA", borderRadius: "12px" }}>
                             {/* eslint-disable-next-line @next/next/no-img-element */}
                             <img
-                              src={`https://api.qrserver.com/v1/create-qr-code/?size=180x180&data=${encodeURIComponent(amneziaQrPayload)}`}
+                              src={amneziaQrUrl}
                               alt="QR AmneziaWG"
-                              width={180}
-                              height={180}
-                              style={{ display: "block", borderRadius: "8px" }}
+                              width={220}
+                              height={220}
+                              style={{ display: "block", borderRadius: "8px", maxWidth: "100%" }}
                             />
                           </div>
                         </div>
-                      </details>
                       )}
-                    </>
+                    </div>
                   )}
                 </div>
               )}
@@ -1286,10 +1271,10 @@ export default function MiniAppPage() {
           )}
 
           {amneziaEligible?.show_menu && amnezia?.available && amneziaConf && (
-            <div className="mb-6 p-4 space-y-3" style={{ background: "#ECFDF5", borderRadius: "16px", border: "1px solid #A7F3D0" }}>
+            <div className="mb-6 p-4 space-y-2" style={{ background: "#ECFDF5", borderRadius: "16px", border: "1px solid #A7F3D0" }}>
               <p className="text-sm font-semibold" style={{ color: "#047857" }}>🌿 AmneziaWG готов</p>
               <p className="text-xs leading-relaxed" style={{ color: "#374151" }}>
-                В боте: «🌿 AmneziaWG» — придёт файл <code>frosty_amneziawg.conf</code>. В приложении AmneziaWG: «Создать из файла».
+                В боте «🌿 AmneziaWG» — файл и QR. В мини-апп после оплаты — те же два способа.
               </p>
             </div>
           )}
