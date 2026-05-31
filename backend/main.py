@@ -4411,11 +4411,13 @@ class AmneziaEligibleResponse(BaseModel):
 
 class AmneziaConfigResponse(BaseModel):
     available: bool
-    reason: str | None = None  # not_allowed | no_key
+    reason: str | None = None  # not_allowed | no_key | internal_token_required
+    protocol: str = "AmneziaWG"
     vpn_key: str | None = None
     key_format: str | None = None
     server_ip: str | None = None
     app_url: str | None = None
+    docs_url: str | None = None
     install_steps: list[str] | None = None
 
 
@@ -4428,7 +4430,9 @@ def amnezia_eligible(telegram_id: int, db: Session = Depends(get_db)) -> Amnezia
 
 
 @app.get("/vpn/amnezia/config/{telegram_id}", response_model=AmneziaConfigResponse)
-def amnezia_config(telegram_id: int, db: Session = Depends(get_db)) -> AmneziaConfigResponse:
+def amnezia_config(telegram_id: int, req: Request, db: Session = Depends(get_db)) -> AmneziaConfigResponse:
+    if INTERNAL_API_TOKEN and not _vpn_config_caller_trusted(req, telegram_id):
+        return AmneziaConfigResponse(available=False, reason="internal_token_required")
     row = _amnezia_access_row(db, telegram_id)
     if not row:
         return AmneziaConfigResponse(available=False, reason="not_allowed")
@@ -4437,19 +4441,21 @@ def amnezia_config(telegram_id: int, db: Session = Depends(get_db)) -> AmneziaCo
         return AmneziaConfigResponse(available=False, reason="no_key")
     fmt = (row.key_format or "vpn").strip().lower()
     steps = [
-        "Скачайте AmneziaVPN: https://amnezia.org/ru",
-        "В приложении: «+» → «У меня есть данные для подключения»",
-        "Вставьте ключ ниже (или отсканируйте QR из файла, если выдали .conf)",
-        "Подключитесь — это отдельный VPN, не Frosty/Happ VLESS",
+        "Установите AmneziaVPN (протокол AmneziaWG 2.0)",
+        "«+» → «У меня есть данные для подключения»",
+        "Вставьте ключ ниже или импортируйте QR",
+        "Включите туннель — отдельно от Frosty VLESS (Happ)",
     ]
     if fmt == "conf":
-        steps[2] = "Импортируйте файл .conf в AmneziaWG или AmneziaVPN"
+        steps[2] = "Импортируйте файл .conf в AmneziaVPN / AmneziaWG"
     return AmneziaConfigResponse(
         available=True,
+        protocol="AmneziaWG",
         vpn_key=key,
         key_format=fmt,
         server_ip=AMNEZIA_SERVER_IP or None,
         app_url=AMNEZIA_APP_URL,
+        docs_url="https://docs.amnezia.org/ru/documentation/amnezia-wg/",
         install_steps=steps,
     )
 

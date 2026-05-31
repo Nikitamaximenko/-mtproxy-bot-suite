@@ -31,6 +31,23 @@ type VpnData = {
   uuid: string | null
 }
 
+type AmneziaEligible = {
+  eligible: boolean
+  has_key: boolean
+  show_menu: boolean
+}
+
+type AmneziaData = {
+  available: boolean
+  reason?: string | null
+  protocol?: string
+  vpn_key?: string | null
+  key_format?: string | null
+  app_url?: string | null
+  docs_url?: string | null
+  install_steps?: string[] | null
+}
+
 function FrostIcon({ className, style }: { className?: string; style?: React.CSSProperties }) {
   return (
     <svg viewBox="0 0 100 100" className={className} style={style} fill="none" xmlns="http://www.w3.org/2000/svg">
@@ -312,6 +329,11 @@ export default function MiniAppPage() {
   const [vpnLoading, setVpnLoading] = useState(false)
   const [vpnLinkCopied, setVpnLinkCopied] = useState(false)
   const [vpnError, setVpnError] = useState<string | null>(null)
+  const [amneziaEligible, setAmneziaEligible] = useState<AmneziaEligible | null>(null)
+  const [amnezia, setAmnezia] = useState<AmneziaData | null>(null)
+  const [amneziaLoading, setAmneziaLoading] = useState(false)
+  const [amneziaError, setAmneziaError] = useState<string | null>(null)
+  const [amneziaKeyCopied, setAmneziaKeyCopied] = useState(false)
   const [proxyBusy, setProxyBusy] = useState(false)
   const [proxyConnectError, setProxyConnectError] = useState<string | null>(null)
 
@@ -492,7 +514,65 @@ export default function MiniAppPage() {
     }
   }, [activeTab, vpn, fetchVpn])
 
+  const fetchAmneziaEligible = useCallback(async () => {
+    if (!tgId) return
+    try {
+      const res = await fetch(`/api/vpn/amnezia?tg_id=${tgId}`, { cache: "no-store" })
+      const data = (await res.json()) as AmneziaEligible
+      if (res.ok) setAmneziaEligible(data)
+      else setAmneziaEligible(null)
+    } catch {
+      setAmneziaEligible(null)
+    }
+  }, [tgId])
+
+  const fetchAmnezia = useCallback(async () => {
+    if (!tgId) return
+    setAmneziaLoading(true)
+    setAmneziaError(null)
+    try {
+      let initData = typeof window !== "undefined" ? getTelegramInitData() : ""
+      if (!initData && typeof window !== "undefined") {
+        initData = await getTelegramInitDataAsync()
+      }
+      const res = await fetch("/api/vpn/amnezia", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        cache: "no-store",
+        body: JSON.stringify({ tg_id: tgId, init_data: initData }),
+      })
+      const data = (await res.json()) as AmneziaData
+      if (!res.ok) {
+        setAmnezia(null)
+        setAmneziaError("Не удалось загрузить AmneziaWG")
+        return
+      }
+      setAmnezia(data)
+    } catch {
+      setAmnezia(null)
+      setAmneziaError("Сеть недоступна")
+    } finally {
+      setAmneziaLoading(false)
+    }
+  }, [tgId])
+
+  useEffect(() => {
+    if (tgId) void fetchAmneziaEligible()
+  }, [tgId, fetchAmneziaEligible])
+
+  useEffect(() => {
+    if (amneziaEligible?.show_menu && !amnezia && tgId) void fetchAmnezia()
+  }, [amneziaEligible, amnezia, tgId, fetchAmnezia])
+
   const vpnLink = vpn?.vless_link || null
+  const amneziaKey = amnezia?.vpn_key?.trim() || null
+
+  const handleCopyAmneziaKey = () => {
+    if (!amneziaKey) return
+    navigator.clipboard.writeText(amneziaKey)
+    setAmneziaKeyCopied(true)
+    setTimeout(() => setAmneziaKeyCopied(false), 2000)
+  }
 
   const handleCopyVlessLink = () => {
     if (!vpnLink) return
@@ -1053,6 +1133,136 @@ export default function MiniAppPage() {
                   </p>
                 </>
               )}
+
+              {/* AmneziaWG 2.0 — отдельная ветка (только whitelist) */}
+              {amneziaEligible?.show_menu && (
+                <div
+                  className="mt-6 pt-5 space-y-4"
+                  style={{ borderTop: "1px solid #E5E7EB" }}
+                >
+                  <div className="px-3 py-2.5" style={{ background: "#ECFDF5", borderRadius: "12px", border: "1px solid #A7F3D0" }}>
+                    <p className="text-xs font-semibold" style={{ color: "#047857" }}>
+                      🌿 AmneziaWG — VPN для России
+                    </p>
+                    <p className="text-[11px] mt-1 leading-relaxed" style={{ color: "#374151" }}>
+                      Протокол с обфускацией под обычный UDP-трафик (
+                      <a
+                        href="https://docs.amnezia.org/ru/documentation/amnezia-wg/"
+                        target="_blank"
+                        rel="noreferrer"
+                        className="underline"
+                        style={{ color: "#059669" }}
+                      >
+                        подробнее
+                      </a>
+                      ). Работает в приложении AmneziaVPN, отдельно от Frosty/Happ.
+                    </p>
+                  </div>
+
+                  {amneziaLoading && !amnezia && (
+                    <div className="flex items-center justify-center gap-2 py-6">
+                      <RefreshCw className="w-5 h-5 animate-spin" style={{ color: "#059669" }} />
+                      <span className="text-xs" style={{ color: "#6B7280" }}>Загружаем ключ AmneziaWG…</span>
+                    </div>
+                  )}
+
+                  {amneziaError && !amnezia && (
+                    <div className="p-4 text-center space-y-2" style={{ background: "#FEF2F2", borderRadius: "12px" }}>
+                      <p className="text-xs" style={{ color: "#B91C1C" }}>{amneziaError}</p>
+                      <button
+                        type="button"
+                        onClick={() => void fetchAmnezia()}
+                        className="text-xs font-semibold px-3 py-1.5"
+                        style={{ background: "#059669", color: "#fff", borderRadius: "8px" }}
+                      >
+                        Повторить
+                      </button>
+                    </div>
+                  )}
+
+                  {amnezia && !amnezia.available && amnezia.reason === "no_key" && (
+                    <p className="text-xs text-center py-4" style={{ color: "#6B7280" }}>
+                      Доступ включён — ключ AmneziaWG ещё не выдан. Напишите администратору.
+                    </p>
+                  )}
+
+                  {amnezia?.available && amneziaKey && (
+                    <>
+                      <ol className="text-xs space-y-1.5 pl-4 list-decimal" style={{ color: "#374151" }}>
+                        {(amnezia.install_steps || []).map((step, i) => (
+                          <li key={i}>{step}</li>
+                        ))}
+                      </ol>
+                      <a
+                        href={amnezia.app_url || "https://amnezia.org/ru"}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="flex items-center justify-center gap-2 w-full text-sm font-semibold touch-manipulation"
+                        style={{
+                          height: "48px",
+                          borderRadius: "12px",
+                          background: "#059669",
+                          color: "#FFFFFF",
+                        }}
+                      >
+                        <ExternalLink className="w-4 h-4" />
+                        Скачать AmneziaVPN
+                      </a>
+                      <button
+                        type="button"
+                        onClick={handleCopyAmneziaKey}
+                        className="w-full flex items-center justify-center gap-2 font-bold touch-manipulation"
+                        style={{
+                          height: "52px",
+                          borderRadius: "14px",
+                          background: amneziaKeyCopied ? "#047857" : "#10B981",
+                          color: "#FFFFFF",
+                          fontSize: "15px",
+                        }}
+                      >
+                        {amneziaKeyCopied ? (
+                          <>
+                            <Check className="w-5 h-5" />
+                            Скопировано
+                          </>
+                        ) : (
+                          <>
+                            <Copy className="w-5 h-5" />
+                            Скопировать ключ AmneziaWG
+                          </>
+                        )}
+                      </button>
+                      <div
+                        className="text-[10px] font-mono break-all p-3 max-h-24 overflow-y-auto"
+                        style={{ background: "#F7F8FA", borderRadius: "10px", color: "#6B7280" }}
+                      >
+                        {amneziaKey}
+                      </div>
+                      <details>
+                        <summary
+                          className="flex items-center justify-between px-4 py-3 cursor-pointer list-none text-sm font-semibold"
+                          style={{ background: "#F7F8FA", borderRadius: "14px", color: "#6B7280" }}
+                        >
+                          QR для AmneziaVPN
+                          <span className="text-xs font-normal" style={{ color: "#059669" }}>↓</span>
+                        </summary>
+                        <div className="mt-2 flex flex-col items-center p-4" style={{ background: "#F7F8FA", borderRadius: "14px" }}>
+                          <div className="p-3" style={{ background: "#FFFFFF", borderRadius: "14px" }}>
+                            {/* eslint-disable-next-line @next/next/no-img-element */}
+                            <img
+                              src={`https://api.qrserver.com/v1/create-qr-code/?size=180x180&data=${encodeURIComponent(amneziaKey)}`}
+                              alt="QR AmneziaWG"
+                              width={180}
+                              height={180}
+                              style={{ display: "block", borderRadius: "8px" }}
+                            />
+                          </div>
+                        </div>
+                      </details>
+                    </>
+                  )}
+                </div>
+              )}
             </div>
           )}
 
@@ -1081,6 +1291,27 @@ export default function MiniAppPage() {
             >
               Доступ приостановлен вручную. Оплаченный период до{" "}
               <strong>{new Date(expiresAt).toLocaleDateString("ru-RU")}</strong>.
+            </div>
+          )}
+
+          {amneziaEligible?.show_menu && amnezia?.available && amneziaKey && (
+            <div className="mb-6 p-4 space-y-3" style={{ background: "#ECFDF5", borderRadius: "16px", border: "1px solid #A7F3D0" }}>
+              <p className="text-sm font-semibold" style={{ color: "#047857" }}>🌿 Ваш AmneziaWG готов</p>
+              <p className="text-xs leading-relaxed" style={{ color: "#374151" }}>
+                Отдельный VPN для стабильной работы в РФ. Установите{" "}
+                <a href={amnezia.app_url || "https://amnezia.org/ru"} target="_blank" rel="noreferrer" className="underline" style={{ color: "#059669" }}>
+                  AmneziaVPN
+                </a>
+                {" "}и вставьте ключ.
+              </p>
+              <button
+                type="button"
+                onClick={handleCopyAmneziaKey}
+                className="w-full font-bold text-sm"
+                style={{ height: "48px", borderRadius: "12px", background: "#059669", color: "#fff" }}
+              >
+                {amneziaKeyCopied ? "Скопировано ✓" : "Скопировать ключ AmneziaWG"}
+              </button>
             </div>
           )}
 
