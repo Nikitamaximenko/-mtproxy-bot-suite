@@ -17,8 +17,11 @@ from aiogram.filters import BaseFilter, Command, CommandStart, StateFilter
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.storage.memory import MemoryStorage
+from pathlib import Path
+
 from aiogram.types import (
     BufferedInputFile,
+    FSInputFile,
     CallbackQuery,
     InlineKeyboardButton,
     InlineKeyboardMarkup,
@@ -32,6 +35,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 BOT_TOKEN = os.getenv("BOT_TOKEN", "").strip()
+AMNEZIA_AWG_DIR = (os.getenv("AMNEZIA_AWG_DIR") or "/root/awg").strip()
 BACKEND_BASE_URL = (os.getenv("BACKEND_BASE_URL") or "http://localhost:8000").rstrip("/")
 FRONTEND_URL = (os.getenv("FRONTEND_URL") or "http://localhost:3000").strip()
 INTERNAL_API_TOKEN = os.getenv("INTERNAL_API_TOKEN", "").strip()
@@ -516,22 +520,49 @@ async def _send_amnezia_qr_photo(msg: Message, conf: str, qr_url: str | None = N
     )
 
 
-async def _send_amnezia_vpn_key(msg: Message, vpn_key: str, app_url: str) -> None:
+def _amnezia_vpnuri_png_path(tg_uid: int) -> Path | None:
+    """QR для импорта в AmneziaVPN (надёжнее, чем вставка длинного vpn://)."""
+    for name in (f"tg_{tg_uid}.vpnuri.png", f"nikita_frosty.vpnuri.png" if tg_uid == 231115635 else ""):
+        if not name:
+            continue
+        p = Path(AMNEZIA_AWG_DIR) / name
+        if p.is_file():
+            return p
+    return None
+
+
+async def _send_amnezia_vpn_key(msg: Message, vpn_key: str, app_url: str, tg_uid: int) -> None:
+    png = _amnezia_vpnuri_png_path(tg_uid)
     await msg.answer(
-        "📱 <b>Ветка A — AmneziaVPN + ключ</b>\n\n"
-        f"1. Установите <a href=\"{html.escape(app_url)}\">AmneziaVPN</a> (не AmneziaWG)\n"
-        "2. «+» → «У меня есть данные для подключения»\n"
-        "3. Вставьте ключ ниже → Подключиться\n\n"
-        f"<code>{html.escape(vpn_key)}</code>",
+        "📱 <b>Ветка A — AmneziaVPN</b>\n\n"
+        f"1. Установите <a href=\"{html.escape(app_url)}\">AmneziaVPN</a>\n"
+        "2. Если вставка ключа <code>vpn://</code> крутится бесконечно — "
+        "<b>импортируйте через QR</b> (сообщение ниже).\n"
+        "3. Или: «+» → «У меня есть данные» → вставить ключ (запасной вариант).\n\n"
+        "Если снова зависает — используйте <b>B</b> (файл) или <b>C</b> (QR) в приложении <b>AmneziaWG</b>.",
         parse_mode="HTML",
         disable_web_page_preview=True,
         reply_markup=InlineKeyboardMarkup(
             inline_keyboard=[
-                [InlineKeyboardButton(text="📋 Скопировать ключ vpn://", callback_data="menu:amnezia_copy")],
+                [InlineKeyboardButton(text="📋 Ключ vpn:// (запасной)", callback_data="menu:amnezia_copy")],
                 [InlineKeyboardButton(text="↩️ Выбор способа", callback_data="menu:amnezia")],
             ]
         ),
     )
+    if png:
+        await msg.answer_photo(
+            FSInputFile(png),
+            caption=(
+                "📷 <b>QR для AmneziaVPN</b>\n\n"
+                "«+» → сканировать QR / импорт из галереи → выберите это изображение."
+            ),
+            parse_mode="HTML",
+        )
+    else:
+        await msg.answer(
+            f"<code>{html.escape(vpn_key)}</code>",
+            parse_mode="HTML",
+        )
 
 
 async def _send_amnezia_hub(msg: Message, session: aiohttp.ClientSession, tg_uid: int) -> None:
@@ -1231,7 +1262,9 @@ async def main() -> None:
                     reply_markup=_amnezia_branch_kb(has_vpn_key=False, has_conf=bool(data.get("wg_conf"))),
                 )
                 return
-            await _send_amnezia_vpn_key(msg, vpn_key, data.get("app_url") or "https://amnezia.org/ru")
+            await _send_amnezia_vpn_key(
+                msg, vpn_key, data.get("app_url") or "https://amnezia.org/ru", tg_uid
+            )
             return
 
         if action == "amnezia_copy":

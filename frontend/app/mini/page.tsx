@@ -1200,7 +1200,8 @@ export default function MiniAppPage() {
                           <p className="text-sm font-bold" style={{ color: "#1D4ED8" }}>A — AmneziaVPN + ключ</p>
                           <p className="text-xs leading-relaxed" style={{ color: "#374151" }}>
                             Приложение <a href={amnezia.app_url || "https://amnezia.org/ru"} target="_blank" rel="noreferrer" className="underline" style={{ color: "#2563EB" }}>AmneziaVPN</a>
-                            {" "}→ «+» → «У меня есть данные» → вставить ключ.
+                            : в боте «📱 AmneziaVPN + ключ» придёт <b>QR для импорта</b> (надёжнее, чем вставка vpn://).
+                            Если крутит загрузку — используйте B или C в <b>AmneziaWG</b>.
                           </p>
                           <button
                             type="button"
