@@ -161,13 +161,18 @@ type SupportAiStats = {
   total: number
   last_24h: number
   last_7d: number
+  last_30d?: number
   unique_users_total: number
   unique_users_7d: number
+  unique_users_30d?: number
   errors_total: number
   avg_duration_ms: number | null
   last_message_at: string | null
   daily_7d: SupportAiDailyBucket[]
   top_users_7d: SupportAiTopUser[]
+  daily_30d?: SupportAiDailyBucket[]
+  top_users_30d?: SupportAiTopUser[]
+  period_days?: number
 }
 
 type CheckoutLogItem = {
@@ -413,6 +418,7 @@ export default function AdminPage() {
   const [supportMessages, setSupportMessages] = useState<SupportAiMessagesData | null>(null)
   const [supportOnlyErrors, setSupportOnlyErrors] = useState(false)
   const [supportTgFilter, setSupportTgFilter] = useState("")
+  const [supportSearch, setSupportSearch] = useState("")
   const [supportExpandedId, setSupportExpandedId] = useState<number | null>(null)
   const [checkoutStats, setCheckoutStats] = useState<CheckoutStats | null>(null)
   const [checkoutLogs, setCheckoutLogs] = useState<CheckoutLogsData | null>(null)
@@ -473,7 +479,7 @@ export default function AdminPage() {
           fetch("/api/admin/vpn-online", { headers: headers(activeKey), cache: "no-store" }),
           fetch("/api/admin/vpn-clients", { headers: headers(activeKey), cache: "no-store" }),
           fetch("/api/admin/support/stats", { headers: headers(activeKey), cache: "no-store" }),
-          fetch("/api/admin/support/messages?limit=100", { headers: headers(activeKey), cache: "no-store" }),
+          fetch("/api/admin/support/messages?limit=300", { headers: headers(activeKey), cache: "no-store" }),
           fetch("/api/admin/checkout/stats", { headers: headers(activeKey), cache: "no-store" }),
           fetch("/api/admin/checkout/logs?limit=100", { headers: headers(activeKey), cache: "no-store" }),
         ])
@@ -738,13 +744,16 @@ export default function AdminPage() {
   }, [fetchAll, headers])
 
   const fetchSupportMessages = useCallback(
-    async (opts?: { tgId?: string; onlyErrors?: boolean }) => {
-      const q = new URLSearchParams({ limit: "100" })
+    async (opts?: { tgId?: string; onlyErrors?: boolean; search?: string; offset?: number }) => {
+      const q = new URLSearchParams({ limit: "300" })
       const tgRaw = (opts?.tgId ?? supportTgFilter).trim()
       if (tgRaw) {
         const asNum = Number(tgRaw)
         if (Number.isFinite(asNum) && asNum > 0) q.set("tg_id", String(asNum))
       }
+      const searchRaw = (opts?.search ?? supportSearch).trim()
+      if (searchRaw) q.set("search", searchRaw)
+      if (opts?.offset) q.set("offset", String(opts.offset))
       if (opts?.onlyErrors ?? supportOnlyErrors) q.set("only_errors", "true")
       try {
         const res = await fetch(`/api/admin/support/messages?${q.toString()}`, {
@@ -758,7 +767,7 @@ export default function AdminPage() {
         /* ignore */
       }
     },
-    [headers, supportOnlyErrors, supportTgFilter],
+    [headers, supportOnlyErrors, supportSearch, supportTgFilter],
   )
 
   const fetchCheckoutLogs = useCallback(
@@ -2187,9 +2196,15 @@ export default function AdminPage() {
         <section>
           <h2 className="text-lg font-semibold mb-1 text-gray-300">ИИ-поддержка</h2>
           <p className="text-xs text-gray-500 mb-4">
-            Диалоги пользователей с ИИ-ботом поддержки (OpenRouter). Записываются автоматически после
-            каждого ответа — видно вопрос, ответ, модель, длительность и ошибки.
+            Диалоги /support в боте. Список ниже — все записи из БД (сверху новые). График — за 30 дней.
           </p>
+          {supportStats && (supportStats.last_24h ?? 0) === 0 && (supportStats.total ?? 0) > 0 && (
+            <div className="mb-4 px-4 py-3 rounded-xl border border-amber-800/60 bg-amber-950/40 text-sm text-amber-100/95">
+              С <strong>22 мая</strong> новых записей нет: на боте выключен ИИ-поддержки (нет OPENROUTER ключа).
+              Пользователи пишут в /support, но в БД не попадало — сейчас исправлено, новые сообщения будут видны.
+              Последнее в базе: {supportStats.last_message_at ? formatDate(supportStats.last_message_at) : "—"}.
+            </div>
+          )}
 
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-4">
             {[
@@ -2204,12 +2219,12 @@ export default function AdminPage() {
               {
                 label: "За 24 часа",
                 value: supportStats?.last_24h ?? "—",
-                sub: supportStats ? `за 7д: ${supportStats.last_7d}` : undefined,
+                sub: supportStats ? `за 30д: ${supportStats.last_30d ?? supportStats.last_7d}` : undefined,
                 color: "text-emerald-400",
               },
               {
-                label: "Уникальных 7д",
-                value: supportStats?.unique_users_7d ?? "—",
+                label: "Уникальных 30д",
+                value: supportStats?.unique_users_30d ?? supportStats?.unique_users_7d ?? "—",
                 sub: supportStats ? `всего: ${supportStats.unique_users_total}` : undefined,
                 color: "text-purple-400",
               },
@@ -2237,14 +2252,17 @@ export default function AdminPage() {
             ))}
           </div>
 
-          {supportStats && supportStats.daily_7d.length > 0 && (
+          {supportStats && (supportStats.daily_30d?.length ?? supportStats.daily_7d.length) > 0 && (
             <div className="bg-gray-900 border border-gray-800 rounded-2xl p-4 mb-4">
-              <div className="text-xs text-gray-500 mb-3 font-medium">Сообщений по дням (7д)</div>
+              <div className="text-xs text-gray-500 mb-3 font-medium">
+                Сообщений по дням ({supportStats.period_days ?? 30}д)
+              </div>
               {(() => {
-                const maxVal = Math.max(1, ...supportStats.daily_7d.map((d) => d.count))
+                const daily = supportStats.daily_30d?.length ? supportStats.daily_30d : supportStats.daily_7d
+                const maxVal = Math.max(1, ...daily.map((d) => d.count))
                 return (
-                  <div className="flex items-end gap-2 h-28">
-                    {supportStats.daily_7d.map((b) => {
+                  <div className="flex items-end gap-1 h-28 overflow-x-auto">
+                    {daily.map((b) => {
                       const h = Math.round((b.count / maxVal) * 100)
                       const short = b.day.slice(5)
                       return (
@@ -2268,11 +2286,13 @@ export default function AdminPage() {
             </div>
           )}
 
-          {supportStats && supportStats.top_users_7d.length > 0 && (
+          {supportStats && (supportStats.top_users_30d?.length ?? supportStats.top_users_7d.length) > 0 && (
             <div className="bg-gray-900 border border-gray-800 rounded-2xl p-4 mb-4">
-              <div className="text-xs text-gray-500 mb-3 font-medium">Топ пользователей (7д)</div>
+              <div className="text-xs text-gray-500 mb-3 font-medium">
+                Топ пользователей ({supportStats.period_days ?? 30}д) — клик фильтрует таблицу
+              </div>
               <div className="flex flex-wrap gap-2">
-                {supportStats.top_users_7d.map((u) => (
+                {(supportStats.top_users_30d?.length ? supportStats.top_users_30d : supportStats.top_users_7d).map((u) => (
                   <button
                     key={u.telegram_id}
                     type="button"
@@ -2301,8 +2321,18 @@ export default function AdminPage() {
               onKeyDown={(e) => {
                 if (e.key === "Enter") void fetchSupportMessages()
               }}
-              placeholder="Фильтр по Telegram ID…"
-              className="px-3 py-2 text-sm bg-gray-900 border border-gray-700 rounded-lg text-white placeholder:text-gray-500 outline-none focus:border-blue-500 w-56"
+              placeholder="Telegram ID…"
+              className="px-3 py-2 text-sm bg-gray-900 border border-gray-700 rounded-lg text-white placeholder:text-gray-500 outline-none focus:border-blue-500 w-40"
+            />
+            <input
+              type="text"
+              value={supportSearch}
+              onChange={(e) => setSupportSearch(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") void fetchSupportMessages()
+              }}
+              placeholder="username / текст…"
+              className="px-3 py-2 text-sm bg-gray-900 border border-gray-700 rounded-lg text-white placeholder:text-gray-500 outline-none focus:border-blue-500 w-48"
             />
             <button
               type="button"
@@ -2413,8 +2443,19 @@ export default function AdminPage() {
               </table>
             </div>
             {supportMessages && supportMessages.total > supportMessages.messages.length && (
-              <div className="px-4 py-2 text-xs text-gray-500 border-t border-gray-800">
-                Показаны последние {supportMessages.messages.length} из {supportMessages.total}.
+              <div className="px-4 py-2 text-xs text-gray-500 border-t border-gray-800 flex items-center justify-between gap-2">
+                <span>
+                  Показаны {supportMessages.messages.length} из {supportMessages.total} (новые сверху).
+                </span>
+                <button
+                  type="button"
+                  className="text-blue-400 hover:text-blue-300"
+                  onClick={() =>
+                    void fetchSupportMessages({ offset: supportMessages.messages.length })
+                  }
+                >
+                  Загрузить ещё
+                </button>
               </div>
             )}
           </div>

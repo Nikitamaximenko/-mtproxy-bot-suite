@@ -7473,23 +7473,29 @@ class SupportAiStatsResponse(BaseModel):
     total: int
     last_24h: int
     last_7d: int
+    last_30d: int = 0
     unique_users_total: int
     unique_users_7d: int
+    unique_users_30d: int = 0
     errors_total: int
     avg_duration_ms: int | None
     last_message_at: datetime | None
     daily_7d: list[SupportAiDailyBucket]
     top_users_7d: list[SupportAiTopUser]
+    daily_30d: list[SupportAiDailyBucket] = []
+    top_users_30d: list[SupportAiTopUser] = []
+    period_days: int = 30
 
 
 @app.get("/admin/support/messages", response_model=SupportAiMessagesResponse)
 def admin_support_messages(
     req: Request,
     db: Session = Depends(get_db),
-    limit: int = 100,
+    limit: int = 300,
     offset: int = 0,
     tg_id: int | None = None,
     only_errors: bool = False,
+    search: str | None = Query(None, description="username, user_text fragment"),
 ) -> SupportAiMessagesResponse:
     _require_admin(req)
     limit = max(1, min(int(limit or 100), 500))
@@ -7503,6 +7509,19 @@ def admin_support_messages(
     if only_errors:
         total_q = total_q.where(SupportAiMessage.ok.is_(False))
         list_q = list_q.where(SupportAiMessage.ok.is_(False))
+    search_clean = (search or "").strip()
+    if search_clean:
+        like = f"%{search_clean}%"
+        search_cond = or_(
+            SupportAiMessage.user_text.ilike(like),
+            SupportAiMessage.assistant_text.ilike(like),
+            SupportAiMessage.username.ilike(like),
+            SupportAiMessage.error.ilike(like),
+        )
+        if search_clean.isdigit():
+            search_cond = or_(search_cond, SupportAiMessage.telegram_id == int(search_clean))
+        total_q = total_q.where(search_cond)
+        list_q = list_q.where(search_cond)
 
     total = int(db.execute(total_q).scalar() or 0)
     rows = (
@@ -7530,13 +7549,59 @@ def admin_support_messages(
     return SupportAiMessagesResponse(messages=items, total=total)
 
 
+def _support_daily_buckets(db: Session, *, since: datetime, span_days: int) -> list[SupportAiDailyBucket]:
+    now = utcnow()
+    buckets: dict[str, int] = {}
+    for i in range(span_days):
+        d = (now - timedelta(days=span_days - 1 - i)).date().isoformat()
+        buckets[d] = 0
+    recent_rows = (
+        db.execute(
+            select(SupportAiMessage.created_at).where(SupportAiMessage.created_at >= since)
+        )
+        .scalars()
+        .all()
+    )
+    for ts in recent_rows:
+        if ts is None:
+            continue
+        key = ts.date().isoformat()
+        if key in buckets:
+            buckets[key] += 1
+    return [SupportAiDailyBucket(day=d, count=c) for d, c in buckets.items()]
+
+
+def _support_top_users(db: Session, *, since: datetime, limit: int = 15) -> list[SupportAiTopUser]:
+    top_rows = db.execute(
+        select(
+            SupportAiMessage.telegram_id,
+            func.count(SupportAiMessage.id).label("cnt"),
+            func.max(SupportAiMessage.username).label("username"),
+        )
+        .where(SupportAiMessage.created_at >= since)
+        .group_by(SupportAiMessage.telegram_id)
+        .order_by(func.count(SupportAiMessage.id).desc())
+        .limit(limit)
+    ).all()
+    return [
+        SupportAiTopUser(telegram_id=int(r[0]), username=r[2], count=int(r[1]))
+        for r in top_rows
+    ]
+
+
 @app.get("/admin/support/stats", response_model=SupportAiStatsResponse)
-def admin_support_stats(req: Request, db: Session = Depends(get_db)) -> SupportAiStatsResponse:
+def admin_support_stats(
+    req: Request,
+    db: Session = Depends(get_db),
+    period_days: int = Query(30, ge=7, le=90),
+) -> SupportAiStatsResponse:
     _require_admin(req)
     now = utcnow()
     day = timedelta(days=1)
     since_24h = now - day
     since_7d = now - timedelta(days=7)
+    since_30d = now - timedelta(days=30)
+    since_period = now - timedelta(days=period_days)
 
     total = int(
         db.execute(select(func.count(SupportAiMessage.id))).scalar() or 0
@@ -7557,6 +7622,14 @@ def admin_support_stats(req: Request, db: Session = Depends(get_db)) -> SupportA
         ).scalar()
         or 0
     )
+    last_30d = int(
+        db.execute(
+            select(func.count(SupportAiMessage.id)).where(
+                SupportAiMessage.created_at >= since_30d
+            )
+        ).scalar()
+        or 0
+    )
     unique_users_total = int(
         db.execute(select(func.count(func.distinct(SupportAiMessage.telegram_id)))).scalar()
         or 0
@@ -7565,6 +7638,14 @@ def admin_support_stats(req: Request, db: Session = Depends(get_db)) -> SupportA
         db.execute(
             select(func.count(func.distinct(SupportAiMessage.telegram_id))).where(
                 SupportAiMessage.created_at >= since_7d
+            )
+        ).scalar()
+        or 0
+    )
+    unique_users_30d = int(
+        db.execute(
+            select(func.count(func.distinct(SupportAiMessage.telegram_id))).where(
+                SupportAiMessage.created_at >= since_30d
             )
         ).scalar()
         or 0
@@ -7584,56 +7665,27 @@ def admin_support_stats(req: Request, db: Session = Depends(get_db)) -> SupportA
 
     last_at = db.execute(select(func.max(SupportAiMessage.created_at))).scalar()
 
-    # Daily buckets for last 7 days (инициализируем нулями, чтобы в графике не было пропусков).
-    buckets: dict[str, int] = {}
-    for i in range(7):
-        d = (now - timedelta(days=6 - i)).date().isoformat()
-        buckets[d] = 0
-    recent_rows = (
-        db.execute(
-            select(SupportAiMessage.created_at).where(
-                SupportAiMessage.created_at >= now - timedelta(days=7)
-            )
-        )
-        .scalars()
-        .all()
-    )
-    for ts in recent_rows:
-        if ts is None:
-            continue
-        key = ts.date().isoformat()
-        if key in buckets:
-            buckets[key] += 1
-    daily = [SupportAiDailyBucket(day=d, count=c) for d, c in buckets.items()]
-
-    # Top users last 7d.
-    top_rows = db.execute(
-        select(
-            SupportAiMessage.telegram_id,
-            func.count(SupportAiMessage.id).label("cnt"),
-            func.max(SupportAiMessage.username).label("username"),
-        )
-        .where(SupportAiMessage.created_at >= since_7d)
-        .group_by(SupportAiMessage.telegram_id)
-        .order_by(func.count(SupportAiMessage.id).desc())
-        .limit(10)
-    ).all()
-    top_users = [
-        SupportAiTopUser(telegram_id=int(r[0]), username=r[2], count=int(r[1]))
-        for r in top_rows
-    ]
+    daily_7d = _support_daily_buckets(db, since=since_7d, span_days=7)
+    daily_30d = _support_daily_buckets(db, since=since_period, span_days=period_days)
+    top_users_7d = _support_top_users(db, since=since_7d, limit=10)
+    top_users_30d = _support_top_users(db, since=since_period, limit=15)
 
     return SupportAiStatsResponse(
         total=total,
         last_24h=last_24h,
         last_7d=last_7d,
+        last_30d=last_30d,
         unique_users_total=unique_users_total,
         unique_users_7d=unique_users_7d,
+        unique_users_30d=unique_users_30d,
         errors_total=errors_total,
         avg_duration_ms=avg_duration_ms,
         last_message_at=last_at,
-        daily_7d=daily,
-        top_users_7d=top_users,
+        daily_7d=daily_7d,
+        top_users_7d=top_users_7d,
+        daily_30d=daily_30d,
+        top_users_30d=top_users_30d,
+        period_days=period_days,
     )
 
 

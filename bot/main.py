@@ -340,6 +340,35 @@ async def backend_post(session: aiohttp.ClientSession, path: str, payload: dict[
         _log.warning("backend_post %s failed: %s", path, exc)
 
 
+async def _log_support_round(
+    session: aiohttp.ClientSession,
+    *,
+    tg_id: int,
+    username: str | None,
+    user_text: str,
+    assistant_text: str,
+    model: str | None = None,
+    duration_ms: int | None = None,
+    ok: bool = True,
+    error: str | None = None,
+) -> None:
+    """Всегда пишем диалог в БД для админки — даже если ИИ-помощник выключен."""
+    await backend_post(
+        session,
+        "/internal/support/message",
+        {
+            "telegram_id": int(tg_id),
+            "username": username,
+            "user_text": user_text[:4096],
+            "assistant_text": assistant_text[:4096],
+            "model": model,
+            "duration_ms": duration_ms,
+            "ok": ok,
+            "error": error,
+        },
+    )
+
+
 async def backend_post_json(session: aiohttp.ClientSession, path: str, payload: dict[str, Any]) -> dict[str, Any]:
     url = f"{BACKEND_BASE_URL}{path}"
     headers = {**_internal_headers(), "Content-Type": "application/json"}
@@ -1646,29 +1675,39 @@ async def main() -> None:
                 _log.info("support_ai: reply sent tg_id=%s len=%s ms=%s ok=%s", tg_id, len(reply), duration_ms, reply_ok)
                 uname = message.from_user.username if message.from_user else None
                 asyncio.create_task(
-                    backend_post(
+                    _log_support_round(
                         session,
-                        "/internal/support/message",
-                        {
-                            "telegram_id": int(tg_id),
-                            "username": uname,
-                            "user_text": t[:4096],
-                            "assistant_text": reply[:4096],
-                            "model": SUPPORT_AI_MODEL,
-                            "duration_ms": duration_ms,
-                            "ok": reply_ok,
-                            "error": reply_err,
-                        },
+                        tg_id=tg_id,
+                        username=uname,
+                        user_text=t,
+                        assistant_text=reply,
+                        model=SUPPORT_AI_MODEL,
+                        duration_ms=duration_ms,
+                        ok=reply_ok,
+                        error=reply_err,
                     )
                 )
             return
 
         data = await state.get_data()
         sc_chat = bool(data.get("support_show_cancel", True))
-        await message.answer(
+        fallback = (
             "Сообщение получено. Автоответ помощника сейчас недоступен — "
-            "попробуйте позже, /status или «Купить / продлить подписку» в /start.",
-            reply_markup=support_chat_kb(show_cancel_autopay=sc_chat),
+            "попробуйте позже, /status или «Купить / продлить подписку» в /start."
+        )
+        await message.answer(fallback, reply_markup=support_chat_kb(show_cancel_autopay=sc_chat))
+        uname = message.from_user.username if message.from_user else None
+        asyncio.create_task(
+            _log_support_round(
+                session,
+                tg_id=tg_id,
+                username=uname,
+                user_text=t,
+                assistant_text=fallback,
+                model=None,
+                ok=True,
+                error="ai_support_disabled",
+            )
         )
 
     @dp.message(StateFilter(SupportStates.chatting))
