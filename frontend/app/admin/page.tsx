@@ -2200,9 +2200,9 @@ export default function AdminPage() {
           </p>
           {supportStats && (supportStats.last_24h ?? 0) === 0 && (supportStats.total ?? 0) > 0 && (
             <div className="mb-4 px-4 py-3 rounded-xl border border-amber-800/60 bg-amber-950/40 text-sm text-amber-100/95">
-              С <strong>22 мая</strong> новых записей нет: на боте выключен ИИ-поддержки (нет OPENROUTER ключа).
-              Пользователи пишут в /support, но в БД не попадало — сейчас исправлено, новые сообщения будут видны.
-              Последнее в базе: {supportStats.last_message_at ? formatDate(supportStats.last_message_at) : "—"}.
+              Долго не было новых диалогов в БД (последнее:{" "}
+              {supportStats.last_message_at ? formatDate(supportStats.last_message_at) : "—"}).
+              Сейчас сообщения в /support логируются; если ИИ не отвечает — проверьте ключ OpenRouter на VPS (обычный API key, не provisioning).
             </div>
           )}
 
