@@ -18,6 +18,7 @@ node_modules/
 .env.local
 .env.*.local
 .env.audit
+bot/.openrouter_inference_key
 
 # Cursor / local audit NDJSON (не коммитить)
 .cursor/debug-*.log
