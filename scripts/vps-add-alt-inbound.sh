@@ -35,6 +35,7 @@ cur.execute(
         user_id,
         f"{remark}-alt-{ALT}",
         listen or "",
+        ALT,
         protocol,
         settings,
         stream_settings,
