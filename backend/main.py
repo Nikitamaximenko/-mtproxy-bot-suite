@@ -11,6 +11,7 @@ import logging
 import os
 import re
 import socket
+import subprocess
 import time
 import urllib.error
 import urllib.request
@@ -181,6 +182,38 @@ XRAY_ALT_PORT = int((os.getenv("XRAY_ALT_PORT") or "2053").strip() or "0")
 # Amnezia VPN (отдельная ветка, whitelist в таблице amnezia_access)
 AMNEZIA_SERVER_IP = (os.getenv("AMNEZIA_SERVER_IP") or XRAY_SERVER_IP or "").strip()
 AMNEZIA_APP_URL = (os.getenv("AMNEZIA_APP_URL") or "https://amnezia.org/ru").strip()
+AMNEZIA_AWG_DIR = Path((os.getenv("AMNEZIA_AWG_DIR") or "/root/awg").strip())
+AMNEZIA_MANAGE_SCRIPT = Path(
+    (os.getenv("AMNEZIA_MANAGE_SCRIPT") or str(AMNEZIA_AWG_DIR / "manage_amneziawg.sh")).strip()
+)
+
+# Admin-пилот: основной стек Amnezia только для перечисленных telegram_id (см. docs/AMNEZIA_PIVOT.md)
+VPN_STACK_PILOT_PRIMARY = (os.getenv("VPN_STACK_PILOT_PRIMARY") or "amnezia").strip().lower()
+
+
+def _vpn_stack_pilot_telegram_ids() -> set[int]:
+    raw = (
+        os.getenv("VPN_STACK_PILOT_TG_IDS")
+        or os.getenv("BOT_ADMIN_TELEGRAM_IDS")
+        or "231115635"
+    ).strip()
+    ids: set[int] = set()
+    for part in raw.split(","):
+        p = part.strip()
+        if p.isdigit():
+            ids.add(int(p))
+    return ids
+
+
+def _is_vpn_stack_pilot(telegram_id: int) -> bool:
+    return int(telegram_id) in _vpn_stack_pilot_telegram_ids()
+
+
+def _vpn_stack_primary_for(telegram_id: int) -> str:
+    if _is_vpn_stack_pilot(telegram_id) and VPN_STACK_PILOT_PRIMARY in ("amnezia", "vless"):
+        return VPN_STACK_PILOT_PRIMARY
+    return "vless"
+
 
 # Internal API token for frontend-to-backend calls (prevents direct public access)
 INTERNAL_API_TOKEN = (os.getenv("INTERNAL_API_TOKEN") or "").strip()
@@ -4422,6 +4455,50 @@ def vpn_config(telegram_id: int, req: Request, db: Session = Depends(get_db)) ->
     )
 
 
+# ── VPN stack (admin pilot) ───────────────────────────────────────────────────
+
+
+class VpnStackResponse(BaseModel):
+    pilot: bool = False
+    primary: str = "vless"  # amnezia | vless
+    vless_available: bool = False
+    amnezia_eligible: bool = False
+    amnezia_has_key: bool = False
+    server_ip: str | None = None
+    docs_url: str = "docs/AMNEZIA_PIVOT.md"
+
+
+@app.get("/vpn/stack/{telegram_id}", response_model=VpnStackResponse)
+def vpn_stack(telegram_id: int, db: Session = Depends(get_db)) -> VpnStackResponse:
+    """Какой VPN-стек показывать в боте (пилот Amnezia только для VPN_STACK_PILOT_TG_IDS)."""
+    primary = _vpn_stack_primary_for(telegram_id)
+    row = _amnezia_access_row(db, telegram_id)
+    amz_eligible = row is not None
+    amz_key = bool(
+        row and ((row.vpn_key or "").strip() or (row.wg_conf or "").strip())
+    )
+    vless_ok = False
+    if XRAY_API_URL:
+        paid = db.execute(
+            select(Subscription)
+            .where(
+                Subscription.telegram_id == telegram_id,
+                Subscription.payment_status.in_(SUBSCRIPTION_ACCESS_STATUSES),
+                Subscription.expires_at > utcnow(),
+            )
+            .limit(1)
+        ).scalar_one_or_none()
+        vless_ok = paid is not None and not (paid.access_suspended or paid.access_blocked_reason)
+    return VpnStackResponse(
+        pilot=_is_vpn_stack_pilot(telegram_id),
+        primary=primary,
+        vless_available=vless_ok,
+        amnezia_eligible=amz_eligible,
+        amnezia_has_key=amz_key,
+        server_ip=AMNEZIA_SERVER_IP or XRAY_SERVER_IP or None,
+    )
+
+
 # ── Amnezia VPN (отдельная ветка, whitelist) ─────────────────────────────────
 
 
@@ -4439,6 +4516,42 @@ def _amnezia_peer_name(row: AmneziaAccess) -> str:
     if custom:
         return custom
     return f"tg_{int(row.telegram_id)}"
+
+
+def _amnezia_read_peer_artifacts(peer_name: str) -> tuple[str, str]:
+    """Читает vpn:// и .conf с диска VPS после manage_amneziawg.sh add."""
+    base = AMNEZIA_AWG_DIR
+    vpn_key = ""
+    wg_conf = ""
+    vpnuri = base / f"{peer_name}.vpnuri"
+    conf = base / f"{peer_name}.conf"
+    if vpnuri.is_file():
+        vpn_key = vpnuri.read_text(encoding="utf-8", errors="replace").strip()
+    if conf.is_file():
+        wg_conf = conf.read_text(encoding="utf-8", errors="replace").strip()
+    return vpn_key, wg_conf
+
+
+def _amnezia_provision_peer_on_host(peer_name: str) -> tuple[str, str]:
+    """Запуск manage_amneziawg.sh add (только на VPS с установленным awg)."""
+    if not AMNEZIA_MANAGE_SCRIPT.is_file():
+        raise HTTPException(
+            status_code=503,
+            detail=f"Amnezia manage script not found: {AMNEZIA_MANAGE_SCRIPT}",
+        )
+    conf_path = AMNEZIA_AWG_DIR / f"{peer_name}.conf"
+    if not conf_path.is_file():
+        proc = subprocess.run(
+            [str(AMNEZIA_MANAGE_SCRIPT), "add", peer_name],
+            cwd=str(AMNEZIA_AWG_DIR),
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
+        if proc.returncode != 0:
+            err = (proc.stderr or proc.stdout or "").strip()[:500]
+            raise HTTPException(status_code=500, detail=f"awg add failed: {err or proc.returncode}")
+    return _amnezia_read_peer_artifacts(peer_name)
 
 
 class AmneziaEligibleResponse(BaseModel):
@@ -4524,7 +4637,18 @@ class AdminAmneziaAccessItem(BaseModel):
     label: str | None = None
     active: bool = True
     has_key: bool = False
+    has_conf: bool = False
+    awg_peer_name: str | None = None
     updated_at: datetime | None = None
+
+
+class AdminAmneziaProvisionResponse(BaseModel):
+    ok: bool
+    telegram_id: int
+    awg_peer_name: str
+    has_vpn_key: bool
+    has_wg_conf: bool
+    message: str
 
 
 class AdminAmneziaAccessUpsertRequest(BaseModel):
@@ -4554,6 +4678,7 @@ def admin_list_amnezia_access(req: Request, db: Session = Depends(get_db)) -> Ad
             active=bool(r.active),
             has_key=bool((r.vpn_key or "").strip() or (r.wg_conf or "").strip()),
             has_conf=bool((r.wg_conf or "").strip()),
+            awg_peer_name=_amnezia_peer_name(r),
             updated_at=r.updated_at,
         )
         for r in rows
@@ -4625,7 +4750,53 @@ def admin_upsert_amnezia_access(
         active=bool(row.active),
         has_key=bool((row.vpn_key or "").strip() or (row.wg_conf or "").strip()),
         has_conf=bool((row.wg_conf or "").strip()),
+        awg_peer_name=_amnezia_peer_name(row),
         updated_at=row.updated_at,
+    )
+
+
+@app.post(
+    "/admin/amnezia-access/{telegram_id}/provision",
+    response_model=AdminAmneziaProvisionResponse,
+)
+def admin_provision_amnezia_access(
+    telegram_id: int,
+    req: Request,
+    db: Session = Depends(get_db),
+) -> AdminAmneziaProvisionResponse:
+    """Создать peer на VPS (manage_amneziawg.sh) и записать ключи в БД. Admin / пилот."""
+    _require_admin(req)
+    tg = int(telegram_id)
+    peer = f"tg_{tg}"
+    row = db.execute(select(AmneziaAccess).where(AmneziaAccess.telegram_id == tg)).scalar_one_or_none()
+    now = utcnow()
+    if row is None:
+        row = AmneziaAccess(
+            telegram_id=tg,
+            vpn_key="",
+            wg_conf="",
+            awg_peer_name=peer,
+            key_format="vpn",
+            active=True,
+            created_at=now,
+            updated_at=now,
+        )
+        db.add(row)
+    row.awg_peer_name = peer
+    vpn_key, wg_conf = _amnezia_provision_peer_on_host(peer)
+    if not vpn_key and not wg_conf:
+        raise HTTPException(status_code=500, detail="Peer created but no vpn:// or .conf on disk")
+    row.vpn_key = vpn_key
+    row.wg_conf = wg_conf
+    row.updated_at = now
+    db.commit()
+    return AdminAmneziaProvisionResponse(
+        ok=True,
+        telegram_id=tg,
+        awg_peer_name=peer,
+        has_vpn_key=bool(vpn_key),
+        has_wg_conf=bool(wg_conf),
+        message="Peer provisioned; user should re-import in AmneziaVPN (delete old profile first).",
     )
 
 

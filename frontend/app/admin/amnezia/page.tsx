@@ -35,6 +35,7 @@ export default function AdminAmneziaPage() {
   const [vpnKey, setVpnKey] = useState("")
   const [label, setLabel] = useState("")
   const [saving, setSaving] = useState(false)
+  const [provisioning, setProvisioning] = useState<number | null>(null)
 
   const load = useCallback(async (adminKey: string) => {
     setLoading(true)
@@ -97,6 +98,24 @@ export default function AdminAmneziaPage() {
     }
   }
 
+  async function handleProvision(telegramId: number) {
+    if (!key) return
+    setProvisioning(telegramId)
+    setError(null)
+    try {
+      await fetchAdminJson<{ ok: boolean; message: string }>(
+        `/api/admin/amnezia-access/${telegramId}/provision`,
+        key,
+        { method: "POST" }
+      )
+      await load(key)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Provision failed (run on VPS with /root/awg)")
+    } finally {
+      setProvisioning(null)
+    }
+  }
+
   async function handleDelete(telegramId: number) {
     if (!key || !confirm(`Удалить доступ Amnezia для ${telegramId}?`)) return
     try {
@@ -123,13 +142,17 @@ export default function AdminAmneziaPage() {
         />
 
         <div className="max-w-3xl space-y-6">
+          <div className="rounded-xl border border-amber-500/40 bg-amber-500/10 px-4 py-3 text-sm">
+            <b>Пилот Amnezia</b> — только admin (<code>VPN_STACK_PILOT_TG_IDS</code>). Остальные
+            пользователи по-прежнему на VLESS. Стратегия:{" "}
+            <code className="text-xs">docs/AMNEZIA_PIVOT.md</code>
+          </div>
           <p className="text-sm text-muted-foreground">
-            Установка на VPS — через приложение{" "}
+            Установка на VPS —{" "}
             <a href="https://amnezia.org/ru" className="text-primary underline" target="_blank" rel="noreferrer">
               AmneziaVPN
             </a>
-            . Гостевой ключ <code className="text-xs">vpn://…</code> из Share → Share VPN Access.
-            Инструкция в репозитории: <code className="text-xs">docs/AMNEZIA_SETUP.md</code>
+            . Ключ вручную из Share или кнопка <b>Provision</b> (VPS + <code>manage_amneziawg.sh</code>).
           </p>
 
           <form onSubmit={handleSave} className="bg-card border border-border rounded-xl p-5 space-y-4">
@@ -187,14 +210,25 @@ export default function AdminAmneziaPage() {
                         {item.has_key ? "✅ ключ выдан" : "⏳ без ключа"} · {item.active ? "активен" : "выкл"}
                       </p>
                     </div>
-                    <button
-                      type="button"
-                      onClick={() => handleDelete(item.telegram_id)}
-                      className="p-2 text-destructive hover:bg-destructive/10 rounded-lg"
-                      title="Удалить"
-                    >
-                      <Trash2 className="w-4 h-4" />
-                    </button>
+                    <div className="flex gap-1 shrink-0">
+                      <button
+                        type="button"
+                        onClick={() => handleProvision(item.telegram_id)}
+                        disabled={provisioning === item.telegram_id}
+                        className="px-2 py-1 text-xs rounded-lg border border-border hover:bg-muted disabled:opacity-50"
+                        title="Создать peer на VPS"
+                      >
+                        {provisioning === item.telegram_id ? "…" : "Provision"}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleDelete(item.telegram_id)}
+                        className="p-2 text-destructive hover:bg-destructive/10 rounded-lg"
+                        title="Удалить"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    </div>
                   </li>
                 ))}
               </ul>

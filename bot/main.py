@@ -136,16 +136,31 @@ def _miniapp_url(tg_id: int) -> str:
     return f"{base}{path}?tg_id={tg_id}&v={v}"
 
 
-def main_menu_kb(tg_id: int, *, show_amnezia: bool = False) -> InlineKeyboardMarkup:
+def main_menu_kb(
+    tg_id: int,
+    *,
+    show_amnezia: bool = False,
+    pilot_primary_amnezia: bool = False,
+) -> InlineKeyboardMarkup:
     rows: list[list[InlineKeyboardButton]] = [
         [InlineKeyboardButton(text="🎁 Бесплатный день", callback_data="menu:trial")],
         [InlineKeyboardButton(text="💳 Купить / продлить подписку", callback_data="menu:buy_in_bot")],
-        [InlineKeyboardButton(text="🛡 Подключить VPN (Frosty)", callback_data="menu:connect")],
     ]
-    if show_amnezia:
+    if pilot_primary_amnezia:
         rows.append(
-            [InlineKeyboardButton(text="🌿 Amnezia VPN (RU+)", callback_data="menu:amnezia")]
+            [InlineKeyboardButton(text="🛡 Подключить VPN (Amnezia)", callback_data="menu:connect")]
         )
+        rows.append(
+            [InlineKeyboardButton(text="⚙️ VLESS Happ (тест, устар.)", callback_data="menu:connect_vless")]
+        )
+    else:
+        rows.append(
+            [InlineKeyboardButton(text="🛡 Подключить VPN (Frosty)", callback_data="menu:connect")]
+        )
+        if show_amnezia:
+            rows.append(
+                [InlineKeyboardButton(text="🌿 Amnezia VPN (RU+)", callback_data="menu:amnezia")]
+            )
     rows.extend(
         [
             [InlineKeyboardButton(text="🧊 Открыть мини-апп", web_app=WebAppInfo(url=_miniapp_url(tg_id)))],
@@ -164,9 +179,26 @@ async def _amnezia_menu_visible(session: aiohttp.ClientSession, tg_id: int) -> b
         return False
 
 
+async def _fetch_vpn_stack(session: aiohttp.ClientSession, tg_id: int) -> dict:
+    try:
+        return await backend_get(session, f"/vpn/stack/{tg_id}")
+    except Exception:
+        return {}
+
+
 async def main_menu_kb_for(session: aiohttp.ClientSession, tg_id: int) -> InlineKeyboardMarkup:
-    show = await _amnezia_menu_visible(session, tg_id)
-    return main_menu_kb(tg_id, show_amnezia=show)
+    stack = await _fetch_vpn_stack(session, tg_id)
+    pilot = bool(stack.get("pilot"))
+    primary = (stack.get("primary") or "vless").strip().lower()
+    pilot_amnezia = pilot and primary == "amnezia"
+    show_amnezia = await _amnezia_menu_visible(session, tg_id)
+    if pilot_amnezia:
+        show_amnezia = True
+    return main_menu_kb(
+        tg_id,
+        show_amnezia=show_amnezia,
+        pilot_primary_amnezia=pilot_amnezia,
+    )
 
 
 def checkout_provider_kb(tg_id: int) -> InlineKeyboardMarkup:
@@ -1446,12 +1478,34 @@ async def main() -> None:
         if action in ("connect", "get_proxy", "get_vpn"):
             await query.answer("Проверяю доступ…")
             tg_uid = query.from_user.id if query.from_user else 0
+            stack = await _fetch_vpn_stack(session, tg_uid)
+            if bool(stack.get("pilot")) and (stack.get("primary") or "").strip().lower() == "amnezia":
+                await _send_amnezia_hub(msg, session, tg_uid)
+                return
             try:
                 await _send_proxy_vpn_bundle(msg, session, tg_uid)
             except Exception as exc:
                 _log.exception("_send_proxy_vpn_bundle failed tg_id=%s: %s", tg_uid, exc)
                 await msg.answer(
                     "Не удалось загрузить VPN-данные. Попробуйте через минуту или напишите /support.",
+                    reply_markup=await main_menu_kb_for(session, tg_uid),
+                )
+            return
+
+        if action == "connect_vless":
+            await query.answer("VLESS (тест)…")
+            tg_uid = query.from_user.id if query.from_user else 0
+            await msg.answer(
+                "⚙️ <b>VLESS / Happ</b> — тестовая ветка (IP может быть заблокирован РКН).\n"
+                "Основной продукт в пилоте — <b>Amnezia</b> (кнопка «Подключить VPN»).",
+                parse_mode="HTML",
+            )
+            try:
+                await _send_proxy_vpn_bundle(msg, session, tg_uid)
+            except Exception as exc:
+                _log.exception("_send_proxy_vpn_bundle pilot vless failed tg_id=%s: %s", tg_uid, exc)
+                await msg.answer(
+                    "Не удалось загрузить VLESS. Используйте Amnezia из главного меню.",
                     reply_markup=await main_menu_kb_for(session, tg_uid),
                 )
             return
