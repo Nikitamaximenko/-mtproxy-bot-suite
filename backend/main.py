@@ -175,6 +175,8 @@ XRAY_SNI = (os.getenv("XRAY_SNI") or "www.microsoft.com").strip()
 XRAY_SERVER_IP = (os.getenv("XRAY_SERVER_IP") or "").strip()
 # xray слушает 443 напрямую (klodbot на другом сервере). См. docs/VPS_PORT_ALLOCATION.md
 XRAY_CLIENT_PORT = int((os.getenv("XRAY_CLIENT_PORT") or "443").strip() or "443")
+# Резервный порт для провайдеров, режущих :443 к зарубежным IP (DPI РКН). 0 = выключить.
+XRAY_ALT_PORT = int((os.getenv("XRAY_ALT_PORT") or "2053").strip() or "0")
 
 # Amnezia VPN (отдельная ветка, whitelist в таблице amnezia_access)
 AMNEZIA_SERVER_IP = (os.getenv("AMNEZIA_SERVER_IP") or XRAY_SERVER_IP or "").strip()
@@ -3850,7 +3852,8 @@ def _xray_build_vless_link(client_uuid: str, port: int | None = None) -> str:
         f"&fp=chrome&pbk={XRAY_PUBLIC_KEY}&sid={XRAY_SHORT_ID}"
         f"&flow=xtls-rprx-vision"
     )
-    return f"vless://{client_uuid}@{XRAY_SERVER_IP}:{client_port}?{params}#FrostyVPN"
+    label = "FrostyVPN" if client_port == XRAY_CLIENT_PORT else f"FrostyVPN-{client_port}"
+    return f"vless://{client_uuid}@{XRAY_SERVER_IP}:{client_port}?{params}#{label}"
 
 
 def _vless_link_port(link: str) -> int | None:
@@ -4407,9 +4410,13 @@ def vpn_config(telegram_id: int, req: Request, db: Session = Depends(get_db)) ->
         return VpnConfigResponse(available=True, reason="creating")
 
     client_uuid, vless_link = result
+    vless_alt: str | None = None
+    if XRAY_ALT_PORT and XRAY_ALT_PORT != XRAY_CLIENT_PORT:
+        vless_alt = _xray_build_vless_link(client_uuid, port=XRAY_ALT_PORT)
     return VpnConfigResponse(
         available=True,
         vless_link=vless_link,
+        vless_link_alt=vless_alt,
         uuid=client_uuid,
         subscription_url=None,
     )

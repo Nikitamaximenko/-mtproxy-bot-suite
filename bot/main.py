@@ -733,6 +733,16 @@ async def _send_proxy_vpn_bundle(message: Message, session: aiohttp.ClientSessio
         )
         return
 
+    alt_block = ""
+    if vless_alt:
+        alt_block = (
+            "\n\n<b>Не работает на Wi‑Fi?</b> Провайдер может резать порт 443.\n"
+            "Добавьте <b>второй профиль</b> — резервный ключ:\n\n"
+            f"<code>{html.escape(vless_alt)}</code>\n"
+            "В Happ включите тот, у кого есть интернет (443 или резерв).\n"
+            "Или ветка <b>AmneziaVPN</b> в меню — другой протокол (UDP), часто обходит DPI."
+        )
+
     await message.answer(
         "🛡 <b>Умный VPN Frosty</b>\n\n"
         "<b>Шаг 1.</b> Установите Happ:\n"
@@ -740,7 +750,8 @@ async def _send_proxy_vpn_bundle(message: Message, session: aiohttp.ClientSessio
         '<a href="https://play.google.com/store/apps/details?id=com.happproxy">Android</a> · '
         '<a href="https://hiddify.com">Mac / Windows</a>\n\n'
         "<b>Шаг 2.</b> Скопируйте ключ и вставьте в Happ: «+» → «Вставить из буфера»\n\n"
-        f"<code>{html.escape(vless)}</code>\n\n"
+        f"<code>{html.escape(vless)}</code>"
+        f"{alt_block}\n\n"
         "⚡ Instagram, TikTok, YouTube — через VPN.\n"
         "До 10 устройств · без лимитов",
         parse_mode="HTML",
