@@ -3844,12 +3844,12 @@ def _xray_build_vless_link(client_uuid: str, port: int | None = None) -> str:
     if not (XRAY_SERVER_IP and XRAY_PUBLIC_KEY):
         return ""
     client_port = int(port if port is not None else XRAY_CLIENT_PORT)
+    # Порядок и минимум полей — Happ иначе даёт N/A на ping (spx/пробел в # ломают импорт).
     params = (
-        f"security=reality&encryption=none&pbk={XRAY_PUBLIC_KEY}"
-        f"&fp=chrome&type=tcp&flow=xtls-rprx-vision"
-        f"&sni={XRAY_SNI}&sid={XRAY_SHORT_ID}&spx=%2F"
+        f"type=tcp&encryption=none&flow=xtls-rprx-vision&security=reality"
+        f"&pbk={XRAY_PUBLIC_KEY}&fp=chrome&sni={XRAY_SNI}&sid={XRAY_SHORT_ID}"
     )
-    label = "Frosty VPN" if client_port == 443 else f"Frosty VPN ({client_port})"
+    label = "FrostyVPN" if client_port == 443 else f"FrostyVPN-{client_port}"
     return f"vless://{client_uuid}@{XRAY_SERVER_IP}:{client_port}?{params}#{label}"
 
 
