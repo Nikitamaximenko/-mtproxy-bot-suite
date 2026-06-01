@@ -1,7 +1,6 @@
 "use client"
 
-import { AdminHeader } from "@/components/admin/AdminHeader"
-import { AdminSidebar } from "@/components/admin/AdminSidebar"
+import { AdminPageChrome } from "@/components/admin/AdminPageChrome"
 import {
   AdminAuthError,
   RegistryUserInfo,
@@ -172,17 +171,12 @@ export default function UsersPage() {
   const analyticsScoped = Boolean(overview?.analytics_scoped) || Boolean(stats?.analytics_scoped)
 
   return (
-    <div className="flex min-h-screen bg-background">
-      <AdminSidebar />
-
-      <div className="flex-1 lg:ml-64">
-        <AdminHeader
-          title="Пользователи"
-          subtitle="Реестр пользователей и доступов по live-данным"
-          note="Автообновление каждые 30 секунд"
-        />
-
-        <main className="p-4 lg:p-6 space-y-6">
+    <AdminPageChrome
+      title="Пользователи"
+      subtitle="Поиск, фильтры, включение VPN"
+      note="Автообновление каждые 30 секунд"
+    >
+      <div className="space-y-6">
           {analyticsScoped ? (
             <div className="rounded-xl border border-warning/30 bg-warning/10 px-4 py-3 text-sm text-foreground">
               Обзор пользователей ограничен серверным списком <code>ANALYTICS_PRODUCTION_TG_IDS</code>.
@@ -389,8 +383,7 @@ export default function UsersPage() {
               </div>
             )}
           </div>
-        </main>
       </div>
-    </div>
+    </AdminPageChrome>
   )
 }

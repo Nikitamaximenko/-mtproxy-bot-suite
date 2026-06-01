@@ -1,112 +1,128 @@
 "use client"
 
+import { ADMIN_NAV_GROUPS } from "@/lib/admin-nav"
+import { ADMIN_STORAGE_KEY } from "@/lib/admin"
 import Link from "next/link"
-import { usePathname } from "next/navigation"
-import {
-  LayoutDashboard,
-  Server,
-  Users,
-  Leaf,
-  BarChart3,
-  Snowflake,
-  LogOut,
-  Menu,
-  X,
-} from "lucide-react"
+import { usePathname, useRouter } from "next/navigation"
+import { LogOut, Menu, Snowflake, X } from "lucide-react"
 import { useState } from "react"
 
-const navItems = [
-  { href: "/admin", label: "Дашборд", icon: LayoutDashboard },
-  { href: "/admin/analytics", label: "Аналитика", icon: BarChart3 },
-  { href: "/admin/servers", label: "Серверы", icon: Server },
-  { href: "/admin/users", label: "Пользователи", icon: Users },
-  { href: "/admin/amnezia", label: "Amnezia VPN", icon: Leaf },
-]
+type AdminSidebarProps = {
+  onLogout?: () => void
+}
 
-export function AdminSidebar() {
+export function AdminSidebar({ onLogout }: AdminSidebarProps) {
   const pathname = usePathname()
+  const router = useRouter()
   const [mobileOpen, setMobileOpen] = useState(false)
+
+  const logout = () => {
+    try {
+      localStorage.removeItem(ADMIN_STORAGE_KEY)
+    } catch {
+      /* ignore */
+    }
+    onLogout?.()
+    router.push("/admin")
+  }
 
   return (
     <>
-      {/* Mobile menu button */}
       <button
+        type="button"
         onClick={() => setMobileOpen(true)}
         className="lg:hidden fixed top-4 left-4 z-50 p-2 bg-card rounded-lg shadow-md border border-border"
+        aria-label="Открыть меню"
       >
         <Menu className="w-5 h-5 text-foreground" />
       </button>
 
-      {/* Mobile overlay */}
-      {mobileOpen && (
-        <div 
+      {mobileOpen ? (
+        <div
           className="lg:hidden fixed inset-0 bg-foreground/50 z-40"
           onClick={() => setMobileOpen(false)}
+          aria-hidden
         />
-      )}
+      ) : null}
 
-      {/* Sidebar */}
-      <aside className={`
-        fixed top-0 left-0 h-full w-64 bg-card border-r border-border z-50
+      <aside
+        className={`
+        fixed top-0 left-0 h-full w-64 bg-card border-r border-border z-50 flex flex-col
         transform transition-transform duration-300 ease-in-out
-        lg:translate-x-0 ${mobileOpen ? 'translate-x-0' : '-translate-x-full'}
-      `}>
-        {/* Logo */}
-        <div className="h-16 flex items-center justify-between px-4 border-b border-border">
-          <Link href="/admin" className="flex items-center gap-2">
+        lg:translate-x-0 ${mobileOpen ? "translate-x-0" : "-translate-x-full"}
+      `}
+      >
+        <div className="h-16 flex items-center justify-between px-4 border-b border-border shrink-0">
+          <Link href="/admin" className="flex items-center gap-2" onClick={() => setMobileOpen(false)}>
             <div className="w-9 h-9 rounded-lg bg-primary flex items-center justify-center">
               <Snowflake className="w-5 h-5 text-white" />
             </div>
             <span className="text-lg font-bold text-foreground">Frosty</span>
-            <span className="text-xs bg-primary/10 text-primary px-2 py-0.5 rounded-full font-medium">Admin</span>
+            <span className="text-xs bg-primary/10 text-primary px-2 py-0.5 rounded-full font-medium">
+              Admin
+            </span>
           </Link>
-          <button 
+          <button
+            type="button"
             onClick={() => setMobileOpen(false)}
             className="lg:hidden p-1 hover:bg-secondary rounded"
+            aria-label="Закрыть меню"
           >
             <X className="w-5 h-5 text-muted-foreground" />
           </button>
         </div>
 
-        {/* Navigation */}
-        <nav className="p-4 space-y-1">
-          {navItems.map((item) => {
-            const isActive = pathname === item.href || 
-              (item.href !== "/admin" && pathname.startsWith(item.href))
-            const Icon = item.icon
-            
-            return (
-              <Link
-                key={item.href}
-                href={item.href}
-                onClick={() => setMobileOpen(false)}
-                className={`
-                  flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium
-                  transition-colors duration-200
-                  ${isActive 
-                    ? 'bg-primary text-white' 
-                    : 'text-muted-foreground hover:bg-secondary hover:text-foreground'
-                  }
-                `}
-              >
-                <Icon className="w-5 h-5" />
-                {item.label}
-              </Link>
-            )
-          })}
+        <nav className="flex-1 overflow-y-auto p-3 space-y-5">
+          {ADMIN_NAV_GROUPS.map((group) => (
+            <div key={group.label}>
+              <p className="px-3 mb-1.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                {group.label}
+              </p>
+              <div className="space-y-0.5">
+                {group.items.map((item) => {
+                  const isActive =
+                    pathname === item.href ||
+                    (item.href !== "/admin" && pathname.startsWith(item.href))
+                  const Icon = item.icon
+                  return (
+                    <Link
+                      key={item.href}
+                      href={item.href}
+                      onClick={() => setMobileOpen(false)}
+                      title={item.description}
+                      className={`
+                        flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium
+                        transition-colors duration-200
+                        ${
+                          isActive
+                            ? "bg-primary text-primary-foreground"
+                            : "text-muted-foreground hover:bg-secondary hover:text-foreground"
+                        }
+                      `}
+                    >
+                      <Icon className="w-5 h-5 shrink-0" />
+                      <span className="truncate">{item.label}</span>
+                    </Link>
+                  )
+                })}
+              </div>
+            </div>
+          ))}
         </nav>
 
-        {/* Bottom section */}
-        <div className="absolute bottom-0 left-0 right-0 p-4 border-t border-border">
-          <div className="mb-4 rounded-xl bg-secondary/60 px-3 py-2">
-            <p className="text-sm font-medium text-foreground">Live Admin</p>
-            <p className="text-xs text-muted-foreground">Только данные из backend и БД</p>
-          </div>
+        <div className="shrink-0 p-4 border-t border-border space-y-1">
+          <button
+            type="button"
+            onClick={logout}
+            className="flex items-center gap-3 w-full px-3 py-2.5 text-sm text-muted-foreground hover:text-destructive hover:bg-destructive/10 rounded-lg transition-colors"
+          >
+            <LogOut className="w-4 h-4" />
+            Выйти из админки
+          </button>
           <Link
             href="/"
             className="flex items-center justify-center gap-2 w-full px-3 py-2 text-sm text-muted-foreground hover:text-foreground hover:bg-secondary rounded-lg transition-colors"
           >
-            <LogOut className="w-4 h-4" />
             На сайт
           </Link>
         </div>

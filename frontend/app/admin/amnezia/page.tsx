@@ -1,7 +1,6 @@
 "use client"
 
-import { AdminHeader } from "@/components/admin/AdminHeader"
-import { AdminSidebar } from "@/components/admin/AdminSidebar"
+import { AdminPageChrome } from "@/components/admin/AdminPageChrome"
 import {
   AdminAuthError,
   clearStoredAdminKey,
@@ -133,15 +132,11 @@ export default function AdminAmneziaPage() {
   const activeCount = items.filter((i) => i.active).length
 
   return (
-    <div className="min-h-screen bg-background">
-      <AdminSidebar />
-      <main className="lg:pl-64 p-4 lg:p-8">
-        <AdminHeader
-          title="Amnezia VPN"
-          subtitle={`Отдельная ветка для РФ · слотов ${activeCount}/${maxSlots}`}
-        />
-
-        <div className="max-w-3xl space-y-6">
+    <AdminPageChrome
+      title="Amnezia VPN"
+      subtitle={`Пилот · слотов ${activeCount}/${maxSlots}`}
+    >
+      <div className="max-w-3xl space-y-6">
           <div className="rounded-xl border border-amber-500/40 bg-amber-500/10 px-4 py-3 text-sm">
             <b>Пилот Amnezia</b> — только admin (<code>VPN_STACK_PILOT_TG_IDS</code>). Остальные
             пользователи по-прежнему на VLESS. Стратегия:{" "}
@@ -235,7 +230,6 @@ export default function AdminAmneziaPage() {
             )}
           </div>
         </div>
-      </main>
-    </div>
+    </AdminPageChrome>
   )
 }

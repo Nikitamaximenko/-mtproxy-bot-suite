@@ -230,6 +230,27 @@ export function formatTrafficGb(value: number): string {
   return `${value.toLocaleString("ru-RU", { maximumFractionDigits: 1 })} ГБ`
 }
 
+export function checkoutStageLabel(stage: string): string {
+  const labels: Record<string, string> = {
+    backend_checkout_received: "Backend принял checkout",
+    backend_lava_invoice_ready: "Lava вернула ссылку",
+    backend_lava_fallback: "Lava упала, включился fallback",
+    backend_lava_legacy_url: "Использована legacy/fallback ссылка",
+    backend_yookassa_ready: "ЮKassa вернула ссылку",
+    backend_yookassa_failed: "ЮKassa не создала платёж",
+    backend_yookassa_recurring_saved: "ЮKassa сохранила метод для рекурентов",
+    backend_yookassa_recurring_missing: "ЮKassa не сохранила метод для рекурентов",
+    backend_checkout_response: "Backend отдал payment_url",
+    frontend_backend_unreachable: "Frontend не достучался до backend",
+    frontend_backend_error: "Frontend получил ошибку backend",
+    frontend_missing_payment_url: "Frontend не получил payment_url",
+    frontend_checkout_ok: "Frontend получил ссылку и отдал пользователю",
+    trial_vpn_ready: "Пробный день: VPN поднялся успешно",
+    trial_vpn_failed: "Пробный день: VPN не провижился",
+  }
+  return labels[stage] || stage
+}
+
 export function isSubAccessActive(sub: Pick<SubInfo, "payment_status" | "expires_at" | "access_suspended" | "access_blocked_reason">): boolean {
   if (sub.access_suspended) return false
   if (sub.access_blocked_reason) return false
@@ -237,3 +258,77 @@ export function isSubAccessActive(sub: Pick<SubInfo, "payment_status" | "expires
   if (!sub.expires_at) return false
   return new Date(sub.expires_at).getTime() > Date.now()
 }
+
+export type CheckoutLogItem = {
+  id: number
+  source: string
+  stage: string
+  provider: string | null
+  telegram_id: number | null
+  username: string | null
+  email: string | null
+  customer_email: string | null
+  payment_token: string | null
+  ok: boolean
+  payment_url: string | null
+  error: string | null
+  details: string | null
+  created_at: string
+}
+
+export type CheckoutLogsData = {
+  logs: CheckoutLogItem[]
+  total: number
+}
+
+export type CheckoutStats = {
+  total: number
+  last_24h: number
+  errors_total: number
+  errors_24h: number
+  fallback_24h: number
+  last_error_at: string | null
+  last_success_at: string | null
+  stage_24h: { stage: string; total: number; errors: number }[]
+}
+
+export type SupportAiMessage = {
+  id: number
+  telegram_id: number
+  username: string | null
+  user_text: string
+  assistant_text: string
+  model: string | null
+  duration_ms: number | null
+  ok: boolean
+  error: string | null
+  created_at: string
+}
+
+export type SupportAiMessagesData = {
+  messages: SupportAiMessage[]
+  total: number
+}
+
+export type SupportAiStats = {
+  total: number
+  last_24h: number
+  last_7d: number
+  last_30d?: number
+  unique_users_total: number
+  unique_users_7d: number
+  unique_users_30d?: number
+  errors_total: number
+  avg_duration_ms: number | null
+  last_message_at: string | null
+  daily_7d: { day: string; count: number }[]
+  top_users_7d: { telegram_id: number; username: string | null; count: number }[]
+  daily_30d?: { day: string; count: number }[]
+  top_users_30d?: { telegram_id: number; username: string | null; count: number }[]
+  period_days?: number
+}
+
+/** Реальные prod-пользователи для самотеста доступа. */
+export const PRODUCTION_TELEGRAM_IDS = [
+  231115635, 1760841179, 1759725640, 195699085, 282345092, 1069768978,
+] as const

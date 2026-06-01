@@ -1,7 +1,6 @@
 "use client"
 
-import { AdminHeader } from "@/components/admin/AdminHeader"
-import { AdminSidebar } from "@/components/admin/AdminSidebar"
+import { AdminPageChrome } from "@/components/admin/AdminPageChrome"
 import {
   AdminAuthError,
   FunnelStats,
@@ -164,17 +163,12 @@ export default function AnalyticsPage() {
   const trialConversionRate = trialClaimed > 0 ? Math.round((trialConverted / trialClaimed) * 100) : 0
 
   return (
-    <div className="flex min-h-screen bg-background">
-      <AdminSidebar />
-
-      <div className="flex-1 lg:ml-64">
-        <AdminHeader
-          title="Аналитика"
-          subtitle="Только live-статистика из backend и БД"
-          note="Автообновление каждые 30 секунд"
-        />
-
-        <main className="p-4 lg:p-6 space-y-6">
+    <AdminPageChrome
+      title="Аналитика"
+      subtitle="Воронка, выручка, источники"
+      note="Автообновление каждые 30 секунд"
+    >
+      <div className="space-y-6">
           {analyticsScoped ? (
             <div className="rounded-xl border border-warning/30 bg-warning/10 px-4 py-3 text-sm text-foreground">
               Метрики ограничены серверным списком <code>ANALYTICS_PRODUCTION_TG_IDS</code>, не всей базой.
@@ -356,8 +350,7 @@ export default function AnalyticsPage() {
               </div>
             </>
           ) : null}
-        </main>
       </div>
-    </div>
+    </AdminPageChrome>
   )
 }

@@ -23,7 +23,7 @@ from typing import Any, AsyncGenerator, Generator, Literal
 from uuid import UUID, uuid4
 
 from dotenv import load_dotenv
-from fastapi import Body, Depends, FastAPI, HTTPException, Query, Request
+from fastapi import BackgroundTasks, Body, Depends, FastAPI, HTTPException, Query, Request
 from fastapi.responses import JSONResponse, PlainTextResponse, Response
 from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import (
@@ -760,6 +760,7 @@ async def lifespan(application: FastAPI) -> AsyncGenerator[None, None]:
         raise
     task = asyncio.create_task(_expiration_loop())
     vpn_task = asyncio.create_task(_vpn_maintenance_loop())
+    yk_task = asyncio.create_task(_yookassa_reconcile_loop())
 
     async def _startup_reconcile() -> None:
         await asyncio.sleep(15)
@@ -779,6 +780,7 @@ async def lifespan(application: FastAPI) -> AsyncGenerator[None, None]:
     yield
     task.cancel()
     vpn_task.cancel()
+    yk_task.cancel()
 
 
 app = FastAPI(title="MTProxy Backend", version="0.3.0", lifespan=lifespan)
@@ -1250,6 +1252,9 @@ def _reconcile_lava_pending_payments() -> int:
 
 
 YOOKASSA_RECONCILE_LOOKBACK_DAYS = int(os.getenv("YOOKASSA_RECONCILE_LOOKBACK_DAYS", "14").strip() or "14")
+YOOKASSA_RECONCILE_INTERVAL_SEC = int(os.getenv("YOOKASSA_RECONCILE_INTERVAL_SEC", "180").strip() or "180")
+YOOKASSA_TOKEN_RECONCILE_TTL_SEC = int(os.getenv("YOOKASSA_TOKEN_RECONCILE_TTL_SEC", "12").strip() or "12")
+_yookassa_token_reconcile_at: dict[str, float] = {}
 
 
 def _yookassa_iso8601(dt: datetime) -> str:
@@ -1309,6 +1314,106 @@ def _yookassa_checkout_payment_id(db: Session, payment_token: str) -> str | None
     return pay_id or None
 
 
+def _try_apply_yookassa_for_payment_token(db: Session, payment_token: str, *, force: bool = False) -> bool:
+    """Проверить платёж в API ЮKassa по token и применить, если succeeded (webhook не дошёл)."""
+    if not _yookassa_configured():
+        return False
+    token = (payment_token or "").strip()
+    if not token:
+        return False
+    now_ts = time.time()
+    if not force:
+        last = _yookassa_token_reconcile_at.get(token, 0.0)
+        if now_ts - last < YOOKASSA_TOKEN_RECONCILE_TTL_SEC:
+            return False
+    _yookassa_token_reconcile_at[token] = now_ts
+
+    sub = db.execute(select(Subscription).where(Subscription.payment_token == token)).scalar_one_or_none()
+    if sub is None:
+        return False
+    pay_id = _yookassa_checkout_payment_id(db, token)
+    if not pay_id:
+        return False
+    if (sub.yookassa_last_applied_payment_id or "") == pay_id and sub.payment_status == "paid":
+        return False
+
+    verified = _yookassa_get_payment(pay_id)
+    if not isinstance(verified, dict) or str(verified.get("status") or "") != "succeeded":
+        return False
+    meta = verified.get("metadata")
+    if isinstance(meta, dict):
+        meta_token = str(meta.get("payment_token") or "").strip()
+        if meta_token and meta_token != token:
+            logger.warning("YooKassa token mismatch pay_id=%s expected=%s got=%s", pay_id, token, meta_token)
+            return False
+
+    before_status = sub.payment_status
+    before_expires = sub.expires_at
+    try:
+        _apply_yookassa_payment_object(db, verified)
+    except Exception:
+        logger.exception("YooKassa apply-for-token failed pay_id=%s token=%s", pay_id, token)
+        db.rollback()
+        return False
+    db.refresh(sub)
+    changed = (
+        sub.payment_status != before_status
+        or sub.expires_at != before_expires
+        or (sub.yookassa_last_applied_payment_id or "") == pay_id
+    )
+    if changed:
+        logger.info(
+            "YooKassa applied via token reconcile tg_id=%s pay_id=%s %s→%s",
+            sub.telegram_id,
+            pay_id,
+            before_status,
+            sub.payment_status,
+        )
+    return changed
+
+
+def _try_apply_yookassa_for_payment_token_sync(payment_token: str, *, force: bool = False) -> bool:
+    db = SessionLocal()
+    try:
+        return _try_apply_yookassa_for_payment_token(db, payment_token, force=force)
+    finally:
+        db.close()
+
+
+def _reconcile_pending_yookassa_for_tg(db: Session, telegram_id: int) -> bool:
+    """Подтянуть оплату для всех pending-подписок пользователя (оплата из бота без /success)."""
+    rows = (
+        db.execute(
+            select(Subscription).where(
+                Subscription.telegram_id == int(telegram_id),
+                Subscription.payment_status == "pending",
+            )
+        )
+        .scalars()
+        .all()
+    )
+    applied = False
+    for sub in rows:
+        token = (sub.payment_token or "").strip()
+        if token and _try_apply_yookassa_for_payment_token(db, token, force=True):
+            applied = True
+    return applied
+
+
+async def _schedule_yookassa_token_reconcile(payment_token: str) -> None:
+    """После создания ссылки на оплату — несколько попыток применить платёж без webhook."""
+    for delay in (20, 60, 180, 420):
+        await asyncio.sleep(delay)
+        loop = asyncio.get_event_loop()
+        applied = await loop.run_in_executor(
+            None,
+            lambda t=payment_token: _try_apply_yookassa_for_payment_token_sync(t, force=True),
+        )
+        if applied:
+            logger.info("Delayed YooKassa reconcile OK token=%s after %ss", payment_token, delay)
+            return
+
+
 def _reconcile_yookassa_pending_payments() -> int:
     """Применить succeeded-платежи ЮKassa, если webhook не дошёл или подписка осталась trial/expired."""
     if not _yookassa_configured():
@@ -1317,6 +1422,17 @@ def _reconcile_yookassa_pending_payments() -> int:
     applied = 0
     seen_pay_ids: set[str] = set()
     try:
+        # Все pending с недавним checkout ЮKassa — самый частый пропуск (webhook не дошёл).
+        pending_rows = (
+            db.execute(select(Subscription).where(Subscription.payment_status == "pending"))
+            .scalars()
+            .all()
+        )
+        for sub in pending_rows:
+            token = (sub.payment_token or "").strip()
+            if token and _try_apply_yookassa_for_payment_token(db, token, force=True):
+                applied += 1
+
         candidates: list[dict[str, Any]] = []
 
         # Checkout с payment_id в логах (оплата могла пройти при trial/expired в БД).
@@ -1750,7 +1866,17 @@ def _apply_yookassa_payment_object(db: Session, payment: dict[str, Any]) -> None
                 "supported_for_recurring": recurring_supported,
             },
         )
-    logger.info("YooKassa payment applied tg_id=%s renewal=%s", sub.telegram_id, is_renewal)
+    logger.info("YooKassa payment applied tg_id=%s renewal=%s pay_id=%s", sub.telegram_id, is_renewal, pay_id)
+    if not is_renewal:
+        _record_checkout_log(
+            source="backend",
+            stage="backend_yookassa_applied",
+            provider="yookassa",
+            telegram_id=int(sub.telegram_id),
+            payment_token=sub.payment_token,
+            ok=True,
+            details={"payment_id": pay_id or None, "renewal": False},
+        )
     _provision_vpn_after_payment(int(sub.telegram_id), db)
     if sub.proxy_server and sub.proxy_port and sub.proxy_secret:
         proxy_link = f"tg://proxy?server={sub.proxy_server}&port={sub.proxy_port}&secret={sub.proxy_secret}"
@@ -1900,7 +2026,11 @@ def _find_subscription_for_lava_webhook(
 
 
 @app.post("/checkout/create", response_model=CheckoutCreateResponse)
-def checkout_create(payload: CheckoutCreateRequest, db: Session = Depends(get_db)) -> CheckoutCreateResponse:
+def checkout_create(
+    payload: CheckoutCreateRequest,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+) -> CheckoutCreateResponse:
     import random
     username = payload.username.strip() if payload.username else None
     email_raw = payload.email.strip() if payload.email else None
@@ -2042,8 +2172,9 @@ def checkout_create(payload: CheckoutCreateRequest, db: Session = Depends(get_db
             payment_url=payment_url,
             details={"payment_id": yk_payment_id},
         )
-        logger.info("Checkout YooKassa: tg_id=%s token=%s", tg_id, token)
-    return CheckoutCreateResponse(payment_url=payment_url, payment_token=token)
+        logger.info("Checkout YooKassa: tg_id=%s token=%s payment_id=%s", tg_id, token, yk_payment_id)
+        background_tasks.add_task(_schedule_yookassa_token_reconcile, str(token))
+        return CheckoutCreateResponse(payment_url=payment_url, payment_token=token)
 
     lava_contract_id: str | None = None
     lava_top_configured = bool(LAVA_TOP_API_KEY and LAVA_TOP_OFFER_ID)
@@ -2129,6 +2260,21 @@ def checkout_create(payload: CheckoutCreateRequest, db: Session = Depends(get_db
         details={"contract_id": lava_contract_id},
     )
     return CheckoutCreateResponse(payment_url=payment_url, payment_token=token)
+
+
+class ConfirmYookassaResponse(BaseModel):
+    ok: bool
+    applied: bool
+
+
+@app.post("/checkout/confirm-yookassa", response_model=ConfirmYookassaResponse)
+def confirm_yookassa_payment(
+    token: UUID = Query(..., description="payment_token из success URL"),
+    db: Session = Depends(get_db),
+) -> ConfirmYookassaResponse:
+    """Страница success и поллинг: принудительно проверить платёж в API ЮKassa и выдать доступ."""
+    applied = _try_apply_yookassa_for_payment_token(db, str(token), force=True)
+    return ConfirmYookassaResponse(ok=True, applied=applied)
 
 
 def _apply_proxy_credentials(sub: Subscription) -> None:
@@ -2775,6 +2921,21 @@ async def _expiration_loop() -> None:
         await asyncio.sleep(3600)
 
 
+async def _yookassa_reconcile_loop() -> None:
+    """Частый reconcile ЮKassa — webhook на VPS часто не доходит."""
+    await asyncio.sleep(25)
+    loop = asyncio.get_event_loop()
+    interval = max(60, YOOKASSA_RECONCILE_INTERVAL_SEC)
+    while True:
+        try:
+            n = await loop.run_in_executor(None, _reconcile_yookassa_pending_payments)
+            if n:
+                logger.info("YooKassa periodic reconcile: applied=%d", n)
+        except Exception:
+            logger.exception("YooKassa periodic reconcile failed")
+        await asyncio.sleep(interval)
+
+
 async def _vpn_maintenance_loop() -> None:
     """Background loop: VPN traffic sync every 10 minutes."""
     await asyncio.sleep(30)  # short initial delay, after main loop starts
@@ -2920,6 +3081,8 @@ async def yookassa_webhook(req: Request, db: Session = Depends(get_db)) -> Plain
     obj = payload.get("object")
     if not isinstance(obj, dict):
         return PlainTextResponse("OK", status_code=200)
+    pay_id_hint = str(obj.get("id") or "").strip()
+    logger.info("YooKassa webhook: event=%s payment_id=%s", event, pay_id_hint or "?")
 
     # Не Payment: id в object — не payment_id, GET /payments/{id} даст 404.
     if event.startswith("payment_method.") or event.startswith("refund."):
@@ -3509,19 +3672,12 @@ def _has_active_paid_subscription(db: Session, telegram_id: int, now: datetime) 
     return int(n) > 0
 
 
-@app.get("/subscription/{telegram_id}", response_model=SubscriptionResponse)
-def get_subscription(telegram_id: int, req: Request, db: Session = Depends(get_db)) -> SubscriptionResponse:
-    # Status fields (active/expires_at/suspended) are low-sensitivity and served publicly
-    # so Mini App on Vercel can render the paid screen even if INTERNAL_API_TOKEN
-    # is not configured there. proxy_link требует либо X-Internal-Token, либо валидный
-    # X-Telegram-Init-Data для этого tg_id (как /vpn/config) — иначе утечки по перебору tg_id.
-    has_token = _has_valid_internal_token(req)
-    if INTERNAL_API_TOKEN and not has_token:
-        init_hdr = (req.headers.get("X-Telegram-Init-Data") or "").strip()
-        if init_hdr and _verify_telegram_webapp_init_data(init_hdr, int(telegram_id)):
-            has_token = True
-    now = utcnow()
-    sub = (
+def _get_effective_subscription_for_access(
+    db: Session, telegram_id: int, now: datetime | None = None
+) -> Subscription | None:
+    """Одна актуальная подписка на tg_id: paid в приоритете, макс. expires_at (не старая suspended)."""
+    now = now or utcnow()
+    return (
         db.execute(
             select(Subscription)
             .where(
@@ -3539,6 +3695,22 @@ def get_subscription(telegram_id: int, req: Request, db: Session = Depends(get_d
         .scalars()
         .first()
     )
+
+
+@app.get("/subscription/{telegram_id}", response_model=SubscriptionResponse)
+def get_subscription(telegram_id: int, req: Request, db: Session = Depends(get_db)) -> SubscriptionResponse:
+    _reconcile_pending_yookassa_for_tg(db, int(telegram_id))
+    # Status fields (active/expires_at/suspended) are low-sensitivity and served publicly
+    # so Mini App on Vercel can render the paid screen even if INTERNAL_API_TOKEN
+    # is not configured there. proxy_link требует либо X-Internal-Token, либо валидный
+    # X-Telegram-Init-Data для этого tg_id (как /vpn/config) — иначе утечки по перебору tg_id.
+    has_token = _has_valid_internal_token(req)
+    if INTERNAL_API_TOKEN and not has_token:
+        init_hdr = (req.headers.get("X-Telegram-Init-Data") or "").strip()
+        if init_hdr and _verify_telegram_webapp_init_data(init_hdr, int(telegram_id)):
+            has_token = True
+    now = utcnow()
+    sub = _get_effective_subscription_for_access(db, int(telegram_id), now)
 
     if not sub:
         return SubscriptionResponse(
@@ -3600,7 +3772,9 @@ class CheckTokenResponse(BaseModel):
 
 @app.get("/subscription/token/{token}", response_model=CheckTokenResponse)
 def check_token(token: UUID, db: Session = Depends(get_db)) -> CheckTokenResponse:
-    sub = db.execute(select(Subscription).where(Subscription.payment_token == str(token))).scalar_one_or_none()
+    token_str = str(token)
+    _try_apply_yookassa_for_payment_token(db, token_str, force=False)
+    sub = db.execute(select(Subscription).where(Subscription.payment_token == token_str)).scalar_one_or_none()
     if sub is None or sub.payment_status not in SUBSCRIPTION_ACCESS_STATUSES:
         return CheckTokenResponse(found=False)
     now = utcnow()
@@ -4252,19 +4426,12 @@ class VpnToggleResponse(BaseModel):
 
 
 def _active_sub_for_vpn(telegram_id: int, db: Session) -> bool:
-    now = utcnow()
-    stmt = (
-        select(Subscription.id)
-        .where(
-            Subscription.telegram_id == telegram_id,
-            Subscription.payment_status.in_(SUBSCRIPTION_ACCESS_STATUSES),
-            Subscription.expires_at > now,
-            Subscription.access_suspended == False,  # noqa: E712
-            Subscription.access_blocked_reason.is_(None),
-        )
-        .limit(1)
+    sub = _get_effective_subscription_for_access(db, int(telegram_id))
+    return (
+        sub is not None
+        and not sub.access_suspended
+        and sub.access_blocked_reason is None
     )
-    return db.execute(stmt).scalar_one_or_none() is not None
 
 
 @app.get("/vpn/status/{telegram_id}", response_model=VpnStatusResponse)
@@ -4449,16 +4616,7 @@ def vpn_config(telegram_id: int, req: Request, db: Session = Depends(get_db)) ->
         return VpnConfigResponse(available=False, reason="internal_token_required")
 
     now = utcnow()
-    # Проверяем есть ли подписка вообще (paid/trial + expires_at в будущем)
-    paid_sub = db.execute(
-        select(Subscription)
-        .where(
-            Subscription.telegram_id == telegram_id,
-            Subscription.payment_status.in_(SUBSCRIPTION_ACCESS_STATUSES),
-            Subscription.expires_at > now,
-        )
-        .limit(1)
-    ).scalar_one_or_none()
+    paid_sub = _get_effective_subscription_for_access(db, int(telegram_id), now)
 
     if paid_sub is None:
         return VpnConfigResponse(available=False, reason="no_subscription")
@@ -4511,15 +4669,7 @@ def vpn_stack(telegram_id: int, db: Session = Depends(get_db)) -> VpnStackRespon
     )
     vless_ok = False
     if XRAY_API_URL:
-        paid = db.execute(
-            select(Subscription)
-            .where(
-                Subscription.telegram_id == telegram_id,
-                Subscription.payment_status.in_(SUBSCRIPTION_ACCESS_STATUSES),
-                Subscription.expires_at > utcnow(),
-            )
-            .limit(1)
-        ).scalar_one_or_none()
+        paid = _get_effective_subscription_for_access(db, int(telegram_id))
         vless_ok = paid is not None and not (paid.access_suspended or paid.access_blocked_reason)
     return VpnStackResponse(
         pilot=_is_vpn_stack_pilot(telegram_id),

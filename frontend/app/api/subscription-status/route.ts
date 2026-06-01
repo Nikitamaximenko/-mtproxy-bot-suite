@@ -7,7 +7,11 @@ export async function GET(req: NextRequest) {
   const backendUrl = getBackendUrl()
   try {
     if (token) {
-      const res = await fetch(`${backendUrl}/subscription/token/${token}`)
+      await fetch(`${backendUrl}/checkout/confirm-yookassa?token=${encodeURIComponent(token)}`, {
+        method: "POST",
+        cache: "no-store",
+      }).catch(() => null)
+      const res = await fetch(`${backendUrl}/subscription/token/${token}`, { cache: "no-store" })
       if (!res.ok) return NextResponse.json({ active: false })
       const data = await res.json()
       return NextResponse.json({ active: data.found ?? false, proxy_link: data.proxy_link ?? null })

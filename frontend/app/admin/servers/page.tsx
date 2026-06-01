@@ -1,7 +1,6 @@
 "use client"
 
-import { AdminHeader } from "@/components/admin/AdminHeader"
-import { AdminSidebar } from "@/components/admin/AdminSidebar"
+import { AdminPageChrome } from "@/components/admin/AdminPageChrome"
 import {
   AdminAuthError,
   ProxyStatus,
@@ -122,17 +121,12 @@ export default function ServersPage() {
   }, [searchQuery, vpnClients?.clients])
 
   return (
-    <div className="flex min-h-screen bg-background">
-      <AdminSidebar />
-
-      <div className="flex-1 lg:ml-64">
-        <AdminHeader
-          title="Серверы"
-          subtitle="Текущее состояние MTProxy и VPN без выдуманных нод"
-          note="Автообновление каждые 30 секунд"
-        />
-
-        <main className="p-4 lg:p-6 space-y-6">
+    <AdminPageChrome
+      title="Серверы"
+      subtitle="MTProxy и VPN Reality"
+      note="Автообновление каждые 30 секунд"
+    >
+      <div className="space-y-6">
           {error ? (
             <div className="rounded-xl border border-destructive/30 bg-destructive/10 px-4 py-3 text-sm text-destructive">
               {error}
@@ -331,8 +325,7 @@ export default function ServersPage() {
               </table>
             </div>
           </section>
-        </main>
       </div>
-    </div>
+    </AdminPageChrome>
   )
 }
