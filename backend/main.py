@@ -5658,6 +5658,44 @@ def _vpn_user_display_name(db: Session, tg_id: int) -> str:
     return ""
 
 
+def _vpn_server_migration_message(name: str = "") -> str:
+    greeting = f"Здравствуйте, {name}!\n\n" if name else ""
+    return (
+        f"{greeting}"
+        "🚀 <b>Frosty VPN переехал на новый сервер</b>\n\n"
+        "Инфраструктура обновлена — подключение снова <b>стабильно работает</b> "
+        "(Instagram, YouTube, TikTok и др.).\n\n"
+        "⚠️ <b>Старый ключ в Happ больше не действует.</b> Нужно один раз поставить новый "
+        "(подписка и оплата не меняются).\n\n"
+        "📱 <b>Как обновить ключ в Happ:</b>\n"
+        "1. Откройте приложение <b>Happ</b>\n"
+        "2. <b>Удалите</b> старый профиль Frosty (свайп влево → удалить)\n"
+        "3. Нажмите кнопку <b>«Подключить VPN»</b> ниже в этом чате\n"
+        "4. Скопируйте <b>новый ключ</b> из ответа бота\n"
+        "5. В Happ: «+» → «Вставить из буфера» → включите VPN\n\n"
+        "💡 В Happ: режим <b>Global</b>, DNS — <b>Remote</b>.\n\n"
+        "Вопросы — /support"
+    )
+
+
+def _vpn_migration_broadcast_keyboard() -> dict:
+    return {"inline_keyboard": [[{"text": "🛡 Подключить VPN", "callback_data": "menu:connect"}]]}
+
+
+def _broadcast_recipient_ids(db: Session, *, include_opted_out: bool = False) -> list[int]:
+    q = select(User.telegram_id).where(User.telegram_id > 0)
+    if not include_opted_out:
+        q = q.where(User.marketing_opt_out == False)  # noqa: E712
+    seen: set[int] = set()
+    ids: list[int] = []
+    for raw in db.execute(q).scalars().all():
+        uid = int(raw)
+        if uid not in seen:
+            seen.add(uid)
+            ids.append(uid)
+    return ids
+
+
 def _notify_active_vpn_users_vless_refresh(db: Session) -> tuple[int, int]:
     """Персональная рассылка: каждому свой vless:// (uuid уникален), не общий ключ."""
     if not BOT_TOKEN:
@@ -5832,6 +5870,11 @@ class BroadcastRequest(BaseModel):
     include_opted_out: bool = False
     button_text: str | None = Field(None, max_length=64)
     button_url: str | None = Field(None, max_length=2048)
+    button_callback_data: str | None = Field(
+        None,
+        max_length=64,
+        description="callback_data для inline-кнопки (например menu:connect)",
+    )
     # Если True — кнопка открывает мини-апп (web_app) вместо внешней ссылки
     button_web_app: bool = False
 
@@ -5919,12 +5962,15 @@ def admin_broadcast(payload: BroadcastRequest, req: Request, db: Session = Depen
     msg = payload.message.strip()
     kb: dict | None = None
     if payload.button_text:
-        if payload.button_web_app and FRONTEND_URL:
-            # Кнопка открывает мини-апп оплаты внутри Telegram
+        row: dict[str, object] = {"text": payload.button_text}
+        if payload.button_callback_data:
+            row["callback_data"] = payload.button_callback_data.strip()
+        elif payload.button_web_app and FRONTEND_URL:
             miniapp_url = f"{FRONTEND_URL}{MINIAPP_PATH or '/mini'}"
-            kb = {"inline_keyboard": [[{"text": payload.button_text, "web_app": {"url": miniapp_url}}]]}
+            row["web_app"] = {"url": miniapp_url}
         elif payload.button_url:
-            kb = {"inline_keyboard": [[{"text": payload.button_text, "url": payload.button_url}]]}
+            row["url"] = payload.button_url
+        kb = {"inline_keyboard": [[row]]}
 
     t = threading.Thread(target=_broadcast_worker, args=(ids, msg, kb), daemon=True)
     t.start()
@@ -5939,6 +5985,63 @@ def admin_broadcast_status(req: Request) -> BroadcastStatusResponse:
     with _bcast_lock:
         s = dict(_bcast_state)
     return BroadcastStatusResponse(**s)
+
+
+@app.post("/admin/broadcast-vpn-migration", response_model=BroadcastQueuedResponse)
+def admin_broadcast_vpn_migration(req: Request, db: Session = Depends(get_db)) -> BroadcastQueuedResponse:
+    """
+    Рассылка: переезд на новый сервер + гайд Happ + кнопка «Подключить VPN» (menu:connect).
+    Получатели: все пользователи бота (кроме отписавшихся от маркетинга).
+    """
+    _require_admin(req)
+    if not BOT_TOKEN:
+        raise HTTPException(status_code=503, detail="BOT_TOKEN is not configured on backend")
+
+    with _bcast_lock:
+        if _bcast_state["running"]:
+            raise HTTPException(status_code=409, detail="Рассылка уже выполняется — дождитесь завершения")
+
+    ids = _broadcast_recipient_ids(db, include_opted_out=False)
+    kb = _vpn_migration_broadcast_keyboard()
+    messages = [(uid, _vpn_server_migration_message(_vpn_user_display_name(db, uid))) for uid in ids]
+
+    def _worker_migration() -> None:
+        with _bcast_lock:
+            _bcast_state.update(
+                running=True,
+                done=False,
+                total=len(messages),
+                sent=0,
+                failed=0,
+                error=None,
+                started_at=utcnow().isoformat(),
+            )
+        logger.info("VPN migration broadcast started: %s recipients", len(messages))
+        try:
+            for uid, msg in messages:
+                ok = _send_tg(uid, msg, kb)
+                with _bcast_lock:
+                    if ok:
+                        _bcast_state["sent"] += 1
+                    else:
+                        _bcast_state["failed"] += 1
+                time.sleep(0.05)
+        except Exception as exc:
+            with _bcast_lock:
+                _bcast_state["error"] = str(exc)
+            logger.exception("VPN migration broadcast error: %s", exc)
+        finally:
+            with _bcast_lock:
+                _bcast_state["running"] = False
+                _bcast_state["done"] = True
+            logger.info(
+                "VPN migration broadcast done: sent=%s failed=%s",
+                _bcast_state["sent"],
+                _bcast_state["failed"],
+            )
+
+    threading.Thread(target=_worker_migration, daemon=True).start()
+    return BroadcastQueuedResponse(ok=True, queued=True, total=len(ids))
 
 
 class AdminDeactivateRequest(BaseModel):
