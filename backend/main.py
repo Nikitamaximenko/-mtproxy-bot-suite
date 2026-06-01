@@ -4778,6 +4778,9 @@ def _build_clash_config(vless_link: str) -> str:
     if fp:
         proxy_fields.append(f'    client-fingerprint: {fp}')
     proxy_fields.append(f'    network: {network or "tcp"}')
+    flow = q("flow", "")
+    if flow:
+        proxy_fields.append(f'    flow: "{flow}"')
     if network == "ws":
         proxy_fields += [
             '    ws-opts:',
@@ -4805,8 +4808,6 @@ def _build_clash_config(vless_link: str) -> str:
         "  - DOMAIN-SUFFIX,рф,DIRECT",
         # Non-.ru домены топ-50 РФ-приложений → DIRECT
         *[f"  - DOMAIN-SUFFIX,{s},DIRECT" for s in CLASH_SUFFIXES],
-        # РФ IP-диапазоны (приложения с прямым IP) → DIRECT
-        "  - GEOIP,RU,DIRECT,no-resolve",
         # Приватные адреса (LAN) → DIRECT
         "  - IP-CIDR,10.0.0.0/8,DIRECT",
         "  - IP-CIDR,172.16.0.0/12,DIRECT",
@@ -4889,6 +4890,9 @@ def _build_singbox_config(vless_link: str) -> dict:
         "tls": tls_block,
         "domain_strategy": "prefer_ipv4",
     }
+    flow = q("flow", "")
+    if flow:
+        vless_out["flow"] = flow
     if network == "ws":
         vless_out["transport"] = {
             "type": "ws",
