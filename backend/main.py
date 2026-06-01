@@ -174,6 +174,9 @@ XRAY_PUBLIC_KEY = (os.getenv("XRAY_PUBLIC_KEY") or "").strip()
 XRAY_SHORT_ID = (os.getenv("XRAY_SHORT_ID") or "").strip()
 XRAY_SNI = (os.getenv("XRAY_SNI") or "www.microsoft.com").strip()
 XRAY_SERVER_IP = (os.getenv("XRAY_SERVER_IP") or "").strip()
+# Адрес в vless:// (домен как у Hit: SNI = host). Пусто → XRAY_SERVER_IP.
+XRAY_CLIENT_HOST = (os.getenv("XRAY_CLIENT_HOST") or XRAY_SERVER_IP or "").strip()
+XRAY_FP = (os.getenv("XRAY_FP") or "chrome").strip()
 # xray слушает 443 напрямую (klodbot на другом сервере). См. docs/VPS_PORT_ALLOCATION.md
 XRAY_CLIENT_PORT = int((os.getenv("XRAY_CLIENT_PORT") or "443").strip() or "443")
 # Резервный порт для провайдеров, режущих :443 к зарубежным IP (DPI РКН). 0 = выключить.
@@ -3876,17 +3879,22 @@ def _xray_req(method: str, path: str, body: dict | None = None, timeout: int = 8
         return result if status < 300 else None
 
 
+def _xray_vless_host() -> str:
+    return (XRAY_CLIENT_HOST or XRAY_SERVER_IP or "").strip()
+
+
 def _xray_build_vless_link(client_uuid: str, port: int | None = None) -> str:
-    if not (XRAY_SERVER_IP and XRAY_PUBLIC_KEY):
+    host = _xray_vless_host()
+    if not (host and XRAY_PUBLIC_KEY):
         return ""
     client_port = int(port if port is not None else XRAY_CLIENT_PORT)
     params = (
         f"type=tcp&encryption=none&security=reality&sni={XRAY_SNI}"
-        f"&fp=chrome&pbk={XRAY_PUBLIC_KEY}&sid={XRAY_SHORT_ID}"
+        f"&fp={XRAY_FP}&pbk={XRAY_PUBLIC_KEY}&sid={XRAY_SHORT_ID}"
         f"&flow=xtls-rprx-vision"
     )
     label = "FrostyVPN" if client_port == XRAY_CLIENT_PORT else f"FrostyVPN-{client_port}"
-    return f"vless://{client_uuid}@{XRAY_SERVER_IP}:{client_port}?{params}#{label}"
+    return f"vless://{client_uuid}@{host}:{client_port}?{params}#{label}"
 
 
 def _vless_link_port(link: str) -> int | None:
@@ -3903,6 +3911,18 @@ def _vless_link_port(link: str) -> int | None:
     return 443 if link.startswith("vless://") else None
 
 
+def _vless_link_host(link: str) -> str | None:
+    try:
+        parsed = urlsplit(link)
+        if parsed.hostname:
+            return parsed.hostname
+        if parsed.netloc and "@" in parsed.netloc:
+            return parsed.netloc.rsplit("@", 1)[-1].split(":")[0] or None
+    except Exception:
+        return None
+    return None
+
+
 def _vless_link_needs_refresh(link: str | None) -> bool:
     if not link or not link.strip():
         return True
@@ -3912,6 +3932,13 @@ def _vless_link_needs_refresh(link: str | None) -> bool:
     if port is None or port != XRAY_CLIENT_PORT:
         return True
     if "FrostyVPN-" in link or port == 10443:
+        return True
+    want_host = _xray_vless_host()
+    if want_host and _vless_link_host(link) != want_host:
+        return True
+    if XRAY_SNI and f"sni={XRAY_SNI}" not in link:
+        return True
+    if XRAY_FP and f"fp={XRAY_FP}" not in link:
         return True
     return False
 
@@ -5681,18 +5708,53 @@ class AdminVpnRefreshNotifyResponse(BaseModel):
     notify_failed: int
 
 
+def _refresh_vless_links_for_clients(
+    db: Session, *, telegram_id: int | None = None
+) -> tuple[int, int]:
+    """Обновить vless_link в БД (и при необходимости Xray). telegram_id — только один пользователь."""
+    repaired = 0
+    failed = 0
+    q = select(VpnClient).where(VpnClient.active == True)  # noqa: E712
+    if telegram_id is not None:
+        q = q.where(VpnClient.telegram_id == int(telegram_id))
+    clients = db.execute(q).scalars().all()
+    for client in clients:
+        try:
+            if not client.uuid:
+                failed += 1
+                continue
+            refreshed = _xray_build_vless_link(client.uuid)
+            if refreshed:
+                client.vless_link = refreshed
+                repaired += 1
+            else:
+                failed += 1
+        except Exception:
+            logger.exception("vless refresh failed tg_id=%s", client.telegram_id)
+            failed += 1
+    db.commit()
+    return repaired, failed
+
+
 @app.post("/admin/refresh-vpn-links", response_model=AdminVpnRefreshNotifyResponse)
 def admin_refresh_vpn_links(
     req: Request,
     db: Session = Depends(get_db),
+    telegram_id: int | None = Query(
+        None,
+        description="Обновить только этого пользователя (тест admin без массовой смены ключей)",
+    ),
     notify: bool = Query(
         False,
         description="Массовая рассылка vless в Telegram — только при явном notify=true",
     ),
 ) -> AdminVpnRefreshNotifyResponse:
-    """Обновить vless:// (порт/параметры) для всех активных клиентов и опционально уведомить в Telegram."""
+    """Обновить vless:// (порт/параметры) для активных клиентов и опционально уведомить в Telegram."""
     _require_admin(req)
-    repaired, repair_failed = _repair_all_xray_clients(db)
+    if telegram_id is not None:
+        repaired, repair_failed = _refresh_vless_links_for_clients(db, telegram_id=telegram_id)
+    else:
+        repaired, repair_failed = _repair_all_xray_clients(db)
     notified = 0
     notify_failed = 0
     if notify:
