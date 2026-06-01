@@ -173,6 +173,7 @@ XRAY_PUBLIC_KEY = (os.getenv("XRAY_PUBLIC_KEY") or "").strip()
 XRAY_SHORT_ID = (os.getenv("XRAY_SHORT_ID") or "").strip()
 XRAY_SNI = (os.getenv("XRAY_SNI") or "www.microsoft.com").strip()
 XRAY_SERVER_IP = (os.getenv("XRAY_SERVER_IP") or "").strip()
+# xray слушает 443 напрямую (klodbot на другом сервере). См. docs/VPS_PORT_ALLOCATION.md
 XRAY_CLIENT_PORT = int((os.getenv("XRAY_CLIENT_PORT") or "443").strip() or "443")
 
 # Amnezia VPN (отдельная ветка, whitelist в таблице amnezia_access)
@@ -3844,13 +3845,12 @@ def _xray_build_vless_link(client_uuid: str, port: int | None = None) -> str:
     if not (XRAY_SERVER_IP and XRAY_PUBLIC_KEY):
         return ""
     client_port = int(port if port is not None else XRAY_CLIENT_PORT)
-    # Порядок и минимум полей — Happ иначе даёт N/A на ping (spx/пробел в # ломают импорт).
     params = (
-        f"type=tcp&encryption=none&flow=xtls-rprx-vision&security=reality"
-        f"&pbk={XRAY_PUBLIC_KEY}&fp=chrome&sni={XRAY_SNI}&sid={XRAY_SHORT_ID}"
+        f"type=tcp&encryption=none&security=reality&sni={XRAY_SNI}"
+        f"&fp=chrome&pbk={XRAY_PUBLIC_KEY}&sid={XRAY_SHORT_ID}"
+        f"&flow=xtls-rprx-vision"
     )
-    label = "FrostyVPN" if client_port == 443 else f"FrostyVPN-{client_port}"
-    return f"vless://{client_uuid}@{XRAY_SERVER_IP}:{client_port}?{params}#{label}"
+    return f"vless://{client_uuid}@{XRAY_SERVER_IP}:{client_port}?{params}#FrostyVPN"
 
 
 def _vless_link_port(link: str) -> int | None:
@@ -3870,10 +3870,14 @@ def _vless_link_port(link: str) -> int | None:
 def _vless_link_needs_refresh(link: str | None) -> bool:
     if not link or not link.strip():
         return True
-    if "flow=" not in link:
+    if "flow=xtls-rprx-vision" not in link or "security=reality" not in link:
         return True
     port = _vless_link_port(link)
-    return port is None or port != XRAY_CLIENT_PORT
+    if port is None or port != XRAY_CLIENT_PORT:
+        return True
+    if "FrostyVPN-" in link or port == 10443:
+        return True
+    return False
 
 
 def _xray_client_exists(tg_id: int) -> bool:
@@ -4403,13 +4407,11 @@ def vpn_config(telegram_id: int, req: Request, db: Session = Depends(get_db)) ->
         return VpnConfigResponse(available=True, reason="creating")
 
     client_uuid, vless_link = result
-    # Порт 8443 — socat relay — слишком медленный (480–1400ms TLS vs 150–270ms на 443).
-    # Не отдаём его клиентам; fallback только через iptables DNAT на VPS (без overhead).
     return VpnConfigResponse(
         available=True,
         vless_link=vless_link,
         uuid=client_uuid,
-        subscription_url=_vpn_subscription_url(telegram_id),
+        subscription_url=None,
     )
 
 
@@ -4639,6 +4641,46 @@ class VpnOnlineResponse(BaseModel):
 
 
 # ── Smart Config (Xray JSON с умной маршрутизацией) ──────────────────────────
+
+def _build_global_xray_config(vless_link: str) -> dict:
+    """Минимальный Xray JSON: весь трафик и DNS через VPN (для Happ, без split RU)."""
+    vnext = _parse_vless_for_xray(vless_link)
+    stream = _vless_stream_settings()
+    return {
+        "log": {"loglevel": "warning"},
+        "dns": {
+            "servers": [
+                {"address": "8.8.8.8", "domains": []},
+                {"address": "1.1.1.1", "domains": []},
+            ],
+            "queryStrategy": "UseIPv4",
+        },
+        "inbounds": [
+            {
+                "tag": "socks",
+                "port": 10808,
+                "protocol": "socks",
+                "settings": {"auth": "noauth", "udp": True},
+                "listen": "127.0.0.1",
+            },
+        ],
+        "outbounds": [
+            {
+                "tag": "proxy",
+                "protocol": "vless",
+                "settings": {"vnext": [vnext]},
+                "streamSettings": stream,
+            },
+            {"tag": "direct", "protocol": "freedom", "settings": {}},
+        ],
+        "routing": {
+            "domainStrategy": "AsIs",
+            "rules": [
+                {"type": "field", "network": "tcp,udp", "outboundTag": "proxy"},
+            ],
+        },
+    }
+
 
 def _build_smart_xray_config(vless_link: str) -> dict:
     """
@@ -4999,16 +5041,25 @@ def _parse_vless_for_xray(vless_link: str) -> dict:
     }
 
 
-def _vless_stream_settings() -> dict:
-    """streamSettings для Reality / TCP по умолчанию."""
+def _vless_stream_settings(vless_link: str | None = None) -> dict:
+    """streamSettings для Reality / TCP (Xray 26: public key в поле password)."""
+    sni = XRAY_SNI or "www.microsoft.com"
+    pbk = XRAY_PUBLIC_KEY
+    sid = XRAY_SHORT_ID
+    if vless_link:
+        from urllib.parse import parse_qs, urlparse
+        qs = parse_qs(urlparse(vless_link).query)
+        sni = (qs.get("sni") or [sni])[0] or sni
+        pbk = (qs.get("pbk") or [pbk])[0] or pbk
+        sid = (qs.get("sid") or [sid])[0] or sid
     return {
         "network": "tcp",
         "security": "reality",
         "realitySettings": {
-            "serverName": XRAY_SNI or "www.microsoft.com",
+            "serverName": sni,
             "fingerprint": "chrome",
-            "publicKey": XRAY_PUBLIC_KEY,
-            "shortId": XRAY_SHORT_ID,
+            "password": pbk,
+            "shortId": sid,
             "spiderX": "/",
         },
     }
@@ -5035,6 +5086,34 @@ def _trusted_vpn_request(req: Request, tg_id: int, token_param: str) -> bool:
     if _sub_token_valid(tg_id, token_param):
         return True
     return _vpn_config_caller_trusted(req, tg_id)
+
+
+@app.get(
+    "/vpn/global-config/{telegram_id}",
+    summary="Xray JSON: весь трафик через VPN (без split RU) — для Happ/Mac",
+)
+def vpn_global_config(
+    telegram_id: int,
+    req: Request,
+    db: Session = Depends(get_db),
+    token: str = "",
+) -> JSONResponse:
+    if INTERNAL_API_TOKEN and not _trusted_vpn_request(req, telegram_id, token):
+        return JSONResponse({"available": False, "reason": "forbidden"}, status_code=403)
+    if not _active_sub_for_vpn(telegram_id, db):
+        return JSONResponse({"available": False, "reason": "no_subscription"}, status_code=403)
+    if not XRAY_API_URL:
+        return JSONResponse({"available": False, "reason": "vpn_not_configured"}, status_code=503)
+    result = _ensure_xray_client(telegram_id, db)
+    if not result:
+        return JSONResponse({"available": False, "reason": "creating"}, status_code=503)
+    _, vless_link = result
+    config = _build_global_xray_config(vless_link)
+    return JSONResponse(
+        config,
+        media_type="application/json",
+        headers={"Content-Disposition": f'attachment; filename="frosty-global-{telegram_id}.json"'},
+    )
 
 
 @app.get(
@@ -5360,8 +5439,19 @@ def _repair_all_xray_clients(db: Session) -> tuple[int, int]:
     return repaired, failed
 
 
+def _vpn_user_display_name(db: Session, tg_id: int) -> str:
+    user = db.execute(select(User).where(User.telegram_id == tg_id)).scalar_one_or_none()
+    if user is None:
+        return ""
+    if user.first_name:
+        return html.escape(str(user.first_name).strip())
+    if user.username:
+        return "@" + html.escape(str(user.username).strip().lstrip("@"))
+    return ""
+
+
 def _notify_active_vpn_users_vless_refresh(db: Session) -> tuple[int, int]:
-    """Отправить каждому активному VPN-пользователю обновлённый vless:// для Happ."""
+    """Персональная рассылка: каждому свой vless:// (uuid уникален), не общий ключ."""
     if not BOT_TOKEN:
         return 0, 0
     clients = db.execute(
@@ -5369,27 +5459,29 @@ def _notify_active_vpn_users_vless_refresh(db: Session) -> tuple[int, int]:
     ).scalars().all()
     sent = 0
     failed = 0
-    text_intro = (
-        "🔄 Обновлён VPN-код (если не подключается — замените профиль в Happ).\n\n"
-        "Скопируйте код ниже → Happ → «+» → «Вставить из буфера»\n\n"
-    )
     for client in clients:
         tg_id = int(client.telegram_id)
-        if tg_id <= 0:
+        if tg_id <= 0 or not (client.uuid or "").strip():
+            failed += 1
             continue
-        link = (client.vless_link or "").strip()
-        if not link and client.uuid:
-            link = _xray_build_vless_link(client.uuid)
-            if link:
-                client.vless_link = link
+        link = _xray_build_vless_link(client.uuid.strip())
         if not link:
             failed += 1
             continue
-        msg = f"{text_intro}<code>{link}</code>"
+        client.vless_link = link
+        name = _vpn_user_display_name(db, tg_id)
+        greeting = f"Здравствуйте, {name}!\n\n" if name else ""
+        msg = (
+            f"{greeting}"
+            "🔄 <b>Ваш личный VPN-ключ Frosty</b>\n\n"
+            "Удалите старый FrostyVPN в Happ → «+» → «Вставить из буфера»:\n\n"
+            f"<code>{html.escape(link)}</code>"
+        )
         if _send_tg(tg_id, msg):
             sent += 1
         else:
             failed += 1
+        time.sleep(0.05)
     db.commit()
     return sent, failed
 
@@ -7136,6 +7228,148 @@ class VlessStatusResponse(BaseModel):
     online: bool
     latency_ms: float | None
     sni: str
+
+
+def _run_vless_traffic_proof(vless_link: str) -> dict:
+    """Реальный трафик через VLESS (HTML + загрузка), не TCP-ping."""
+    import re as _re
+    import subprocess
+    import tempfile
+
+    xray_bin = "/usr/local/x-ui/bin/xray-linux-amd64"
+    if not os.path.isfile(xray_bin):
+        return {"ok": False, "detail": "xray binary not found on host"}
+
+    cfg = {
+        "log": {"loglevel": "warning"},
+        "inbounds": [
+            {
+                "tag": "socks",
+                "port": 10808,
+                "listen": "127.0.0.1",
+                "protocol": "socks",
+                "settings": {"udp": True},
+            }
+        ],
+        "outbounds": [
+            {
+                "tag": "proxy",
+                "protocol": "vless",
+                "settings": {"vnext": [_parse_vless_for_xray(vless_link)]},
+                "streamSettings": _vless_stream_settings(vless_link),
+            }
+        ],
+    }
+    with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False) as f:
+        json.dump(cfg, f)
+        path = f.name
+
+    proc = subprocess.Popen(
+        [xray_bin, "run", "-c", path],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.PIPE,
+    )
+    results: dict[str, object] = {"checks": {}}
+    try:
+        time.sleep(2)
+        if proc.poll() is not None:
+            err = (proc.stderr.read() or b"").decode(errors="replace")[-500:]
+            return {"ok": False, "detail": "xray client failed to start", "error": err}
+
+        proxy = "socks5h://127.0.0.1:10808"
+        for name, url, pattern in (
+            ("google_html", "https://www.google.com", r"doctype|google"),
+            ("youtube_html", "https://www.youtube.com", r"youtube|ytimg|html"),
+            ("cloudflare_trace", "https://1.1.1.1/cdn-cgi/trace", r"ip="),
+        ):
+            r = subprocess.run(
+                ["curl", "-sS", "-m", "20", "-x", proxy, url],
+                capture_output=True,
+                text=True,
+            )
+            body = (r.stdout or "")[:1000]
+            ok = r.returncode == 0 and bool(_re.search(pattern, body, _re.I))
+            results["checks"][name] = {
+                "ok": ok,
+                "bytes": len(r.stdout or ""),
+                "sample": body[:80],
+            }
+
+        r = subprocess.run(
+            [
+                "curl", "-sS", "-m", "35", "-x", proxy,
+                "-o", "/dev/null", "-w", "%{size_download}",
+                "https://speed.cloudflare.com/__down?bytes=500000",
+            ],
+            capture_output=True,
+            text=True,
+        )
+        dl = int((r.stdout or "0").strip() or 0)
+        results["checks"]["download_500kb"] = {"ok": dl > 200000, "bytes": dl}
+
+        checks = results["checks"]
+        results["ok"] = all(c.get("ok") for c in checks.values() if isinstance(c, dict))
+        results["vless_port"] = _vless_link_port(vless_link)
+        return results
+    finally:
+        proc.terminate()
+        try:
+            proc.wait(timeout=3)
+        except Exception:
+            proc.kill()
+
+
+@app.get("/admin/vpn-user-live/{telegram_id}")
+def admin_vpn_user_live(telegram_id: int, req: Request, db: Session = Depends(get_db)) -> dict:
+    """Онлайн в xray + трафик клиента (видно, идёт ли реальный обмен, не только ping)."""
+    _require_admin(req)
+    email = f"frosty_{telegram_id}"
+    online_list: list = []
+    result = _xray_req("POST", "/panel/api/inbounds/onlines")
+    if isinstance(result, dict) and result.get("success"):
+        online_list = result.get("obj") or []
+    is_online = any(
+        (o.get("email") == email or o.get("id") == email)
+        for o in online_list
+        if isinstance(o, dict)
+    )
+    traffic = _xray_req("GET", f"/panel/api/inbounds/getClientTraffics/{email}")
+    up = down = 0
+    if isinstance(traffic, dict) and traffic.get("success"):
+        obj = traffic.get("obj") or {}
+        if isinstance(obj, dict):
+            up, down = int(obj.get("up", 0)), int(obj.get("down", 0))
+    client = db.execute(
+        select(VpnClient).where(VpnClient.telegram_id == telegram_id)
+    ).scalar_one_or_none()
+    link = (client.vless_link if client else "") or ""
+    return {
+        "telegram_id": telegram_id,
+        "email": email,
+        "xray_online": is_online,
+        "online_sessions": len(online_list),
+        "traffic_up": up,
+        "traffic_down": down,
+        "vless_port": _vless_link_port(link),
+        "has_flow": "flow=xtls-rprx-vision" in link,
+    }
+
+
+@app.get("/admin/vpn-egress-test")
+def admin_vpn_egress_test(req: Request, db: Session = Depends(get_db)) -> dict:
+    """Реальный трафик admin VLESS: HTML сайтов + загрузка 500KB (не ping)."""
+    _require_admin(req)
+    admin_tg = int((os.getenv("BOT_ADMIN_TELEGRAM_IDS") or "231115635").split(",")[0].strip())
+    client = db.execute(
+        select(VpnClient).where(VpnClient.telegram_id == admin_tg, VpnClient.active == True)  # noqa: E712
+    ).scalar_one_or_none()
+    if not client or not client.uuid:
+        return {"ok": False, "detail": "admin vpn client not found"}
+    link = (client.vless_link or "").strip() or _xray_build_vless_link(client.uuid)
+    out = _run_vless_traffic_proof(link)
+    out["admin_tg"] = admin_tg
+    out["vless_link_prefix"] = link[:80] + "…" if len(link) > 80 else link
+    return out
 
 
 @app.get("/admin/vless-status", response_model=VlessStatusResponse)

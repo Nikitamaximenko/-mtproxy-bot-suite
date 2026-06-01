@@ -651,14 +651,16 @@ async def _send_amnezia_hub(msg: Message, session: aiohttp.ClientSession, tg_uid
 
 
 async def _get_vless_link(session: aiohttp.ClientSession, tg_id: int) -> tuple[str | None, str | None]:
-    """Возвращает (vless_link, None) для Happ — вставка из буфера."""
+    """Возвращает (vless_link, vless_link_alt) для Happ."""
     data = await _fetch_vpn_config(session, tg_id)
     if not data.get("available"):
         return None, None
     vless = data.get("vless_link")
     if not isinstance(vless, str) or not vless.strip():
         return None, None
-    return vless.strip(), None
+    alt = data.get("vless_link_alt")
+    alt_s = alt.strip() if isinstance(alt, str) and alt.strip() else None
+    return vless.strip(), alt_s
 
 
 async def _send_proxy_vpn_bundle(message: Message, session: aiohttp.ClientSession, tg_uid: int) -> None:
@@ -716,7 +718,7 @@ async def _send_proxy_vpn_bundle(message: Message, session: aiohttp.ClientSessio
         await asyncio.sleep(1.0)
         data = await _fetch_vpn_config(session, tg_uid)
 
-    vless, _vless_alt = await _get_vless_link(session, tg_uid)
+    vless, vless_alt = await _get_vless_link(session, tg_uid)
     if not vless:
         await message.answer(
             "⏳ <b>VPN ещё инициализируется</b>\n\n"
@@ -733,14 +735,14 @@ async def _send_proxy_vpn_bundle(message: Message, session: aiohttp.ClientSessio
 
     await message.answer(
         "🛡 <b>Умный VPN Frosty</b>\n\n"
-        "<b>Шаг 1.</b> Установите приложение Happ:\n"
-        '• <a href="https://apps.apple.com/app/happ-proxy-utility/id6504287215">iOS (App Store)</a>\n'
-        '• <a href="https://play.google.com/store/apps/details?id=com.happproxy">Android (Google Play)</a>\n'
-        '• <a href="https://hiddify.com">Windows / Mac (Hiddify)</a>\n\n'
-        "<b>Шаг 2.</b> Скопируйте VPN-ключ и вставьте в Happ: «+» → «Вставить из буфера»\n\n"
+        "<b>Шаг 1.</b> Установите Happ:\n"
+        '• <a href="https://apps.apple.com/app/happ-proxy-utility/id6504287215">iOS</a> · '
+        '<a href="https://play.google.com/store/apps/details?id=com.happproxy">Android</a> · '
+        '<a href="https://hiddify.com">Mac / Windows</a>\n\n'
+        "<b>Шаг 2.</b> Скопируйте ключ и вставьте в Happ: «+» → «Вставить из буфера»\n\n"
         f"<code>{html.escape(vless)}</code>\n\n"
         "⚡ Instagram, TikTok, YouTube — через VPN.\n"
-        "До 10 устройств · без лимитов по скорости и трафику",
+        "До 10 устройств · без лимитов",
         parse_mode="HTML",
         disable_web_page_preview=True,
         reply_markup=InlineKeyboardMarkup(inline_keyboard=[

@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
 import { getBackendUrl } from "@/lib/backend-url"
 
-/** Пинг VLESS-сервера (138.124.80.97:443), не microsoft.com и не MTProxy. */
+/** TCP до VLESS на 443 (xray). */
 export async function GET(req: NextRequest) {
   const adminKey = req.headers.get("x-admin-key") || ""
   if (adminKey) {
