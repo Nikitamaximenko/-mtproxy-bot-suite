@@ -172,11 +172,14 @@ XRAY_PASSWORD = (os.getenv("XRAY_PASSWORD") or "").strip()
 XRAY_INBOUND_ID = int((os.getenv("XRAY_INBOUND_ID") or "1").strip() or "1")
 XRAY_PUBLIC_KEY = (os.getenv("XRAY_PUBLIC_KEY") or "").strip()
 XRAY_SHORT_ID = (os.getenv("XRAY_SHORT_ID") or "").strip()
-XRAY_SNI = (os.getenv("XRAY_SNI") or "www.microsoft.com").strip()
 XRAY_SERVER_IP = (os.getenv("XRAY_SERVER_IP") or "").strip()
-# Адрес в vless:// (домен как у Hit: SNI = host). Пусто → XRAY_SERVER_IP.
-XRAY_CLIENT_HOST = (os.getenv("XRAY_CLIENT_HOST") or XRAY_SERVER_IP or "").strip()
-XRAY_FP = (os.getenv("XRAY_FP") or "chrome").strip()
+# Hit-style: домен в ссылке, SNI = host (обход DPI). Пусто SNI → sslip.io по IP или microsoft.
+_default_hit_host = (
+    f"{XRAY_SERVER_IP.replace('.', '-')}.sslip.io" if XRAY_SERVER_IP else "www.microsoft.com"
+)
+XRAY_SNI = (os.getenv("XRAY_SNI") or _default_hit_host).strip()
+XRAY_CLIENT_HOST = (os.getenv("XRAY_CLIENT_HOST") or XRAY_SNI or XRAY_SERVER_IP or "").strip()
+XRAY_FP = (os.getenv("XRAY_FP") or "firefox").strip()
 # xray слушает 443 напрямую (klodbot на другом сервере). См. docs/VPS_PORT_ALLOCATION.md
 XRAY_CLIENT_PORT = int((os.getenv("XRAY_CLIENT_PORT") or "443").strip() or "443")
 # Резервный порт для провайдеров, режущих :443 к зарубежным IP (DPI РКН). 0 = выключить.

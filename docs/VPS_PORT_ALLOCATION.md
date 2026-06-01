@@ -20,11 +20,15 @@
 
 **Не использовать** nginx stream на 443 и порт 10443 в ссылках — это было для совместного хостинга с klodbot.
 
-## Ссылки для Happ
+## Ссылки для Happ (Hit-style)
+
+Подключение по **домену**, SNI = тот же домен, `fp=firefox` (не голый IP + microsoft.com).
 
 ```
-vless://UUID@138.124.80.97:443?type=tcp&encryption=none&security=reality&sni=www.microsoft.com&fp=chrome&pbk=...&sid=...&flow=xtls-rprx-vision#FrostyVPN
+vless://UUID@138-124-80-97.sslip.io:443?type=tcp&encryption=none&security=reality&sni=138-124-80-97.sslip.io&fp=firefox&pbk=...&sid=...&flow=xtls-rprx-vision#FrostyVPN
 ```
+
+При смене домена: `bash scripts/vps-reality-hit-style.sh` и `POST /admin/refresh-vpn-links?notify=true`.
 
 ## Восстановление после правок
 
