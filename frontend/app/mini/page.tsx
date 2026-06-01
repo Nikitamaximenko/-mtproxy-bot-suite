@@ -205,7 +205,13 @@ function PaymentModal({
   const checkPayment = useCallback(async () => {
     setChecking(true)
     try {
-      const res = await fetch(`/api/subscription?tg_id=${tgId}`, { cache: "no-store" })
+      const initData = await getTelegramInitDataAsync()
+      const res = await fetch("/api/subscription", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        cache: "no-store",
+        body: JSON.stringify({ tg_id: tgId, init_data: initData }),
+      })
       if (!res.ok) return
       const data = (await res.json()) as SubscriptionData
       if (data.active) {
@@ -456,26 +462,34 @@ export default function MiniAppPage() {
     setVpnLoading(true)
     setVpnError(null)
     try {
-      try {
-        window?.Telegram?.WebApp?.ready?.()
-      } catch {
-        /* ignore */
-      }
-      let initData = typeof window !== "undefined" ? getTelegramInitData() : ""
-      // Иногда initData появляется чуть позже первого тика после ready(); без этого POST уходит с пустой строкой.
-      if (!initData && typeof window !== "undefined" && (window as { Telegram?: { WebApp?: { version?: string } } })?.Telegram?.WebApp?.version) {
-        await new Promise<void>((resolve) => {
-          requestAnimationFrame(() => requestAnimationFrame(() => resolve()))
+      let initData = await getTelegramInitDataAsync()
+      let res: Response | null = null
+      let text = ""
+      for (let attempt = 0; attempt < 5; attempt++) {
+        if (!initData && attempt > 0) {
+          await new Promise((r) => setTimeout(r, 350 * attempt))
+          initData = await getTelegramInitDataAsync()
+        }
+        res = await fetch("/api/vpn", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          cache: "no-store",
+          body: JSON.stringify({ tg_id: tgId, init_data: initData }),
         })
-        initData = getTelegramInitData()
+        text = await res.text()
+        let parsed: VpnData | null = null
+        try {
+          parsed = JSON.parse(text) as VpnData
+        } catch {
+          parsed = null
+        }
+        const needRetry =
+          !initData &&
+          parsed?.reason === "internal_token_required" &&
+          attempt < 4
+        if (!needRetry) break
       }
-      const res = await fetch("/api/vpn", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        cache: "no-store",
-        body: JSON.stringify({ tg_id: tgId, init_data: initData }),
-      })
-      const text = await res.text()
+      if (!res) return
       let data: VpnData | null = null
       try {
         data = JSON.parse(text) as VpnData
