@@ -1310,53 +1310,51 @@ def _yookassa_checkout_payment_id(db: Session, payment_token: str) -> str | None
 
 
 def _reconcile_yookassa_pending_payments() -> int:
-    """Активировать pending/renewal, если ЮKassa уже succeeded, а webhook не дошёл до VPS."""
+    """Применить succeeded-платежи ЮKassa, если webhook не дошёл или подписка осталась trial/expired."""
     if not _yookassa_configured():
         return 0
     db = SessionLocal()
     applied = 0
     seen_pay_ids: set[str] = set()
     try:
-        pending_rows = db.execute(
-            select(Subscription).where(
-                Subscription.payment_status == "pending",
-                or_(
-                    Subscription.lava_contract_id.is_(None),
-                    func.trim(Subscription.lava_contract_id) == "",
-                ),
-            )
-        ).scalars().all()
-        pending_tokens = {
-            (s.payment_token or "").strip()
-            for s in pending_rows
-            if (s.payment_token or "").strip()
-        }
-
         candidates: list[dict[str, Any]] = []
-        for sub in pending_rows:
-            token = (sub.payment_token or "").strip()
-            if not token:
+
+        # Checkout с payment_id в логах (оплата могла пройти при trial/expired в БД).
+        since = utcnow() - timedelta(days=max(1, YOOKASSA_RECONCILE_LOOKBACK_DAYS))
+        checkout_rows = db.execute(
+            select(CheckoutLog)
+            .where(
+                CheckoutLog.provider == "yookassa",
+                CheckoutLog.stage == "backend_yookassa_ready",
+                CheckoutLog.created_at >= since,
+                CheckoutLog.payment_token.is_not(None),
+            )
+            .order_by(CheckoutLog.created_at.desc())
+        ).scalars().all()
+        tokens_from_checkout: set[str] = set()
+        for row in checkout_rows:
+            token = (row.payment_token or "").strip()
+            if not token or token in tokens_from_checkout:
                 continue
+            tokens_from_checkout.add(token)
             pay_id = _yookassa_checkout_payment_id(db, token)
-            if pay_id:
+            if pay_id and pay_id not in seen_pay_ids:
                 verified = _yookassa_get_payment(pay_id)
                 if isinstance(verified, dict) and str(verified.get("status") or "") == "succeeded":
                     candidates.append(verified)
+                    seen_pay_ids.add(pay_id)
 
-        since = utcnow() - timedelta(days=max(1, YOOKASSA_RECONCILE_LOOKBACK_DAYS))
+        # Все succeeded за период (renewal + «зависшие» первичные оплаты).
         for payment in _yookassa_list_succeeded_payments(since):
-            meta = payment.get("metadata")
-            if not isinstance(meta, dict):
+            pay_id = str(payment.get("id") or "").strip()
+            if not pay_id or pay_id in seen_pay_ids:
                 continue
-            token = str(meta.get("payment_token") or "").strip()
-            is_renewal = str(meta.get("renewal") or "").strip() == "1"
-            if token in pending_tokens or is_renewal:
-                pay_id = str(payment.get("id") or "").strip()
-                if pay_id:
-                    verified = _yookassa_get_payment(pay_id)
-                    if isinstance(verified, dict) and str(verified.get("status") or "") == "succeeded":
-                        candidates.append(verified)
+            verified = _yookassa_get_payment(pay_id)
+            if isinstance(verified, dict) and str(verified.get("status") or "") == "succeeded":
+                candidates.append(verified)
+                seen_pay_ids.add(pay_id)
 
+        seen_pay_ids.clear()
         for payment in candidates:
             pay_id = str(payment.get("id") or "").strip()
             if not pay_id or pay_id in seen_pay_ids:
@@ -1376,13 +1374,8 @@ def _reconcile_yookassa_pending_payments() -> int:
             if pay_id and (sub.yookassa_last_applied_payment_id or "") == pay_id:
                 continue
             is_renewal = str(meta.get("renewal") or "").strip() == "1"
-            if sub.payment_status == "pending" and not is_renewal:
-                pass
-            elif sub.payment_status == "paid" and is_renewal:
-                pass
-            else:
-                continue
-            before = sub.payment_status
+            before_status = sub.payment_status
+            before_expires = sub.expires_at
             try:
                 _apply_yookassa_payment_object(db, payment)
             except Exception as e:
@@ -1390,13 +1383,20 @@ def _reconcile_yookassa_pending_payments() -> int:
                 db.rollback()
                 continue
             db.refresh(sub)
-            if sub.payment_status != before or (sub.yookassa_last_applied_payment_id or "") == pay_id:
+            changed = (
+                sub.payment_status != before_status
+                or sub.expires_at != before_expires
+                or (sub.yookassa_last_applied_payment_id or "") == pay_id
+            )
+            if changed:
                 applied += 1
                 logger.info(
-                    "Reconciled YooKassa payment tg_id=%s pay_id=%s renewal=%s",
+                    "Reconciled YooKassa payment tg_id=%s pay_id=%s renewal=%s status %s→%s",
                     sub.telegram_id,
                     pay_id,
                     is_renewal,
+                    before_status,
+                    sub.payment_status,
                 )
 
         if applied:
@@ -1719,18 +1719,18 @@ def _apply_yookassa_payment_object(db: Session, payment: dict[str, Any]) -> None
             pm_saved,
             recurring_supported,
         )
-    if sub.payment_status == "pending":
-        activate_subscription(sub, recurring=False)
-    elif sub.payment_status == "paid" and is_renewal:
+    if is_renewal:
         activate_subscription(sub, recurring=True)
     else:
-        logger.info(
-            "YooKassa webhook: skip activate tg_id=%s status=%s renewal=%s",
-            sub.telegram_id,
-            sub.payment_status,
-            is_renewal,
-        )
-        return
+        # Первичная оплата: активируем всегда (trial/expired/pending), иначе оплата прошла, а доступ нет.
+        if sub.payment_status not in ("pending", "paid"):
+            logger.warning(
+                "YooKassa: activating paid subscription from status=%s tg_id=%s",
+                sub.payment_status,
+                sub.telegram_id,
+            )
+        activate_subscription(sub, recurring=False)
+    sub.is_trial_offer = False
     if pay_id:
         sub.yookassa_last_applied_payment_id = pay_id
     db.commit()
@@ -2154,6 +2154,7 @@ def activate_subscription(sub: Subscription, *, recurring: bool = False) -> None
             base = sub.expires_at
         _apply_proxy_credentials(sub)
         sub.payment_status = "paid"
+        sub.is_trial_offer = False
         sub.expires_at = base + timedelta(days=30)
         sub.access_suspended = False
         sub.access_blocked_reason = None
@@ -2178,6 +2179,7 @@ def activate_subscription(sub: Subscription, *, recurring: bool = False) -> None
         return
     _apply_proxy_credentials(sub)
     sub.payment_status = "paid"
+    sub.is_trial_offer = False
     sub.expires_at = now + timedelta(days=30)
     sub.access_suspended = False
     sub.access_blocked_reason = None
