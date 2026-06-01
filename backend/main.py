@@ -457,9 +457,9 @@ def _verified_payment_clause(model: type[Subscription] = Subscription):
 
 
 def _vpn_subscription_url(telegram_id: int) -> str:
-    """Subscription URL: Clash YAML для Happ (flow + routing); token обязателен."""
+    """Subscription URL: Clash global для Happ (весь трафик через VPN)."""
     token = _vpn_sub_token(telegram_id)
-    return f"{PUBLIC_BASE_URL}/vpn/clash/{telegram_id}?token={token}"
+    return f"{PUBLIC_BASE_URL}/vpn/clash/{telegram_id}?token={token}&routing=global"
 
 
 def _backfill_trial_offer_rows() -> None:
@@ -4737,18 +4737,12 @@ def _build_smart_xray_config(vless_link: str) -> dict:
 
 
 
-def _build_clash_config(vless_link: str) -> str:
+def _build_clash_config(vless_link: str, *, routing: str = "global") -> str:
     """
-    Clash/Mihomo YAML — единственный subscription-формат, который Happ принимает
-    И который поддерживает routing rules из коробки.
+    Clash/Mihomo YAML для Happ.
 
-    Дизайн-решения для скорости:
-    - Нет секции dns: → Happ использует свои DNS-настройки, мы не трогаем
-    - DOMAIN-SUFFIX,ru,DIRECT покрывает ВСЕ .ru одним правилом (O(log n) lookup)
-    - Нет GEOIP/GEOSITE → нет скачивания mmdb/dat файлов
-    - Только ~30 правил → matching занимает микросекунды, на скорость не влияет
-    - Telegram/WhatsApp/прочие мессенджеры не перечислены в DIRECT → идут через VPN
-      только если заблокированы; системный DNS не меняется
+    routing=global (по умолчанию): весь трафик через VPN — стабильнее, без «подключён, но сайты не открываются».
+    routing=ru: .ru и топ РФ-сервисы в DIRECT, остальное через VPN (умный режим).
     """
     from urllib.parse import parse_qs, urlparse
 
@@ -4807,25 +4801,31 @@ def _build_clash_config(vless_link: str) -> str:
 
     proxies_block = "\n".join(proxy_fields)
 
+    if (routing or "global").strip().lower() != "ru":
+        return f"""\
+mixed-port: 7890
+allow-lan: false
+mode: global
+log-level: warning
+ipv6: false
+
+proxies:
+{proxies_block}
+"""
+
     from ru_direct_routing import AD_SUFFIXES, CLASH_SUFFIXES
 
-    # ── Routing rules ─────────────────────────────────────────────────────────
-    # Порядок важен: первое совпавшее правило выигрывает.
     rules: list[str] = [
         *[f"  - DOMAIN-SUFFIX,{s},REJECT" for s in AD_SUFFIXES],
-        # Российские TLD → DIRECT (покрывает все .ru/.su/.рф приложения)
         "  - DOMAIN-SUFFIX,ru,DIRECT",
         "  - DOMAIN-SUFFIX,su,DIRECT",
         "  - DOMAIN-SUFFIX,рф,DIRECT",
-        # Non-.ru домены топ-50 РФ-приложений → DIRECT
         *[f"  - DOMAIN-SUFFIX,{s},DIRECT" for s in CLASH_SUFFIXES],
-        # Приватные адреса (LAN) → DIRECT
         "  - IP-CIDR,10.0.0.0/8,DIRECT",
         "  - IP-CIDR,172.16.0.0/12,DIRECT",
         "  - IP-CIDR,192.168.0.0/16,DIRECT",
         "  - IP-CIDR,127.0.0.0/8,DIRECT",
-        # Всё остальное → через VLESS VPN
-        '  - MATCH,🌍 Proxy',
+        "  - MATCH,Frosty",
     ]
     rules_block = "\n".join(rules)
 
@@ -4833,14 +4833,14 @@ def _build_clash_config(vless_link: str) -> str:
 mixed-port: 7890
 allow-lan: false
 mode: rule
-log-level: error
+log-level: warning
 ipv6: false
 
 proxies:
 {proxies_block}
 
 proxy-groups:
-  - name: "🌍 Proxy"
+  - name: Frosty
     type: select
     proxies:
       - "Frosty VPN"
@@ -5166,6 +5166,7 @@ def vpn_clash(
     req: Request,
     db: Session = Depends(get_db),
     token: str = "",
+    routing: str = Query("global", description="global = весь трафик через VPN; ru = умный DIRECT для .ru"),
 ) -> Response:
     """
     Возвращает Clash YAML конфиг с routing rules.
@@ -5192,13 +5193,14 @@ def vpn_clash(
         raise HTTPException(status_code=503, detail="Creating VPN client, try in 30s")
 
     _, vless_link = result
-    yaml_config = _build_clash_config(vless_link)
+    yaml_config = _build_clash_config(vless_link, routing=routing)
     expires_ts = int(_active_sub_expires(telegram_id, db) or 0)
+    title = "Frosty VPN" if routing.strip().lower() != "ru" else "Frosty VPN (RU direct)"
     return Response(
         content=yaml_config,
         media_type="text/yaml; charset=utf-8",
         headers={
-            "profile-title": "Frosty VPN",
+            "profile-title": title,
             "support-url": "https://t.me/frosty_support",
             "subscription-userinfo": f"upload=0; download=0; total=0; expire={expires_ts}",
             "content-disposition": f'attachment; filename="frosty-{telegram_id}.yaml"',
@@ -7126,6 +7128,37 @@ class ProxyStatusResponse(BaseModel):
     # В этом случае Telegram-клиенты не смогут подключиться, даже если админка показывает Вкл.
     degraded: bool = False
     handshake: str = "unknown"
+
+
+class VlessStatusResponse(BaseModel):
+    server: str
+    port: int
+    online: bool
+    latency_ms: float | None
+    sni: str
+
+
+@app.get("/admin/vless-status", response_model=VlessStatusResponse)
+def admin_vless_status(req: Request) -> VlessStatusResponse:
+    """TCP до VLESS (Reality на 443) — реальная проверка VPN-сервера, не MTProxy."""
+    _require_admin(req)
+    server = XRAY_SERVER_IP or ""
+    port = int(XRAY_CLIENT_PORT or 443)
+    if not server:
+        return VlessStatusResponse(server="", port=port, online=False, latency_ms=None, sni=XRAY_SNI)
+    online = False
+    latency_ms: float | None = None
+    try:
+        start = time.monotonic()
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock.settimeout(5)
+        sock.connect((server, port))
+        latency_ms = round((time.monotonic() - start) * 1000, 1)
+        online = True
+        sock.close()
+    except Exception:
+        online = False
+    return VlessStatusResponse(server=server, port=port, online=online, latency_ms=latency_ms, sni=XRAY_SNI)
 
 
 @app.get("/admin/proxy-status", response_model=ProxyStatusResponse)
