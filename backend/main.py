@@ -457,9 +457,9 @@ def _verified_payment_clause(model: type[Subscription] = Subscription):
 
 
 def _vpn_subscription_url(telegram_id: int) -> str:
-    """Subscription URL: base64 VLESS для Happ auto-update."""
+    """Subscription URL: Clash YAML для Happ (flow + routing); token обязателен."""
     token = _vpn_sub_token(telegram_id)
-    return f"{PUBLIC_BASE_URL}/vpn/subscription/{telegram_id}?token={token}"
+    return f"{PUBLIC_BASE_URL}/vpn/clash/{telegram_id}?token={token}"
 
 
 def _backfill_trial_offer_rows() -> None:
@@ -3951,6 +3951,7 @@ def _xray_add_client(tg_id: int, preferred_uuid: str | None = None) -> tuple[str
     }
     result = _xray_req("POST", "/panel/api/inbounds/addClient", payload)
     if result and result.get("success"):
+        _xray_restart_service()
         return client_uuid, vless_link
 
     # Грациозная обработка "Duplicate email": клиент уже существует в 3X-UI
@@ -3959,6 +3960,7 @@ def _xray_add_client(tg_id: int, preferred_uuid: str | None = None) -> tuple[str
         logger.info("3X-UI addClient duplicate for tg_id=%s — trying updateClient", tg_id)
         if _xray_update_client(tg_id, client_uuid):
             logger.info("3X-UI updateClient OK for tg_id=%s", tg_id)
+            _xray_restart_service()
             return client_uuid, vless_link
         # updateClient не сработал — клиент есть, но UUID другой. Считаем успехом.
         logger.info("3X-UI client already exists for tg_id=%s (duplicate email, returning link)", tg_id)
@@ -3992,6 +3994,15 @@ def _xray_delete_client(client_uuid: str) -> bool:
     """Delete a client from 3X-UI inbound. Returns True on success."""
     result = _xray_req("POST", f"/panel/api/inbounds/{XRAY_INBOUND_ID}/delClient/{client_uuid}")
     return isinstance(result, dict) and result.get("success", False)
+
+
+def _xray_restart_service() -> None:
+    """Reload running xray after addClient — иначе клиент есть в панели, но нет в bin/config.json (Happ: N/A)."""
+    result = _xray_req("POST", "/panel/api/server/restartXrayService", body=None, timeout=15)
+    if isinstance(result, dict) and result.get("success"):
+        logger.info("3X-UI: xray restarted after client change")
+    else:
+        logger.warning("3X-UI: restartXrayService failed or unsupported: %s", result)
 
 
 def _ensure_xray_client(tg_id: int, db: Session) -> tuple[str, str] | None:
