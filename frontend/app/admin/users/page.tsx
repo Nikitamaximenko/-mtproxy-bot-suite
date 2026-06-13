@@ -285,7 +285,7 @@ export default function UsersPage() {
                       <th className="py-3 pr-4 font-medium">Пользователь</th>
                       <th className="py-3 pr-4 font-medium">Оплата</th>
                       <th className="py-3 pr-4 font-medium">Доступ</th>
-                      <th className="py-3 pr-4 font-medium">VPN / MTProxy</th>
+                      <th className="py-3 pr-4 font-medium">VPN / VPN</th>
                       <th className="py-3 pr-4 font-medium">Истекает</th>
                       <th className="py-3 font-medium">Автоплатёж</th>
                     </tr>
@@ -314,7 +314,7 @@ export default function UsersPage() {
                           <td className="py-4 pr-4 align-top">
                             <p className="text-sm text-foreground">{vpnLabel(sub, vpnClient)}</p>
                             <p className="text-xs text-muted-foreground mt-1">
-                              MTProxy: {sub.has_proxy ? "выдан" : "нет"}{vpnClient ? ` · UUID ${vpnClient.uuid_prefix}` : ""}
+                              VPN: {sub.has_proxy ? "выдан" : "нет"}{vpnClient ? ` · UUID ${vpnClient.uuid_prefix}` : ""}
                             </p>
                           </td>
                           <td className="py-4 pr-4 align-top text-sm text-foreground">{formatAdminDate(sub.expires_at)}</td>

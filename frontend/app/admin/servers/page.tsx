@@ -123,7 +123,7 @@ export default function ServersPage() {
   return (
     <AdminPageChrome
       title="Серверы"
-      subtitle="MTProxy и VPN Reality"
+      subtitle="VPN Reality"
       note="Автообновление каждые 30 секунд"
     >
       <div className="space-y-6">
@@ -137,7 +137,7 @@ export default function ServersPage() {
             <div className="bg-card rounded-xl p-4 border border-border">
               <div className="flex items-center gap-2 text-muted-foreground text-sm mb-1">
                 <Server className="w-4 h-4" />
-                MTProxy
+                VPN
               </div>
               <p className="text-2xl font-semibold text-foreground">{proxyStateLabel(proxy)}</p>
               <p className="text-xs text-muted-foreground mt-2">
@@ -175,7 +175,7 @@ export default function ServersPage() {
           <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
             <section className="bg-card rounded-xl border border-border p-5 space-y-4">
               <div>
-                <h2 className="font-semibold text-foreground">MTProxy</h2>
+                <h2 className="font-semibold text-foreground">VPN</h2>
                 <p className="text-sm text-muted-foreground">Реальное состояние TCP/handshake, без фиктивных uptime-графиков</p>
               </div>
 
@@ -211,7 +211,7 @@ export default function ServersPage() {
               {proxy?.degraded ? (
                 <div className="rounded-xl border border-warning/30 bg-warning/10 px-4 py-3 text-sm text-foreground flex items-start gap-2">
                   <AlertTriangle className="w-4 h-4 mt-0.5 text-warning shrink-0" />
-                  Порт открыт, но ответ не похож на корректный MTProxy. Это надо проверять на сервере.
+                  Порт открыт, но ответ не похож на корректный VPN. Это надо проверять на сервере.
                 </div>
               ) : null}
             </section>

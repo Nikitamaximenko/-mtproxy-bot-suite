@@ -120,7 +120,7 @@ function TgIdFallbackScreen({ onContinue }: { onContinue: (id: number) => void }
       <div className="w-full max-w-sm space-y-6 text-center">
         <FrostIcon className="w-14 h-14 mx-auto" style={{ color: "#2AABEE" } as React.CSSProperties} />
         <div>
-          <h1 className="text-xl font-bold" style={{ color: "#111827" }}>Frosty — 2 в 1, оплата</h1>
+          <h1 className="text-xl font-bold" style={{ color: "#111827" }}>Frosty VPN — оплата</h1>
           <p className="text-sm mt-2 leading-relaxed" style={{ color: "#6B7280" }}>
             Из Telegram страница откроется сама. В браузере укажите свой{" "}
             <span className="font-medium" style={{ color: "#111827" }}>Telegram ID</span> — тот же, к которому привяжется подписка.
@@ -330,7 +330,7 @@ export default function MiniAppPage() {
   const [renewCheckoutOpen, setRenewCheckoutOpen] = useState(false)
 
   // VPN state
-  // Дефолтный таб = VPN: это главный продукт. MTProxy — приятный бонус,
+  // Дефолтный таб = VPN: это главный продукт. VPN — приятный бонус,
   // но акцент сознательно смещён на VPN, т.к. именно он открывает Instagram/TikTok/YouTube.
   const [activeTab, setActiveTab] = useState<"vpn" | "proxy">("vpn")
   const [vpn, setVpn] = useState<VpnData | null>(null)
@@ -624,7 +624,7 @@ export default function MiniAppPage() {
     if (proxyLink) {
       if (!openTelegramLink(proxyLink)) {
         setProxyConnectError(
-          "Ссылка прокси неполная. Подождите минуту и нажмите снова или напишите в поддержку."
+          "Ссылка VPN неполная. Подождите минуту и нажмите снова или напишите в поддержку."
         )
       }
       return
@@ -644,7 +644,7 @@ export default function MiniAppPage() {
         if (data.proxy_link) {
           if (!openTelegramLink(data.proxy_link)) {
             setProxyConnectError(
-              "Ссылка прокси неполная. Подождите минуту и нажмите снова или напишите в поддержку."
+              "Ссылка VPN неполная. Подождите минуту и нажмите снова или напишите в поддержку."
             )
           }
         }

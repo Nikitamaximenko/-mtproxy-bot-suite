@@ -5,7 +5,7 @@ type Phase =
   | "polling"      // автоматический поллинг после редиректа с Lava
   | "not_found"    // поллинг не дал результата — просим email
   | "checking"     // ручная проверка по введённому email
-  | "done"         // подписка найдена, показываем прокси
+  | "done"         // подписка найдена, показываем VPN
 
 async function fetchStatus(query: string): Promise<{ active: boolean; proxy_link?: string }> {
   const res = await fetch(`/api/subscription-status?${query}`)
@@ -60,7 +60,7 @@ export default function SuccessPage() {
       attempts++
       try {
         const data = await fetchStatus(query)
-        // Оплата подтверждена в БД; прокси может появиться на следующем опросе (гонка с вебхуком).
+        // Оплата подтверждена в БД; VPN-ссылка может появиться на следующем опросе (гонка с вебхуком).
         if (data.active) {
           if (data.proxy_link) {
             handleFound(data.proxy_link)
@@ -167,7 +167,7 @@ export default function SuccessPage() {
               Проверить подписку
             </h1>
             <p style={{ color: "#6B7280", fontSize: "14px", lineHeight: "1.5", marginBottom: "24px" }}>
-              Введите email, который указывали при оплате — и мы покажем вашу ссылку на прокси.
+              Введите email, который указывали при оплате — и мы покажем инструкцию по подключению VPN.
             </p>
             <div style={{ textAlign: "left" }}>
               <label style={{ display: "block", fontSize: "12px", fontWeight: 600, color: "#6B7280", marginBottom: "6px" }}>
@@ -214,13 +214,13 @@ export default function SuccessPage() {
         {phase === "done" && (
           <>
             <div style={{ fontSize: "48px", marginBottom: "16px" }}>🧊</div>
-            <h1 style={{ fontSize: "24px", fontWeight: 700, color: "#111827", marginBottom: "4px" }}>Подписка 2 в 1 активна!</h1>
-            <p style={{ color: "#6B7280", fontSize: "14px", marginBottom: "20px" }}>📡 Прокси для Telegram + 🛡 VPN для всего остального</p>
+            <h1 style={{ fontSize: "24px", fontWeight: 700, color: "#111827", marginBottom: "4px" }}>Подписка VPN активна!</h1>
+            <p style={{ color: "#6B7280", fontSize: "14px", marginBottom: "20px" }}>🛡 VPN для Telegram, Instagram, TikTok и YouTube</p>
             {proxyLink ? (
               <>
                 <div style={{ textAlign: "left", marginBottom: "24px" }}>
                   <p style={{ fontSize: "15px", fontWeight: 700, color: "#111827", marginBottom: "8px" }}>
-                    📡 Шаг 1 — Подключите Telegram прокси
+                    🛡 Подключите VPN через Happ
                   </p>
                   <a
                     href={proxyLink}
@@ -230,16 +230,16 @@ export default function SuccessPage() {
                       textDecoration: "none", lineHeight: "52px", textAlign: "center", marginBottom: "8px",
                     }}
                   >
-                    Подключить прокси в Telegram →
+                    Открыть мини-приложение →
                   </a>
                   <p style={{ fontSize: "13px", color: "#6B7280" }}>
-                    Telegram откроется и предложит добавить прокси — нажмите «Добавить»
+                    В мини-приложении скопируйте ссылку для Happ или нажмите «Открыть в Happ»
                   </p>
                 </div>
 
                 <div style={{ textAlign: "left" }}>
                   <p style={{ fontSize: "15px", fontWeight: 700, color: "#111827", marginBottom: "8px" }}>
-                    🛡 Шаг 2 — Подключите VPN через Happ
+                    Как подключить
                   </p>
                   <div style={{ background: "#F7F8FA", borderRadius: "14px", padding: "16px", marginBottom: "12px" }}>
                     <p style={{ fontSize: "14px", color: "#374151", marginBottom: "12px", lineHeight: "1.6" }}>
@@ -279,7 +279,7 @@ export default function SuccessPage() {
               </>
             ) : (
               <p style={{ color: "#6B7280", fontSize: "14px", marginBottom: "24px", lineHeight: "1.5" }}>
-                Подписка активирована. Откройте бота @FrostyBot и нажмите /start — появится ссылка на прокси и доступ к VPN.
+                Подписка активирована. Откройте бота @FrostyBot и нажмите /start — появится доступ к VPN в мини-приложении.
               </p>
             )}
             <div style={{ textAlign: "center" }}>

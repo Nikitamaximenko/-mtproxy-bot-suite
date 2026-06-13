@@ -1,4 +1,4 @@
-# MTProxy Bot Suite
+# VPN Bot Suite
 
 Монорепа со структурой:
 

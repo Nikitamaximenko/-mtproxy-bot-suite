@@ -300,7 +300,7 @@ export default function AnalyticsPage() {
                     <Clock3 className="w-5 h-5 text-primary" />
                     <div>
                       <h2 className="font-semibold text-foreground">Инфраструктура сейчас</h2>
-                      <p className="text-sm text-muted-foreground">Текущее состояние MTProxy и VPN без выдуманных серверов</p>
+                      <p className="text-sm text-muted-foreground">Текущее состояние VPN без выдуманных серверов</p>
                     </div>
                   </div>
 
@@ -308,7 +308,7 @@ export default function AnalyticsPage() {
                     <div className="rounded-xl bg-secondary/50 border border-border p-4">
                       <div className="flex items-center justify-between gap-3">
                         <div>
-                          <p className="text-sm text-muted-foreground">MTProxy</p>
+                          <p className="text-sm text-muted-foreground">VPN</p>
                           <p className="font-medium text-foreground mt-1">
                             {proxy ? `${proxy.server}:${proxy.port}` : "Нет данных"}
                           </p>
@@ -342,7 +342,7 @@ export default function AnalyticsPage() {
                     {proxy?.degraded ? (
                       <div className="rounded-xl border border-warning/30 bg-warning/10 px-4 py-3 text-sm text-foreground flex items-start gap-2">
                         <AlertTriangle className="w-4 h-4 mt-0.5 text-warning shrink-0" />
-                        Порт отвечает, но поведение не похоже на нормальный MTProxy. Telegram-клиентам это может мешать.
+                        Порт отвечает, но поведение не похоже на нормальный VPN. Telegram-клиентам это может мешать.
                       </div>
                     ) : null}
                   </div>

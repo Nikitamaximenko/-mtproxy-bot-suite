@@ -4,14 +4,14 @@ import { articles } from "./articles"
 import { SITE_URL } from "@/lib/site"
 
 export const metadata: Metadata = {
-  title: "Блог Frosty — Telegram, MTProxy и VPN в России",
+  title: "Блог Frosty — Telegram, VPN в России",
   description:
-    "75+ гайдов, топов и разборов мифов про Telegram, MTProxy и VPN в России: регионы, Happ, YouTube, Instagram, ChatGPT.",
+    "75+ гайдов, топов и разборов мифов про Telegram, VPN в России: регионы, Happ, YouTube, Instagram, ChatGPT.",
   keywords: [
     "блог telegram",
-    "mtproxy гайды",
+    "vpn гайды",
     "vpn россия гайд",
-    "настройка прокси телеграм",
+    "настройка vpn телеграм",
     "обход блокировки instagram",
     "vpn для youtube",
     "telegram москва",
@@ -19,8 +19,8 @@ export const metadata: Metadata = {
   ].join(", "),
   alternates: { canonical: `${SITE_URL}/blog` },
   openGraph: {
-    title: "Блог Frosty — Telegram, MTProxy и VPN в России",
-    description: "Гайды и разборы про Telegram, MTProxy и VPN в России.",
+    title: "Блог Frosty — Telegram, VPN в России",
+    description: "Гайды и разборы про Telegram, VPN в России.",
     url: `${SITE_URL}/blog`,
     siteName: "Frosty",
     locale: "ru_RU",
@@ -125,10 +125,10 @@ export default function BlogPage() {
             margin: "0 0 8px",
           }}
         >
-          Блог Frosty — Telegram, прокси и VPN в России
+          Блог Frosty — Telegram, VPN в России
         </h1>
         <p style={{ color: "#6B7280", fontSize: "16px", margin: "0 0 24px", lineHeight: 1.6 }}>
-          {articles.length} статей: гайды, топы, мифы и региональные инструкции для России. MTProxy,
+          {articles.length} статей: гайды, топы, мифы и региональные инструкции для России. VPN,
           Happ, YouTube, Instagram — без воды.
         </p>
         <p style={{ margin: "0 0 40px" }}>

@@ -1,7 +1,7 @@
 import { ImageResponse } from "next/og"
 
 export const runtime = "edge"
-export const alt = "Frosty — MTProxy + VPN для Telegram и соцсетей"
+export const alt = "Frosty — VPN для Telegram и соцсетей"
 export const size = { width: 1200, height: 630 }
 export const contentType = "image/png"
 
@@ -59,7 +59,7 @@ export default function OGImage() {
               letterSpacing: 1,
             }}
           >
-            2 в 1 — Прокси + VPN
+            VPN
           </div>
           <div style={{ fontSize: 76, fontWeight: 800, lineHeight: 1.05, letterSpacing: -1.5 }}>
             Telegram, Instagram, YouTube
@@ -68,7 +68,7 @@ export default function OGImage() {
             работают без тормозов
           </div>
           <div style={{ fontSize: 30, fontWeight: 500, color: "#E2E8F0", marginTop: 12 }}>
-            Личный MTProxy + VPN · 299 ₽/мес · без логов
+            Личный VPN · 299 ₽/мес · без логов
           </div>
         </div>
 

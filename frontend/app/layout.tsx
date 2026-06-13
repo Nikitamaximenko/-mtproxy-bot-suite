@@ -32,15 +32,15 @@ export const viewport: Viewport = {
 export const metadata: Metadata = {
   metadataBase: new URL(SITE_URL),
   title: {
-    default: 'Frosty — MTProxy + VPN для Telegram, Instagram, YouTube',
+    default: 'Frosty — VPN для Telegram, Instagram, YouTube',
     template: '%s | Frosty',
   },
-  description: 'Личный MTProxy для Telegram и VPN для Instagram, TikTok, YouTube и ChatGPT — всё в одной подписке. 299 ₽/мес, подключение за минуту.',
+  description: 'Личный VPN и VPN для Instagram, TikTok, YouTube и ChatGPT — всё в одной подписке. 299 ₽/мес, подключение за минуту.',
   applicationName: 'Frosty',
-  keywords: 'telegram прокси, mtproxy, vpn, телеграм прокси россия, обход блокировки telegram, vpn для instagram, vpn для youtube, vpn россия 2025, frosty',
+  keywords: 'vpn, vpn telegram россия, обход блокировки telegram, vpn для instagram, vpn для youtube, vpn россия 2025, frosty',
   openGraph: {
-    title: 'Frosty — MTProxy + VPN в одной подписке',
-    description: 'Личный MTProxy + VPN в одной подписке. 299 ₽/мес.',
+    title: 'Frosty — VPN в одной подписке',
+    description: 'Личный VPN в одной подписке. 299 ₽/мес.',
     url: SITE_URL,
     siteName: 'Frosty',
     locale: 'ru_RU',

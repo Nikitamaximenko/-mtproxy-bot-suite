@@ -261,15 +261,15 @@ export function FrostyLanding() {
   const faqItems = [
     {
       question: "Как работает Frosty?",
-      answer: "Frosty использует технологию MTProxy, которая встраивается прямо в Telegram. Вы добавляете прокси одним нажатием в боте, и он автоматически активируется при каждом запуске приложения."
+      answer: "Frosty — VPN на протоколе VLESS Reality. Скачиваете Happ, в боте нажимаете «Подключить VPN» — профиль добавляется за секунды. Telegram, Instagram, TikTok и YouTube работают через один VPN."
     },
     {
       question: "Это безопасно для моих данных?",
-      answer: "Абсолютно. Мы не храним логи, не отслеживаем активность и не имеем доступа к вашим сообщениям. Telegram использует сквозное шифрование, которое работает поверх нашего прокси."
+      answer: "Абсолютно. Мы не храним логи, не отслеживаем активность и не имеем доступа к вашим сообщениям. Трафик шифруется на уровне VPN."
     },
     {
-      question: "Нужно ли выключать VPN?",
-      answer: "Нет! Frosty работает независимо от VPN и других приложений. Вы можете использовать их одновременно без каких-либо конфликтов."
+      question: "Нужно ли выключать другой VPN?",
+      answer: "Frosty — полноценный VPN для всего устройства. Если у вас уже включён другой VPN, лучше отключить его перед подключением Frosty, чтобы не было конфликтов."
     },
     {
       question: "Чем отличается Premium от обычного тарифа?",
@@ -330,8 +330,8 @@ export function FrostyLanding() {
 
             {/* Subheadline */}
             <p className="text-lg md:text-xl text-muted-foreground max-w-xl mx-auto mb-8 leading-relaxed text-pretty">
-              Один клик — и Telegram работает без блокировок.
-              <span className="block mt-1">Безопасно. Анонимно. Без VPN.</span>
+              Один клик — и Telegram, Instagram, YouTube работают без блокировок.
+              <span className="block mt-1">Безопасно. Без логов. До 10 устройств.</span>
             </p>
 
             {/* CTA Button */}
@@ -366,7 +366,7 @@ export function FrostyLanding() {
               <FeatureCard
                 icon={Zap}
                 title="Один клик"
-                description="Нажмите кнопку в боте — прокси автоматически добавится в ваш Telegram."
+                description="Нажмите кнопку в боте — VPN-профиль добавится в Happ автоматически."
               />
               <FeatureCard
                 icon={Shield}
@@ -375,8 +375,8 @@ export function FrostyLanding() {
               />
               <FeatureCard
                 icon={Lock}
-                title="Не мешает VPN"
-                description="Работает независимо от других приложений. Никаких конфликтов."
+                title="Всё в одном"
+                description="Telegram, Instagram, TikTok и YouTube — через один VPN-профиль."
               />
             </div>
           </div>
@@ -405,7 +405,7 @@ export function FrostyLanding() {
             </div>
 
             <p className="text-muted-foreground mt-8 text-base max-w-md mx-auto">
-              Прокси добавляется прямо в настройки Telegram. Без вечных включений — просто работает.
+              Скачайте Happ, нажмите кнопку в боте — VPN подключится за минуту.
             </p>
           </div>
         </section>

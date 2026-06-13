@@ -74,7 +74,7 @@ export const ADMIN_NAV_GROUPS: AdminNavGroup[] = [
       {
         href: "/admin/servers",
         label: "Серверы",
-        description: "MTProxy и VPN Reality",
+        description: "VPN Reality",
         icon: Server,
       },
       {

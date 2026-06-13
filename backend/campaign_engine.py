@@ -17,7 +17,7 @@ from typing import Any, Callable
 from sqlalchemy import and_, delete, func, or_, select
 from sqlalchemy.orm import Session
 
-logger = logging.getLogger("mtproxy")
+logger = logging.getLogger("vpn")
 
 # Populated by main.py after models are defined
 MarketingCampaign: Any = None
@@ -175,7 +175,7 @@ def _llm_generate_variants(
     model = (os.getenv("CAMPAIGN_AI_MODEL") or os.getenv("SUPPORT_AI_MODEL") or "openrouter/free").strip()
     referer = (os.getenv("OPENROUTER_HTTP_REFERER") or os.getenv("FRONTEND_URL") or "https://frostybot.ru").strip()
     system = (
-        "Ты копирайтер Telegram-бота Frosty (MTProxy + VPN за {price} ₽/мес). "
+        "Ты копирайтер Telegram-бота Frosty (VPN за {price} ₽/мес). "
         "Пиши короткие продающие сообщения на русском в HTML: <b>, <i>, без markdown. "
         "Используй плейсхолдеры {greeting} и {price}. Опционально {ref_line}. "
         "В конце — мягкая отписка: <i>/stop — больше не пришлём</i>. "
@@ -563,7 +563,7 @@ def seed_default_campaigns(db: Session, *, price_rub: int) -> int:
             "variants": [
                 (
                     "A",
-                    "{greeting}, коротко напомню: <b>Frosty</b> — MTProxy + VPN за <b>{price} ₽/мес</b>.{ref_line}\n\n<i>/stop</i>",
+                    "{greeting}, коротко напомню: <b>Frosty</b> — VPN за <b>{price} ₽/мес</b>.{ref_line}\n\n<i>/stop</i>",
                 ),
                 (
                     "B",
@@ -633,7 +633,7 @@ def seed_default_campaigns(db: Session, *, price_rub: int) -> int:
             "anchor": ANCHOR_TRIAL_ENDS,
             "offset_min": 1440,
             "variants": [
-                ("A", "{greeting}, напомню: Frosty = MTProxy + VPN, <b>{price} ₽/мес</b>."),
+                ("A", "{greeting}, напомню: Frosty = VPN, <b>{price} ₽/мес</b>."),
                 ("B", "{greeting}, одна подписка — Telegram и соцсети, <b>{price} ₽/мес</b>."),
             ],
         },
@@ -685,6 +685,101 @@ def seed_default_campaigns(db: Session, *, price_rub: int) -> int:
     if created:
         db.commit()
     return created
+
+
+def refresh_default_campaign_copy(db: Session, *, price_rub: int) -> int:
+    """Обновить тексты дефолтных A/B-вариантов (без AI), если кампания уже есть в БД."""
+    defaults = [
+        {
+            "slug": "sales_nudge_1",
+            "variants": [
+                (
+                    "A",
+                    "{greeting}, коротко напомню: <b>Frosty</b> — VPN за <b>{price} ₽/мес</b>.{ref_line}\n\n<i>/stop</i>",
+                ),
+                (
+                    "B",
+                    "{greeting}, Telegram без VPN: <b>Frosty</b> ускоряет мессенджер и даёт VPN для соцсетей — <b>{price} ₽/мес</b>.{ref_line}\n\n<i>/stop</i>",
+                ),
+            ],
+        },
+        {
+            "slug": "sales_nudge_2",
+            "variants": [
+                (
+                    "A",
+                    "{greeting}, в Frosty и Telegram, и Instagram через один VPN — <b>{price} ₽/мес</b>.{ref_line}\n\n<i>/stop</i>",
+                ),
+                (
+                    "B",
+                    "{greeting}, один раз настроил — работают Telegram и TikTok. <b>{price} ₽/мес</b>.{ref_line}\n\n<i>/stop</i>",
+                ),
+            ],
+        },
+        {
+            "slug": "sales_nudge_3",
+            "variants": [
+                (
+                    "A",
+                    "{greeting}, последний пинг: Frosty решает тормоза Telegram — <b>{price} ₽/мес</b>.{ref_line}\n\n<i>/stop</i>",
+                ),
+                (
+                    "B",
+                    "{greeting}, если нужен стабильный Telegram без танцев — Frosty, <b>{price} ₽/мес</b>.{ref_line}\n\n<i>/stop</i>",
+                ),
+            ],
+        },
+        {
+            "slug": "trial_followup_1",
+            "variants": [
+                (
+                    "A",
+                    "{greeting}, пробный день закончился — верни доступ за <b>{price} ₽/мес</b>.",
+                ),
+                (
+                    "B",
+                    "{greeting}, триал истёк. Оформи подписку <b>{price} ₽/мес</b> и продолжай без настройки заново.",
+                ),
+            ],
+        },
+        {
+            "slug": "trial_followup_2",
+            "variants": [
+                ("A", "{greeting}, напомню: Frosty = VPN, <b>{price} ₽/мес</b>."),
+                ("B", "{greeting}, одна подписка — Telegram и соцсети, <b>{price} ₽/мес</b>."),
+            ],
+        },
+        {
+            "slug": "trial_followup_3",
+            "variants": [
+                ("A", "{greeting}, последний мягкий пинг после триала — <b>{price} ₽/мес</b>.\n\n<i>/stop</i>"),
+                ("B", "{greeting}, верни доступ в 2 клика — <b>{price} ₽/мес</b>.\n\n<i>/stop</i>"),
+            ],
+        },
+    ]
+    updated = 0
+    for spec in defaults:
+        camp_id = db.execute(
+            select(MarketingCampaign.id).where(MarketingCampaign.slug == spec["slug"]).limit(1)
+        ).scalar_one_or_none()
+        if camp_id is None:
+            continue
+        for key, msg in spec["variants"]:
+            row = db.execute(
+                select(CampaignVariant).where(
+                    CampaignVariant.campaign_id == camp_id,
+                    CampaignVariant.variant_key == key,
+                    CampaignVariant.is_ai_generated == False,  # noqa: E712
+                ).limit(1)
+            ).scalar_one_or_none()
+            if row is None:
+                continue
+            if row.message_html != msg:
+                row.message_html = msg
+                updated += 1
+    if updated:
+        db.commit()
+    return updated
 
 
 def run_push_campaign(

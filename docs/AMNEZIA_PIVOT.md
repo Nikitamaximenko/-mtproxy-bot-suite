@@ -3,6 +3,8 @@
 Документ стратегии: IP `138.124.80.97` вероятно в реестре РКН или режется DPI на VLESS/TCP 443.
 **Реальным пользователям** пока ничего не меняем — только admin-пилот (`VPN_STACK_PILOT_TG_IDS`).
 
+**Без своего VPS:** см. [AMNEZIA_BUSINESS_NO_VPS.md](./AMNEZIA_BUSINESS_NO_VPS.md) (Amnezia Premium + партнёрка).
+
 См. также: [AMNEZIA_SETUP.md](./AMNEZIA_SETUP.md), принципы работы в `.cursor/skills/frosty-amnezia-pivot/`.
 
 ---

@@ -28,7 +28,7 @@ export async function GET() {
   const xml = `<?xml version="1.0" encoding="UTF-8"?>
 <rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom">
   <channel>
-    <title>Блог Frosty — Telegram, MTProxy и VPN в России</title>
+    <title>Блог Frosty — Telegram, VPN в России</title>
     <link>${SITE_URL}/blog</link>
     <description>Гайды, топы и разборы мифов про Telegram, VPN и обход блокировок в РФ</description>
     <language>ru-RU</language>

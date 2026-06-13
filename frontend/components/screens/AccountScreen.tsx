@@ -55,7 +55,7 @@ export function AccountScreen({ isPaid, isConnected }: AccountScreenProps) {
         {/* Proxy link card */}
         <div className="bg-white border border-[#E8E8E8] rounded-2xl p-6 mb-4">
           <div className="flex items-center justify-between mb-4">
-            <span className="text-[#8E8E93]">Ссылка на прокси</span>
+            <span className="text-[#8E8E93]">Ссылка VPN</span>
             <button
               onClick={handleCopy}
               className={cn(

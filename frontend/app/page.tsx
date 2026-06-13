@@ -5,14 +5,14 @@ import { SITE_URL } from "@/lib/site"
 const PRICE_RUB = 299
 
 export const metadata: Metadata = {
-  title: "Frosty — личный MTProxy + VPN для Telegram, Instagram, YouTube (299 ₽/мес)",
+  title: "Frosty — личный VPN для Telegram, Instagram, YouTube (299 ₽/мес)",
   description:
-    "Персональный MTProxy для Telegram и быстрый VPN для Instagram, TikTok, YouTube и ChatGPT в одной подписке. Работает в России без рекламы и логов. 299 ₽ в месяц, подключение за минуту.",
+    "Персональный VPN и быстрый VPN для Instagram, TikTok, YouTube и ChatGPT в одной подписке. Работает в России без рекламы и логов. 299 ₽ в месяц, подключение за минуту.",
   keywords: [
-    "mtproxy",
-    "личный mtproxy",
-    "прокси для telegram",
-    "телеграм прокси",
+    "vpn",
+    "личный vpn",
+    "VPN для Telegram",
+    "vpn telegram россия",
     "vpn для россии",
     "vpn для instagram",
     "vpn для youtube",
@@ -30,7 +30,7 @@ export const metadata: Metadata = {
   publisher: "Frosty",
   category: "technology",
   openGraph: {
-    title: "Frosty — MTProxy + VPN в одной подписке за 299 ₽",
+    title: "Frosty — VPN в одной подписке за 299 ₽",
     description:
       "Telegram, Instagram, TikTok, YouTube, ChatGPT работают как до 2022 года. Личный сервер, без логов, подключение за минуту.",
     url: SITE_URL,
@@ -42,15 +42,15 @@ export const metadata: Metadata = {
         url: `${SITE_URL}/opengraph-image`,
         width: 1200,
         height: 630,
-        alt: "Frosty — MTProxy + VPN для Telegram и соцсетей",
+        alt: "Frosty — VPN для Telegram и соцсетей",
       },
     ],
   },
   twitter: {
     card: "summary_large_image",
-    title: "Frosty — MTProxy + VPN в одной подписке",
+    title: "Frosty — VPN в одной подписке",
     description:
-      "Персональный MTProxy для Telegram и VPN для Instagram, YouTube, TikTok. 299 ₽/мес.",
+      "Персональный VPN и VPN для Instagram, YouTube, TikTok. 299 ₽/мес.",
     images: [`${SITE_URL}/opengraph-image`],
   },
   alternates: {
@@ -71,16 +71,16 @@ export const metadata: Metadata = {
 
 const faqEntries: Array<{ q: string; a: string }> = [
   {
-    q: "Что такое «2 в 1» — чем отличается прокси и VPN?",
-    a: "MTProxy — это режим работы только Telegram: он начинает открываться без рекламы и приложений. VPN (протокол VLESS Reality, приложение Happ) шифрует весь трафик устройства и открывает Instagram, TikTok, YouTube, ChatGPT и любые другие сайты. Frosty даёт и то, и другое в одной подписке.",
+    q: "Что входит в подписку Frosty?",
+    a: "VPN на протоколе VLESS Reality через приложение Happ. Один профиль открывает Telegram, Instagram, TikTok, YouTube, ChatGPT и любые заблокированные сайты. До 10 устройств на одной подписке.",
   },
   {
     q: "На сколько устройств работает одна подписка?",
-    a: "VPN-профиль можно добавить на несколько устройств одновременно (телефон + ноутбук). MTProxy в Telegram работает сразу на всех ваших Telegram-клиентах, куда настроен прокси.",
+    a: "VPN-профиль можно добавить на несколько устройств одновременно (телефон + ноутбук + планшет) — до 10 штук.",
   },
   {
     q: "Нужен ли Telegram, чтобы купить?",
-    a: "Нет. Оплачиваете на сайте банковской картой, на email приходит чек и ссылка. Чтобы получить кнопки «Подключить прокси» и «VPN» — откройте нашего бота в Telegram из письма: подписка привяжется автоматически.",
+    a: "Нет. Оплачиваете на сайте банковской картой, на email приходит чек. Чтобы получить кнопку «Подключить VPN» — откройте нашего бота в Telegram из письма: подписка привяжется автоматически.",
   },
   {
     q: "Какие способы оплаты?",
@@ -88,7 +88,7 @@ const faqEntries: Array<{ q: string; a: string }> = [
   },
   {
     q: "Можно сначала попробовать бесплатно?",
-    a: "Да. В Telegram-боте есть один бесплатный день, чтобы проверить MTProxy и VPN на ваших устройствах и операторе перед оплатой.",
+    a: "Да. В Telegram-боте есть один бесплатный день, чтобы проверить VPN на ваших устройствах и операторе перед оплатой.",
   },
   {
     q: "Вы пишете логи моего трафика?",
@@ -104,10 +104,10 @@ export default function HomePage() {
   const productJsonLd = {
     "@context": "https://schema.org",
     "@type": "Product",
-    name: "Frosty — MTProxy + VPN",
+    name: "Frosty — VPN",
     image: [`${SITE_URL}/opengraph-image`],
     description:
-      "Личный MTProxy для Telegram и VPN (VLESS Reality) для Instagram, TikTok, YouTube, ChatGPT. Персональный сервер, без логов.",
+      "Личный VPN и VPN (VLESS Reality) для Instagram, TikTok, YouTube, ChatGPT. Персональный сервер, без логов.",
     brand: { "@type": "Brand", name: "Frosty" },
     offers: {
       "@type": "Offer",

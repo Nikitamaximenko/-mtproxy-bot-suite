@@ -24,9 +24,9 @@ export const generateProxyAddress = () => {
   const secret = Math.random().toString(36).substring(2, 15).toUpperCase()
   
   return {
-    server: `${servers[Math.floor(Math.random() * servers.length)]}.mtproxy.ru`,
+    server: `${servers[Math.floor(Math.random() * servers.length)]}.frostyvpn.ru`,
     port,
     secret,
-    address: `${servers[Math.floor(Math.random() * servers.length)]}.mtproxy.ru:${port}`
+    address: `${servers[Math.floor(Math.random() * servers.length)]}.frostyvpn.ru:${port}`
   }
 }

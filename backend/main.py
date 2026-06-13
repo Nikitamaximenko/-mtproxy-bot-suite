@@ -61,7 +61,7 @@ DATABASE_URL = _db_url_raw if _db_url_raw else "sqlite:///./app.db"
 PAYMENT_AMOUNT_RUB = int(os.getenv("PAYMENT_AMOUNT_RUB", "299").strip() or "299")
 # Пробный период только через Telegram-бота (привязка к telegram_id), см. POST /bot/grant-trial
 TRIAL_DAYS = max(1, int(os.getenv("TRIAL_DAYS", "1").strip() or "1"))
-# Статусы подписки с полным доступом (прокси + VPN), пока не истёк срок и нет блокировки
+# Статусы подписки с полным доступом (VPN), пока не истёк срок и нет блокировки
 SUBSCRIPTION_ACCESS_STATUSES: tuple[str, ...] = ("paid", "trial")
 
 LAVA_TOP_API_BASE_URL = (os.getenv("LAVA_TOP_API_BASE_URL") or "https://gate.lava.top").rstrip("/")
@@ -86,7 +86,7 @@ YOOKASSA_API_BASE = (os.getenv("YOOKASSA_API_BASE") or "https://api.yookassa.ru/
 
 PUBLIC_BASE_URL = (os.getenv("PUBLIC_BASE_URL") or "http://localhost:8000").rstrip("/")
 
-# MTProxy server config (single server for MVP)
+# VPN server config (single server for MVP)
 MT_PROXY_SERVER = (os.getenv("MT_PROXY_SERVER") or "").strip()
 MT_PROXY_PORT = int(os.getenv("MT_PROXY_PORT", "443").strip() or "443")
 MT_PROXY_SECRET = (os.getenv("MT_PROXY_SECRET") or "").strip()
@@ -234,7 +234,7 @@ def utcnow() -> datetime:
 
 
 logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger("mtproxy")
+logger = logging.getLogger("vpn")
 
 # Числовой id подписки Prodamus (раздел рекуррент / клубы). В ссылке передаётся subscription вместо products.
 _prod_sub_id_raw = (os.getenv("PRODAMUS_SUBSCRIPTION_ID") or "").strip()
@@ -826,6 +826,9 @@ async def lifespan(application: FastAPI) -> AsyncGenerator[None, None]:
             n = _campaign_engine.seed_default_campaigns(seed_db, price_rub=PAYMENT_AMOUNT_RUB)
             if n:
                 logger.info("Seeded %d default marketing campaigns", n)
+            refreshed = _campaign_engine.refresh_default_campaign_copy(seed_db, price_rub=PAYMENT_AMOUNT_RUB)
+            if refreshed:
+                logger.info("Refreshed copy for %d default campaign variants", refreshed)
         finally:
             seed_db.close()
     except Exception:
@@ -856,7 +859,7 @@ async def lifespan(application: FastAPI) -> AsyncGenerator[None, None]:
     yk_task.cancel()
 
 
-app = FastAPI(title="MTProxy Backend", version="0.3.0", lifespan=lifespan)
+app = FastAPI(title="VPN Backend", version="0.3.0", lifespan=lifespan)
 
 
 class HealthResponse(BaseModel):
@@ -1737,7 +1740,7 @@ def _yookassa_receipt(email: str) -> dict[str, Any]:
         "customer": {"email": email.strip().lower()},
         "items": [
             {
-                "description": "Frosty — подписка 2 в 1 (1 мес.)",
+                "description": "Frosty — VPN-подписка (1 мес.)",
                 "quantity": "1.00",
                 "amount": {"value": amt, "currency": "RUB"},
                 "vat_code": 1,
@@ -1761,7 +1764,7 @@ def _yookassa_create_initial_payment(
         "capture": True,
         "confirmation": {"type": "redirect", "return_url": return_url},
         "save_payment_method": True,
-        "description": "Frosty — подписка 2 в 1 (1 мес.)",
+        "description": "Frosty — VPN-подписка (1 мес.)",
         "metadata": {
             "payment_token": payment_token,
             "renewal": "0",
@@ -2359,7 +2362,7 @@ def confirm_yookassa_payment(
 
 
 def _apply_proxy_credentials(sub: Subscription) -> None:
-    """Выдать MTProxy-учётные данные (опционально; если MT_PROXY_SERVER не задан — пропускаем)."""
+    """Выдать VPN-учётные данные (опционально; если MT_PROXY_SERVER не задан — пропускаем)."""
     if not MT_PROXY_SERVER or not MT_PROXY_SECRET:
         return
     sub.proxy_server = MT_PROXY_SERVER
@@ -2415,7 +2418,7 @@ def activate_subscription(sub: Subscription, *, recurring: bool = False) -> None
 
 
 def activate_trial_subscription(sub: Subscription) -> None:
-    """Один раз из бота: MTProxy + срок TRIAL_DAYS, статус trial (не путать с оплатой Lava)."""
+    """Один раз из бота: VPN + срок TRIAL_DAYS, статус trial (не путать с оплатой Lava)."""
     now = utcnow()
     _apply_proxy_credentials(sub)
     sub.is_trial_offer = True
@@ -2473,23 +2476,23 @@ def _sales_nudge_message(step: int, user: User) -> str:
         ref_line = f"\n\nТы заходил по ссылке с меткой <code>{html.escape(user.ref_source)}</code>."
     if step == 1:
         return (
-            f"{g}, коротко напомню: <b>Frosty</b> — это не просто прокси.\n\n"
-            "📡 <b>MTProxy</b> — Telegram работает без ограничений, ничего включать не нужно\n"
-            "🛡 <b>VPN</b> — Instagram, TikTok, YouTube тоже открываются\n\n"
-            f"Всё вместе за <b>{price} ₽/мес</b> — меньше стакана кофе.{ref_line}\n\n"
+            f"{g}, коротко напомню: <b>Frosty</b> — умный VPN за <b>{price} ₽/мес</b>.\n\n"
+            "🛡 Telegram, Instagram, TikTok, YouTube — через одно приложение Happ\n"
+            "⚡ РФ-сайты и банки работают напрямую, без лишних настроек\n\n"
+            f"Меньше стакана кофе в месяц.{ref_line}\n\n"
             "<i>Не хотите напоминания — команда /stop</i>"
         )
     if step == 2:
         return (
-            f"{g}, многие думают, что прокси — только для Telegram. "
-            "В <b>Frosty</b> ещё и VPN для Instagram, TikTok, YouTube — через приложение Happ.\n\n"
-            "Один раз настроил — работают и Telegram, и Instagram, и всё что нужно.\n\n"
+            f"{g}, многие думают, что VPN — это сложно. "
+            "В <b>Frosty</b> подключение за пару минут: Happ + кнопка в боте.\n\n"
+            "Один раз настроил — работают Telegram, Instagram и всё что нужно.\n\n"
             f"<b>{price} ₽/мес</b> · 10 ₽/день · без ограничений по трафику.{ref_line}\n\n"
             "<i>Отписаться от напоминаний: /stop</i>"
         )
     return (
         f"{g}, последний раз: если Telegram тормозит или Instagram не открывается — "
-        "Frosty решает обе проблемы сразу.\n\n"
+        "Frosty VPN решает обе проблемы.\n\n"
         f"<b>{price} ₽/мес</b>. Подключение за 2 минуты.{ref_line}\n\n"
         "<i>/stop — больше не пришлём</i>"
     )
@@ -2500,14 +2503,14 @@ def _trial_followup_message(step: int, user: User) -> str:
     price = PAYMENT_AMOUNT_RUB
     if step == 1:
         return (
-            f"{g}, пробный день закончился, и доступ к Telegram/VPN уже остановлен.\n\n"
+            f"{g}, пробный день закончился, и доступ к VPN уже остановлен.\n\n"
             "Если по скорости и качеству всё подошло — просто верните доступ одной оплатой.\n\n"
-            f"<b>{price} ₽/мес</b> · MTProxy + VPN в одной подписке."
+            f"<b>{price} ₽/мес</b> · до 10 устройств."
         )
     if step == 2:
         return (
-            f"{g}, напомню: в <b>Frosty</b> работает не только Telegram.\n\n"
-            "Одна подписка возвращает и MTProxy, и VPN для Instagram, TikTok, YouTube и сайтов.\n\n"
+            f"{g}, напомню: в <b>Frosty</b> один VPN-профиль открывает и Telegram, и соцсети.\n\n"
+            "Instagram, TikTok, YouTube и сайты — через приложение Happ.\n\n"
             f"<b>{price} ₽/мес</b> · подключение за пару минут."
         )
     return (
@@ -2679,9 +2682,7 @@ def _notify_expiring(tg_id: int, expires_at: datetime) -> None:
     ]
     _send_tg(tg_id, (
         f"\u23f3 <b>\u041f\u043e\u0434\u043f\u0438\u0441\u043a\u0430 \u0437\u0430\u043a\u0430\u043d\u0447\u0438\u0432\u0430\u0435\u0442\u0441\u044f {date_str}</b>\n\n"
-        "\u041f\u043e\u0441\u043b\u0435 \u0438\u0441\u0442\u0435\u0447\u0435\u043d\u0438\u044f:\n"
-        "\u2022 VPN \u043f\u0435\u0440\u0435\u0441\u0442\u0430\u043d\u0435\u0442 \u0440\u0430\u0431\u043e\u0442\u0430\u0442\u044c\n"
-        "\u2022 \u041f\u0440\u043e\u043a\u0441\u0438 \u0434\u043b\u044f Telegram \u043e\u0442\u043a\u043b\u044e\u0447\u0438\u0442\u0441\u044f\n\n"
+        "\u041f\u043e\u0441\u043b\u0435 \u0438\u0441\u0442\u0435\u0447\u0435\u043d\u0438\u044f VPN \u043f\u0435\u0440\u0435\u0441\u0442\u0430\u043d\u0435\u0442 \u0440\u0430\u0431\u043e\u0442\u0430\u0442\u044c.\n\n"
         "\u041f\u0440\u043e\u0434\u043b\u0438\u0442\u0435 \u0447\u0442\u043e\u0431\u044b \u0432\u0441\u0451 \u043f\u0440\u043e\u0434\u043e\u043b\u0436\u0430\u043b\u043e \u0440\u0430\u0431\u043e\u0442\u0430\u0442\u044c \U0001f447"
     ), {"inline_keyboard": buttons})
 
@@ -2692,7 +2693,7 @@ def _notify_expired(tg_id: int) -> None:
     ]
     _send_tg(tg_id, (
         "\u274c <b>\u041f\u043e\u0434\u043f\u0438\u0441\u043a\u0430 \u0438\u0441\u0442\u0435\u043a\u043b\u0430</b>\n\n"
-        "VPN \u0438 \u043f\u0440\u043e\u043a\u0441\u0438 \u0431\u043e\u043b\u044c\u0448\u0435 \u043d\u0435 \u0440\u0430\u0431\u043e\u0442\u0430\u044e\u0442.\n\n"
+        "VPN \u0431\u043e\u043b\u044c\u0448\u0435 \u043d\u0435 \u0440\u0430\u0431\u043e\u0442\u0430\u0435\u0442.\n\n"
         "\u041e\u0444\u043e\u0440\u043c\u0438\u0442\u0435 \u0437\u0430\u043d\u043e\u0432\u043e \u2014 \u043f\u043e\u0434\u043a\u043b\u044e\u0447\u0435\u043d\u0438\u0435 \u0437\u0430\u0439\u043c\u0451\u0442 2 \u043c\u0438\u043d\u0443\u0442\u044b."
     ), {"inline_keyboard": buttons})
 
@@ -2706,8 +2707,8 @@ def _notify_trial_expired(tg_id: int) -> None:
         tg_id,
         (
             "\u23f0 <b>\u041f\u0440\u043e\u0431\u043d\u044b\u0439 \u0434\u0435\u043d\u044c \u0437\u0430\u043a\u043e\u043d\u0447\u0438\u043b\u0441\u044f</b>\n\n"
-            "\u0414\u043e\u0441\u0442\u0443\u043f \u043a MTProxy \u0438 VPN \u043f\u0440\u0438\u043e\u0441\u0442\u0430\u043d\u043e\u0432\u043b\u0435\u043d.\n\n"
-            "\u041e\u0444\u043e\u0440\u043c\u0438\u0442\u0435 \u043f\u043e\u0434\u043f\u0438\u0441\u043a\u0443 \u2014 \u0447\u0442\u043e\u0431\u044b \u0441\u0440\u0430\u0437\u0443 \u0432\u0435\u0440\u043d\u0443\u0442\u044c \u0434\u043e\u0441\u0442\u0443\u043f \u043a Telegram \u0438 VPN \u0431\u0435\u0437 \u043d\u043e\u0432\u043e\u0439 \u043d\u0430\u0441\u0442\u0440\u043e\u0439\u043a\u0438."
+            "\u0414\u043e\u0441\u0442\u0443\u043f \u043a VPN \u043f\u0440\u0438\u043e\u0441\u0442\u0430\u043d\u043e\u0432\u043b\u0435\u043d.\n\n"
+            "\u041e\u0444\u043e\u0440\u043c\u0438\u0442\u0435 \u043f\u043e\u0434\u043f\u0438\u0441\u043a\u0443 \u2014 \u0447\u0442\u043e\u0431\u044b \u0441\u0440\u0430\u0437\u0443 \u0432\u0435\u0440\u043d\u0443\u0442\u044c \u0434\u043e\u0441\u0442\u0443\u043f \u0431\u0435\u0437 \u043d\u043e\u0432\u043e\u0439 \u043d\u0430\u0441\u0442\u0440\u043e\u0439\u043a\u0438."
         ),
         {"inline_keyboard": buttons},
     )
@@ -2717,13 +2718,13 @@ def _renewal_failed_notify_text(*, first: bool) -> str:
     if first:
         return (
             "<b>Автопродление не прошло</b>\n\n"
-            "Доступ к VPN и MTProxy <b>отключён</b>: не удалось списать оплату "
+            "Доступ к VPN и VPN <b>отключён</b>: не удалось списать оплату "
             "(недостаточно средств, карта просрочена или отклонена банком).\n\n"
             "Обновите способ оплаты и возобновите подписку в приложении."
         )
     return (
         "<b>Подписка всё ещё не оплачена</b>\n\n"
-        "Доступ к VPN и MTProxy остаётся заблокированным. "
+        "Доступ к VPN и VPN остаётся заблокированным. "
         "Оформите оплату в приложении, чтобы снова подключиться."
     )
 
@@ -8099,7 +8100,7 @@ class ProxyStatusResponse(BaseModel):
     port: int
     online: bool
     latency_ms: float | None
-    # degraded=True: TCP открыт, но сервер ведёт себя не как MTProxy
+    # degraded=True: TCP открыт, но сервер ведёт себя не как VPN
     # (сразу закрыл соединение или немедленно шлёт данные без клиентского приветствия).
     # В этом случае Telegram-клиенты не смогут подключиться, даже если админка показывает Вкл.
     degraded: bool = False
@@ -8258,7 +8259,7 @@ def admin_vpn_egress_test(req: Request, db: Session = Depends(get_db)) -> dict:
 
 @app.get("/admin/vless-status", response_model=VlessStatusResponse)
 def admin_vless_status(req: Request) -> VlessStatusResponse:
-    """TCP до VLESS (Reality на 443) — реальная проверка VPN-сервера, не MTProxy."""
+    """TCP до VLESS (Reality на 443) — реальная проверка VPN-сервера, не VPN."""
     _require_admin(req)
     server = XRAY_SERVER_IP or ""
     port = int(XRAY_CLIENT_PORT or 443)
@@ -8301,7 +8302,7 @@ def admin_proxy_status(req: Request) -> ProxyStatusResponse:
         latency_ms = round((time.monotonic() - start) * 1000, 1)
         online = True
 
-        # MTProxy молча ждёт клиентский обфусцированный handshake. Здоровый сервер НЕ отдаёт
+        # VPN молча ждёт клиентский обфусцированный handshake. Здоровый сервер НЕ отдаёт
         # ничего в ответ на тишину клиента и не закрывает соединение мгновенно. Если мы получаем
         # закрытие / данные — это скорее всего чужой сервис или неправильный процесс на порту.
         sock.settimeout(1.5)

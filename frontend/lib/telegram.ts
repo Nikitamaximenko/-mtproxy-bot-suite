@@ -114,7 +114,7 @@ function isCustomAppDeepLink(url: string): boolean {
  * Собирает канонический `tg://proxy?server=…&port=…&secret=…` из любой строки API.
  * Нельзя полагаться только на regexp: иначе не матчится `tg://proxy/?…`, лишний слэш и т.п.,
  * код ниже делает `tg://` → `https://t.me/…`, а `openTelegramLink(https://t.me/proxy?…)`
- * в Telegram Desktop открывает профиль @proxy вместо диалога MTProxy.
+ * в Telegram Desktop открывает профиль @proxy вместо диалога VPN.
  */
 function parseMtProxyTgLink(raw: string): string | null {
   const s = raw.trim()

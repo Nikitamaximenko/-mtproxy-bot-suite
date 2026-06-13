@@ -4,7 +4,7 @@ import { articles } from "../articles"
 export const runtime = "edge"
 export const size = { width: 1200, height: 630 }
 export const contentType = "image/png"
-export const alt = "Frosty — статья о Telegram, прокси и VPN"
+export const alt = "Frosty — статья о Telegram, VPN"
 
 export default async function OGImage({ params }: { params: Promise<{ slug: string }> }) {
   const { slug } = await params

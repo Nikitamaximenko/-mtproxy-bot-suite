@@ -22,7 +22,7 @@ export function AdminDashboardOverview({ stats, proxy, vpnOnline, subscribers = 
     <div className="space-y-4">
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         <div className="bg-card border border-border rounded-xl p-5">
-          <p className="text-xs text-muted-foreground font-medium mb-3">MTProxy</p>
+          <p className="text-xs text-muted-foreground font-medium mb-3">VPN</p>
           {proxy ? (
             proxy.handshake === "not_configured" ? (
               <p className="text-sm text-muted-foreground">Отключён — только VLESS VPN.</p>

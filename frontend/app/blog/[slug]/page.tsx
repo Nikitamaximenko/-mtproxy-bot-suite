@@ -174,7 +174,7 @@ export default async function ArticlePage({
         >
           <div style={{ fontSize: "24px", marginBottom: "8px" }}>❄️</div>
           <div style={{ fontWeight: 700, fontSize: "18px", color: "#111827", marginBottom: "8px" }}>
-            Frosty — личный прокси + VPN для Telegram
+            Frosty — личный VPN для Telegram
           </div>
           <div style={{ color: "#6B7280", fontSize: "14px", marginBottom: "20px" }}>
             299 ₽/мес · Instagram, YouTube, TikTok, ChatGPT · Работает на iOS, Android, Windows, Mac

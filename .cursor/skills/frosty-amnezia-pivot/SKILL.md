@@ -13,7 +13,15 @@ description: >-
 - «Перепродать Amnezia», «база на AmneziaWG», миграция с Happ.
 - Admin-only тесты нового стека.
 
-## Радикальный план (кратко)
+## Без VPS (предпочтительно пользователю)
+
+См. `docs/AMNEZIA_BUSINESS_NO_VPS.md`:
+
+- **Amnezia Premium** — серверы Amnezia, ключ `vpn://` из cp.amnezia.org.
+- **Партнёрка** — https://amnezia.org/partners (affiliate@amnezia.org), до 40% с продаж.
+- Документация AmneziaWG — про **протокол**, не про реселл; self-hosted = нужен VPS.
+
+## Радикальный план self-hosted (если свой сервер)
 
 1. **Новый VPS** (не 138.124.80.97) — Финляндия/Нидерланды, **только** AmneziaWG, без x-ui на 443.
 2. **UDP-порт** 1–9999 (сейчас 3568), открыть в UFW.
