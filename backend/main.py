@@ -6232,7 +6232,7 @@ def admin_campaign_detail(campaign_id: int, req: Request, db: Session = Depends(
         cta_type=c.cta_type,
         cta_label=c.cta_label,
         ai_prompt=c.ai_prompt,
-        ai_available=bool((os.getenv("OPENROUTER_API_KEY") or "").strip()),
+        ai_available=_campaign_engine.openrouter_configured(),
     )
 
 

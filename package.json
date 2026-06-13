@@ -4,9 +4,10 @@
   "private": true,
   "scripts": {
     "dev": "pnpm --filter frontend dev",
-    "build": "pnpm --filter frontend build",
-    "start": "pnpm --filter frontend start",
-    "lint": "pnpm --filter frontend lint"
+    "build": "npm install --prefix frontend && npm run build --prefix frontend",
+    "build:pnpm": "pnpm --filter frontend build",
+    "start": "npm run start --prefix frontend",
+    "lint": "npm run lint --prefix frontend"
   },
   "dependencies": {
     "@vercel/analytics": "1.6.1",

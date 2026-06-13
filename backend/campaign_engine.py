@@ -11,6 +11,7 @@ import time
 import urllib.error
 import urllib.request
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 from typing import Any, Callable
 
 from sqlalchemy import and_, delete, func, or_, select
@@ -139,13 +140,35 @@ def _campaign_keyboard(
     }
 
 
+def _resolve_openrouter_key() -> str:
+    """Inference key: env, then bot cache file (management keys return 401 on /chat/completions)."""
+    cache_candidates = [
+        (os.getenv("OPENROUTER_INFERENCE_CACHE") or "").strip(),
+        "/opt/frostyvpn/bot/.openrouter_inference_key",
+        str(Path(__file__).resolve().parent.parent / "bot" / ".openrouter_inference_key"),
+    ]
+    for raw in cache_candidates:
+        if not raw:
+            continue
+        p = Path(raw)
+        if p.is_file():
+            cached = p.read_text(encoding="utf-8").strip()
+            if cached:
+                return cached
+    return (os.getenv("OPENROUTER_API_KEY") or os.getenv("OPENAI_API_KEY") or "").strip()
+
+
+def openrouter_configured() -> bool:
+    return bool(_resolve_openrouter_key())
+
+
 def _llm_generate_variants(
     *,
     prompt: str,
     count: int,
     price_rub: int,
 ) -> list[str]:
-    api_key = (os.getenv("OPENROUTER_API_KEY") or os.getenv("OPENAI_API_KEY") or "").strip()
+    api_key = _resolve_openrouter_key()
     if not api_key:
         raise RuntimeError("OPENROUTER_API_KEY не задан — автогенерация недоступна")
     base = (os.getenv("OPENAI_BASE_URL") or "https://openrouter.ai/api/v1").rstrip("/")
@@ -178,8 +201,14 @@ def _llm_generate_variants(
         },
         method="POST",
     )
-    with urllib.request.urlopen(req, timeout=90) as resp:
-        data = json.loads(resp.read().decode())
+    try:
+        with urllib.request.urlopen(req, timeout=90) as resp:
+            data = json.loads(resp.read().decode())
+    except urllib.error.HTTPError as e:
+        body = e.read().decode(errors="replace")[:300] if e.fp else ""
+        raise RuntimeError(f"OpenRouter HTTP {e.code}: {body or e.reason}") from e
+    except urllib.error.URLError as e:
+        raise RuntimeError(f"OpenRouter недоступен: {e.reason}") from e
     content = (((data.get("choices") or [{}])[0]).get("message") or {}).get("content") or ""
     content = content.strip()
     if content.startswith("```"):
