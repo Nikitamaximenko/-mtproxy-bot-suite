@@ -127,6 +127,47 @@
   --radius-2xl: calc(var(--radius) + 12px);
 }
 
+/* Tailwind v4 не всегда генерирует shadcn-утилиты из @theme — объявляем явно. */
+@utility text-foreground {
+  color: var(--foreground);
+}
+
+@utility text-muted-foreground {
+  color: var(--muted-foreground);
+}
+
+@utility text-primary-foreground {
+  color: var(--primary-foreground);
+}
+
+@utility bg-background {
+  background-color: var(--background);
+}
+
+@utility bg-primary {
+  background-color: var(--primary);
+}
+
+@utility bg-secondary {
+  background-color: var(--secondary);
+}
+
+@utility bg-muted {
+  background-color: var(--muted);
+}
+
+@utility bg-destructive {
+  background-color: var(--destructive);
+}
+
+@utility border-border {
+  border-color: var(--border);
+}
+
+@utility ring-primary {
+  --tw-ring-color: var(--primary);
+}
+
 @layer base {
   * {
     @apply border-border outline-ring/50;
