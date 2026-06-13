@@ -6090,6 +6090,7 @@ class CampaignDetailResponse(BaseModel):
     cta_type: str
     cta_label: str | None
     ai_prompt: str | None
+    ai_available: bool = False
 
 
 class CampaignCreateRequest(BaseModel):
@@ -6140,6 +6141,17 @@ class CampaignPushResponse(BaseModel):
     ok: bool
     sent: int
     total_queued: int
+
+
+class CampaignTestSendRequest(BaseModel):
+    telegram_id: int | None = Field(None, ge=1)
+
+
+class CampaignTestSendResponse(BaseModel):
+    ok: bool
+    telegram_id: int
+    variant_key: str
+    delivery_id: int
 
 
 class CampaignClickRequest(BaseModel):
@@ -6220,6 +6232,7 @@ def admin_campaign_detail(campaign_id: int, req: Request, db: Session = Depends(
         cta_type=c.cta_type,
         cta_label=c.cta_label,
         ai_prompt=c.ai_prompt,
+        ai_available=bool((os.getenv("OPENROUTER_API_KEY") or "").strip()),
     )
 
 
@@ -6362,6 +6375,39 @@ def admin_campaign_run_push(campaign_id: int, req: Request, db: Session = Depend
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
     return CampaignPushResponse(ok=True, sent=sent, total_queued=sent)
+
+
+@app.post("/admin/campaigns/{campaign_id}/send-test", response_model=CampaignTestSendResponse)
+def admin_campaign_send_test(
+    campaign_id: int,
+    payload: CampaignTestSendRequest,
+    req: Request,
+    db: Session = Depends(get_db),
+) -> CampaignTestSendResponse:
+    _require_admin(req)
+    if not BOT_TOKEN:
+        raise HTTPException(status_code=503, detail="BOT_TOKEN not configured")
+    default_tg = int((os.getenv("BOT_ADMIN_TELEGRAM_IDS") or "231115635").split(",")[0].strip())
+    tg_id = int(payload.telegram_id or default_tg)
+    try:
+        result = _campaign_engine.send_campaign_test(
+            db,
+            campaign_id,
+            tg_id,
+            send_tg=_send_tg,
+            miniapp_url_fn=_miniapp_public_url,
+            price_rub=PAYMENT_AMOUNT_RUB,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    if not result.get("ok"):
+        raise HTTPException(status_code=502, detail="Telegram send failed")
+    return CampaignTestSendResponse(
+        ok=True,
+        telegram_id=int(result["telegram_id"]),
+        variant_key=str(result["variant_key"]),
+        delivery_id=int(result["delivery_id"]),
+    )
 
 
 @app.post("/internal/campaign/click", response_model=OkResponse)

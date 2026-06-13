@@ -21,13 +21,13 @@ export default function CampaignsPage() {
   }, [router])
 
   const handleError = useCallback(
-    (msg: string) => {
-      if (msg.includes("403")) {
+    (err: unknown) => {
+      if (err instanceof AdminAuthError) {
         clearStoredAdminKey()
         router.replace("/admin")
         return
       }
-      setError(msg)
+      setError(err instanceof Error ? err.message : "Ошибка")
     },
     [router],
   )

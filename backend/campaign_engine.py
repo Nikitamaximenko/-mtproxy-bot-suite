@@ -714,3 +714,53 @@ def run_push_campaign(
             ids.append(tg)
     db.commit()
     return ids, sent
+
+
+def send_campaign_test(
+    db: Session,
+    campaign_id: int,
+    tg_id: int,
+    *,
+    send_tg: Callable[[int, str, dict | None], bool],
+    miniapp_url_fn: Callable[[int], str],
+    price_rub: int,
+) -> dict[str, Any]:
+    """Send one campaign message to a single Telegram ID (admin smoke test)."""
+    from types import SimpleNamespace
+
+    camp = db.get(MarketingCampaign, campaign_id)
+    if camp is None:
+        raise ValueError("campaign not found")
+    variants = db.execute(
+        select(CampaignVariant).where(CampaignVariant.campaign_id == campaign_id).order_by(CampaignVariant.variant_key)
+    ).scalars().all()
+    if not variants:
+        raise ValueError("no variants")
+    user = db.execute(select(User).where(User.telegram_id == tg_id)).scalar_one_or_none()
+    if user is None:
+        user = SimpleNamespace(telegram_id=tg_id, first_name="Тест", username=None, ref_source=None)
+    variant = variants[0]
+    body = _render_placeholders(variant.message_html, user, price_rub=price_rub)
+    text = f"🧪 <b>Тест кампании</b> «{html.escape(camp.name)}»\n\n{body}"
+    now = _utcnow()
+    delivery = CampaignDelivery(
+        campaign_id=campaign_id,
+        variant_id=variant.id,
+        telegram_id=tg_id,
+        sent_at=now,
+        delivered_ok=False,
+    )
+    db.add(delivery)
+    db.flush()
+    kb = _campaign_keyboard(camp, delivery.id, tg_id, miniapp_url_fn=miniapp_url_fn)
+    ok = send_tg(tg_id, text, kb)
+    delivery.delivered_ok = bool(ok)
+    if not ok:
+        delivery.error = "send_failed"
+    db.commit()
+    return {
+        "ok": bool(ok),
+        "telegram_id": tg_id,
+        "variant_key": variant.variant_key,
+        "delivery_id": delivery.id,
+    }

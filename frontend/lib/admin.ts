@@ -75,6 +75,7 @@ export type CampaignDetail = {
   cta_type: string
   cta_label: string | null
   ai_prompt: string | null
+  ai_available?: boolean
 }
 
 export type CampaignVariantStats = {
