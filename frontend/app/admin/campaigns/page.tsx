@@ -38,8 +38,12 @@ export default function CampaignsPage() {
     <AdminPageChrome
       title="Кампании"
       subtitle="Push-рассылки, drip-цепочки, A/B тесты текстов и статистика конверсии"
-      note={error || undefined}
     >
+      {error ? (
+        <div className="rounded-xl border border-destructive/30 bg-destructive/10 px-4 py-3 text-sm text-destructive mb-6">
+          {error}
+        </div>
+      ) : null}
       <AdminCampaignsPanel adminKey={adminKey} onError={handleError} />
     </AdminPageChrome>
   )
