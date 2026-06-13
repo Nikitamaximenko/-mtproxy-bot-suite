@@ -54,6 +54,28 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ pat
   }
 }
 
+export async function PATCH(req: NextRequest, { params }: { params: Promise<{ path: string[] }> }) {
+  const { path } = await params
+  const adminKey = req.headers.get("x-admin-key") || ""
+  const backendPath = `/admin/${path.join("/")}${req.nextUrl.search}`
+  const body = await req.text()
+
+  try {
+    const res = await fetch(`${BACKEND_URL}${backendPath}`, {
+      method: "PATCH",
+      cache: "no-store",
+      headers: {
+        "Content-Type": "application/json",
+        "x-admin-key": adminKey,
+      },
+      body,
+    })
+    return proxyJsonResponse(res)
+  } catch {
+    return NextResponse.json({ error: "Backend unavailable" }, { status: 502 })
+  }
+}
+
 export async function DELETE(req: NextRequest, { params }: { params: Promise<{ path: string[] }> }) {
   const { path } = await params
   const adminKey = req.headers.get("x-admin-key") || ""

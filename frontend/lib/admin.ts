@@ -48,6 +48,58 @@ export type FunnelStats = {
   analytics_scoped?: boolean
 }
 
+export type CampaignListItem = {
+  id: number
+  slug: string
+  name: string
+  kind: string
+  status: string
+  audience: string
+  trigger_anchor: string | null
+  trigger_offset_minutes: number | null
+  total_sent: number
+  variants_count: number
+}
+
+export type CampaignVariantItem = {
+  id: number
+  variant_key: string
+  weight: number
+  message_html: string
+  is_ai_generated: boolean
+}
+
+export type CampaignDetail = {
+  campaign: CampaignListItem
+  variants: CampaignVariantItem[]
+  cta_type: string
+  cta_label: string | null
+  ai_prompt: string | null
+}
+
+export type CampaignVariantStats = {
+  variant_id: number
+  variant_key: string
+  weight: number
+  is_ai_generated: boolean
+  sent: number
+  clicks: number
+  converted: number
+  ctr_pct: number
+  conversion_pct: number
+  message_preview: string
+}
+
+export type CampaignStats = {
+  campaign_id: number
+  slug: string
+  name: string
+  status: string
+  kind: string
+  total_sent: number
+  variants: CampaignVariantStats[]
+}
+
 export type ProxyStatus = {
   server: string
   port: number

@@ -1315,6 +1315,18 @@ async def main() -> None:
         if msg and isinstance(msg, Message):
             await msg.answer("Готово — рассылки отключены. Вернуться можно через /start.")
 
+    @dp.callback_query(lambda c: (c.data or "").startswith("camp:clk:"))
+    async def _campaign_click(query: CallbackQuery) -> None:
+        raw = (query.data or "").split(":")
+        delivery_id = int(raw[2]) if len(raw) > 2 and raw[2].isdigit() else 0
+        if delivery_id > 0:
+            session = _get_session(dp)
+            try:
+                await backend_post(session, "/internal/campaign/click", {"delivery_id": delivery_id})
+            except Exception:
+                _log.exception("campaign click log failed delivery_id=%s", delivery_id)
+        await query.answer("👍")
+
     @dp.callback_query(lambda c: (c.data or "").startswith("checkout:prov:"))
     async def _checkout_pick_provider(query: CallbackQuery, state: FSMContext) -> None:
         msg = query.message

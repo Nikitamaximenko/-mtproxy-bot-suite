@@ -47,6 +47,8 @@ from sqlalchemy import (
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column, sessionmaker
 
+import campaign_engine as _campaign_engine
+
 
 load_dotenv()
 
@@ -411,9 +413,73 @@ class CheckoutLog(Base):
     )
 
 
+class MarketingCampaign(Base):
+    """Push / drip / lifecycle кампания с A/B вариантами."""
+
+    __tablename__ = "marketing_campaigns"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    slug: Mapped[str] = mapped_column(String(64), unique=True, index=True, nullable=False)
+    name: Mapped[str] = mapped_column(String(128), nullable=False)
+    kind: Mapped[str] = mapped_column(String(16), default="drip", nullable=False)  # drip|push|lifecycle
+    status: Mapped[str] = mapped_column(String(16), default="draft", index=True, nullable=False)
+    audience: Mapped[str] = mapped_column(String(32), default="non_payer", nullable=False)
+    trigger_anchor: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    trigger_offset_minutes: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    cta_type: Mapped[str] = mapped_column(String(16), default="miniapp", nullable=False)
+    cta_label: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    ai_prompt: Mapped[str | None] = mapped_column(String(2000), nullable=True)
+    scheduled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow, nullable=False)
+
+
+class CampaignVariant(Base):
+    __tablename__ = "campaign_variants"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    campaign_id: Mapped[int] = mapped_column(Integer, index=True, nullable=False)
+    variant_key: Mapped[str] = mapped_column(String(8), nullable=False)
+    weight: Mapped[int] = mapped_column(Integer, default=50, nullable=False)
+    message_html: Mapped[str] = mapped_column(String(4000), nullable=False)
+    is_ai_generated: Mapped[bool] = mapped_column(Boolean, default=False, server_default=sa_false(), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
+
+
+class CampaignDelivery(Base):
+    __tablename__ = "campaign_deliveries"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    campaign_id: Mapped[int] = mapped_column(Integer, index=True, nullable=False)
+    variant_id: Mapped[int] = mapped_column(Integer, index=True, nullable=False)
+    telegram_id: Mapped[int] = mapped_column(BigInteger, index=True, nullable=False)
+    sent_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, index=True, nullable=False)
+    delivered_ok: Mapped[bool] = mapped_column(Boolean, default=False, server_default=sa_false(), nullable=False)
+    error: Mapped[str | None] = mapped_column(String(255), nullable=True)
+
+
+class CampaignEvent(Base):
+    __tablename__ = "campaign_events"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    delivery_id: Mapped[int] = mapped_column(Integer, index=True, nullable=False)
+    event_type: Mapped[str] = mapped_column(String(32), index=True, nullable=False)  # click|converted_paid|opt_out
+    meta_json: Mapped[str | None] = mapped_column(String(2000), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, index=True, nullable=False)
+
+
 connect_args = {"check_same_thread": False} if DATABASE_URL.startswith("sqlite:") else {}
 engine = create_engine(DATABASE_URL, future=True, connect_args=connect_args)
 SessionLocal = sessionmaker(bind=engine, class_=Session, autocommit=False, autoflush=False, future=True)
+
+_campaign_engine.bind_models(
+    marketing_campaign=MarketingCampaign,
+    campaign_variant=CampaignVariant,
+    campaign_delivery=CampaignDelivery,
+    campaign_event=CampaignEvent,
+    user=User,
+    subscription=Subscription,
+)
 
 
 def get_db() -> Generator[Session, None, None]:
@@ -755,6 +821,13 @@ async def lifespan(application: FastAPI) -> AsyncGenerator[None, None]:
     try:
         Base.metadata.create_all(bind=engine)
         _migrate()
+        seed_db = SessionLocal()
+        try:
+            n = _campaign_engine.seed_default_campaigns(seed_db, price_rub=PAYMENT_AMOUNT_RUB)
+            if n:
+                logger.info("Seeded %d default marketing campaigns", n)
+        finally:
+            seed_db.close()
     except Exception:
         logger.exception("Startup failed during create_all / _migrate — check DATABASE_URL and DB reachability")
         raise
@@ -1850,6 +1923,14 @@ def _apply_yookassa_payment_object(db: Session, payment: dict[str, Any]) -> None
     if pay_id:
         sub.yookassa_last_applied_payment_id = pay_id
     db.commit()
+    try:
+        _campaign_engine.record_conversion_for_user(
+            db,
+            int(sub.telegram_id),
+            paid_clause=_verified_payment_clause(),
+        )
+    except Exception:
+        logger.exception("Campaign conversion record failed tg_id=%s", sub.telegram_id)
     if not is_renewal:
         _record_checkout_log(
             source="backend",
@@ -2438,77 +2519,24 @@ def _trial_followup_message(step: int, user: User) -> str:
 
 
 def _process_sales_nudges() -> None:
-    """Отложенные напоминания неплатящим (раз в час вместе с expiration loop)."""
+    """Drip-кампании с A/B (заменяет фиксированные nudge_1/2/3)."""
     if not BOT_TOKEN or not FRONTEND_URL:
         return
     db = SessionLocal()
     try:
-        now = utcnow()
-        paid_rows = db.execute(
-            select(Subscription.telegram_id)
-            .where(_real_paid_subscription_clause())
-            .distinct()
-        ).scalars().all()
-        paid_set = set(paid_rows)
-
-        trial_rows = db.execute(
-            select(Subscription).where(
-                Subscription.telegram_id > 0,
-                Subscription.is_trial_offer == True,  # noqa: E712
-                Subscription.expires_at.is_not(None),
-            )
-        ).scalars().all()
-        trial_by_user: dict[int, Subscription] = {}
-        for sub in trial_rows:
-            tg = int(sub.telegram_id)
-            prev = trial_by_user.get(tg)
-            if prev is None or ((sub.expires_at or now) > (prev.expires_at or now)):
-                trial_by_user[tg] = sub
-
-        users = db.execute(
-            select(User).where(User.marketing_opt_out == False, User.telegram_id > 0)  # noqa: E712
-        ).scalars().all()
-
-        for user in users:
-            tg = int(user.telegram_id)
-            if tg in paid_set:
-                continue
-
-            trial_sub = trial_by_user.get(tg)
-            if user.trial_consumed_at is not None:
-                trial_expires_at = trial_sub.expires_at if trial_sub and trial_sub.expires_at else (user.trial_consumed_at + timedelta(days=TRIAL_DAYS))
-                if trial_expires_at > now:
-                    continue
-                mini_kb = _sales_subscribe_keyboard(tg)
-                if user.trial_nudge_1_sent_at is None and trial_expires_at + timedelta(minutes=30) <= now:
-                    if _send_tg(tg, _trial_followup_message(1, user), mini_kb):
-                        user.trial_nudge_1_sent_at = now
-                        logger.info("Trial follow-up 1 sent tg_id=%s", tg)
-                elif user.trial_nudge_2_sent_at is None and trial_expires_at + timedelta(hours=24) <= now:
-                    if _send_tg(tg, _trial_followup_message(2, user), mini_kb):
-                        user.trial_nudge_2_sent_at = now
-                        logger.info("Trial follow-up 2 sent tg_id=%s", tg)
-                elif user.trial_nudge_3_sent_at is None and trial_expires_at + timedelta(hours=72) <= now:
-                    if _send_tg(tg, _trial_followup_message(3, user), mini_kb):
-                        user.trial_nudge_3_sent_at = now
-                        logger.info("Trial follow-up 3 sent tg_id=%s", tg)
-                continue
-
-            mini_kb = _sales_subscribe_keyboard(tg)
-            if user.nudge_1_sent_at is None and user.created_at + timedelta(hours=2) <= now:
-                if _send_tg(tg, _sales_nudge_message(1, user), mini_kb):
-                    user.nudge_1_sent_at = now
-                    logger.info("Sales nudge 1 sent tg_id=%s", tg)
-            elif user.nudge_2_sent_at is None and user.created_at + timedelta(hours=24) <= now:
-                if _send_tg(tg, _sales_nudge_message(2, user), mini_kb):
-                    user.nudge_2_sent_at = now
-                    logger.info("Sales nudge 2 sent tg_id=%s", tg)
-            elif user.nudge_3_sent_at is None and user.created_at + timedelta(hours=72) <= now:
-                if _send_tg(tg, _sales_nudge_message(3, user), mini_kb):
-                    user.nudge_3_sent_at = now
-                    logger.info("Sales nudge 3 sent tg_id=%s", tg)
-
-        db.commit()
+        n = _campaign_engine.process_campaigns(
+            db,
+            send_tg=_send_tg,
+            miniapp_url_fn=_miniapp_public_url,
+            paid_clause=_verified_payment_clause(),
+            real_paid_clause=_real_paid_subscription_clause(),
+            price_rub=PAYMENT_AMOUNT_RUB,
+            trial_days=TRIAL_DAYS,
+            bot_token=BOT_TOKEN,
+            frontend_url=FRONTEND_URL,
+        )
+        if n:
+            logger.info("Marketing campaigns drip sent=%d", n)
     except Exception:
         db.rollback()
         raise
@@ -6029,6 +6057,318 @@ class BroadcastRequest(BaseModel):
     )
     # Если True — кнопка открывает мини-апп (web_app) вместо внешней ссылки
     button_web_app: bool = False
+
+
+class CampaignVariantItem(BaseModel):
+    id: int
+    variant_key: str
+    weight: int
+    message_html: str
+    is_ai_generated: bool
+
+
+class CampaignListItem(BaseModel):
+    id: int
+    slug: str
+    name: str
+    kind: str
+    status: str
+    audience: str
+    trigger_anchor: str | None
+    trigger_offset_minutes: int | None
+    total_sent: int
+    variants_count: int
+
+
+class CampaignListResponse(BaseModel):
+    campaigns: list[CampaignListItem]
+
+
+class CampaignDetailResponse(BaseModel):
+    campaign: CampaignListItem
+    variants: list[CampaignVariantItem]
+    cta_type: str
+    cta_label: str | None
+    ai_prompt: str | None
+
+
+class CampaignCreateRequest(BaseModel):
+    slug: str = Field(..., min_length=2, max_length=64)
+    name: str = Field(..., min_length=2, max_length=128)
+    kind: Literal["drip", "push", "lifecycle"] = "drip"
+    audience: str = "non_payer"
+    trigger_anchor: str | None = "user_created"
+    trigger_offset_minutes: int | None = 120
+    cta_type: str = "miniapp"
+    cta_label: str | None = "💳 Оформить подписку"
+    ai_prompt: str | None = None
+    message_a: str = Field(..., min_length=10, max_length=4000)
+    message_b: str | None = Field(None, max_length=4000)
+
+
+class CampaignPatchRequest(BaseModel):
+    name: str | None = None
+    status: Literal["draft", "active", "paused", "archived"] | None = None
+    audience: str | None = None
+    trigger_offset_minutes: int | None = None
+    cta_label: str | None = None
+    ai_prompt: str | None = None
+
+
+class CampaignVariantPatchRequest(BaseModel):
+    message_html: str | None = Field(None, max_length=4000)
+    weight: int | None = Field(None, ge=1, le=100)
+
+
+class CampaignGenerateRequest(BaseModel):
+    count: int = Field(2, ge=1, le=5)
+    prompt: str | None = Field(None, max_length=2000)
+    replace_existing: bool = False
+
+
+class CampaignStatsResponse(BaseModel):
+    campaign_id: int
+    slug: str
+    name: str
+    status: str
+    kind: str
+    total_sent: int
+    variants: list[dict[str, Any]]
+
+
+class CampaignPushResponse(BaseModel):
+    ok: bool
+    sent: int
+    total_queued: int
+
+
+class CampaignClickRequest(BaseModel):
+    delivery_id: int = Field(..., ge=1)
+
+
+@app.get("/admin/campaigns", response_model=CampaignListResponse)
+def admin_campaigns_list(req: Request, db: Session = Depends(get_db)) -> CampaignListResponse:
+    _require_admin(req)
+    rows = db.execute(select(MarketingCampaign).order_by(MarketingCampaign.id.desc())).scalars().all()
+    items: list[CampaignListItem] = []
+    for c in rows:
+        sent = db.execute(
+            select(func.count())
+            .select_from(CampaignDelivery)
+            .where(CampaignDelivery.campaign_id == c.id, CampaignDelivery.delivered_ok == True)  # noqa: E712
+        ).scalar() or 0
+        vc = db.execute(
+            select(func.count()).select_from(CampaignVariant).where(CampaignVariant.campaign_id == c.id)
+        ).scalar() or 0
+        items.append(
+            CampaignListItem(
+                id=c.id,
+                slug=c.slug,
+                name=c.name,
+                kind=c.kind,
+                status=c.status,
+                audience=c.audience,
+                trigger_anchor=c.trigger_anchor,
+                trigger_offset_minutes=c.trigger_offset_minutes,
+                total_sent=int(sent),
+                variants_count=int(vc),
+            )
+        )
+    return CampaignListResponse(campaigns=items)
+
+
+@app.get("/admin/campaigns/{campaign_id}", response_model=CampaignDetailResponse)
+def admin_campaign_detail(campaign_id: int, req: Request, db: Session = Depends(get_db)) -> CampaignDetailResponse:
+    _require_admin(req)
+    c = db.get(MarketingCampaign, campaign_id)
+    if c is None:
+        raise HTTPException(status_code=404, detail="Campaign not found")
+    sent = db.execute(
+        select(func.count())
+        .select_from(CampaignDelivery)
+        .where(CampaignDelivery.campaign_id == c.id, CampaignDelivery.delivered_ok == True)  # noqa: E712
+    ).scalar() or 0
+    vc = db.execute(
+        select(func.count()).select_from(CampaignVariant).where(CampaignVariant.campaign_id == c.id)
+    ).scalar() or 0
+    variants = db.execute(
+        select(CampaignVariant).where(CampaignVariant.campaign_id == c.id).order_by(CampaignVariant.variant_key)
+    ).scalars().all()
+    return CampaignDetailResponse(
+        campaign=CampaignListItem(
+            id=c.id,
+            slug=c.slug,
+            name=c.name,
+            kind=c.kind,
+            status=c.status,
+            audience=c.audience,
+            trigger_anchor=c.trigger_anchor,
+            trigger_offset_minutes=c.trigger_offset_minutes,
+            total_sent=int(sent),
+            variants_count=int(vc),
+        ),
+        variants=[
+            CampaignVariantItem(
+                id=v.id,
+                variant_key=v.variant_key,
+                weight=v.weight,
+                message_html=v.message_html,
+                is_ai_generated=bool(v.is_ai_generated),
+            )
+            for v in variants
+        ],
+        cta_type=c.cta_type,
+        cta_label=c.cta_label,
+        ai_prompt=c.ai_prompt,
+    )
+
+
+@app.get("/admin/campaigns/{campaign_id}/stats", response_model=CampaignStatsResponse)
+def admin_campaign_stats(campaign_id: int, req: Request, db: Session = Depends(get_db)) -> CampaignStatsResponse:
+    _require_admin(req)
+    try:
+        data = _campaign_engine.campaign_stats(db, campaign_id)
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e)) from e
+    return CampaignStatsResponse(**data)
+
+
+@app.post("/admin/campaigns", response_model=CampaignDetailResponse)
+def admin_campaign_create(payload: CampaignCreateRequest, req: Request, db: Session = Depends(get_db)) -> CampaignDetailResponse:
+    _require_admin(req)
+    slug = payload.slug.strip().lower().replace(" ", "_")
+    exists = db.execute(select(MarketingCampaign.id).where(MarketingCampaign.slug == slug).limit(1)).scalar_one_or_none()
+    if exists is not None:
+        raise HTTPException(status_code=409, detail="slug already exists")
+    camp = MarketingCampaign(
+        slug=slug,
+        name=payload.name.strip(),
+        kind=payload.kind,
+        status="draft",
+        audience=payload.audience,
+        trigger_anchor=payload.trigger_anchor,
+        trigger_offset_minutes=payload.trigger_offset_minutes,
+        cta_type=payload.cta_type,
+        cta_label=payload.cta_label,
+        ai_prompt=payload.ai_prompt,
+    )
+    db.add(camp)
+    db.flush()
+    db.add(
+        CampaignVariant(
+            campaign_id=camp.id,
+            variant_key="A",
+            weight=50,
+            message_html=payload.message_a.strip(),
+        )
+    )
+    if payload.message_b and payload.message_b.strip():
+        db.add(
+            CampaignVariant(
+                campaign_id=camp.id,
+                variant_key="B",
+                weight=50,
+                message_html=payload.message_b.strip(),
+            )
+        )
+    db.commit()
+    return admin_campaign_detail(camp.id, req, db)
+
+
+@app.patch("/admin/campaigns/{campaign_id}", response_model=CampaignDetailResponse)
+def admin_campaign_patch(
+    campaign_id: int,
+    payload: CampaignPatchRequest,
+    req: Request,
+    db: Session = Depends(get_db),
+) -> CampaignDetailResponse:
+    _require_admin(req)
+    c = db.get(MarketingCampaign, campaign_id)
+    if c is None:
+        raise HTTPException(status_code=404, detail="Campaign not found")
+    if payload.name is not None:
+        c.name = payload.name.strip()
+    if payload.status is not None:
+        c.status = payload.status
+    if payload.audience is not None:
+        c.audience = payload.audience
+    if payload.trigger_offset_minutes is not None:
+        c.trigger_offset_minutes = payload.trigger_offset_minutes
+    if payload.cta_label is not None:
+        c.cta_label = payload.cta_label
+    if payload.ai_prompt is not None:
+        c.ai_prompt = payload.ai_prompt
+    c.updated_at = utcnow()
+    db.commit()
+    return admin_campaign_detail(campaign_id, req, db)
+
+
+@app.patch("/admin/campaigns/variants/{variant_id}", response_model=OkResponse)
+def admin_campaign_variant_patch(
+    variant_id: int,
+    payload: CampaignVariantPatchRequest,
+    req: Request,
+    db: Session = Depends(get_db),
+) -> OkResponse:
+    _require_admin(req)
+    v = db.get(CampaignVariant, variant_id)
+    if v is None:
+        raise HTTPException(status_code=404, detail="Variant not found")
+    if payload.message_html is not None:
+        v.message_html = payload.message_html.strip()
+    if payload.weight is not None:
+        v.weight = int(payload.weight)
+    db.commit()
+    return OkResponse(ok=True)
+
+
+@app.post("/admin/campaigns/{campaign_id}/generate-variants", response_model=CampaignDetailResponse)
+def admin_campaign_generate(
+    campaign_id: int,
+    payload: CampaignGenerateRequest,
+    req: Request,
+    db: Session = Depends(get_db),
+) -> CampaignDetailResponse:
+    _require_admin(req)
+    try:
+        _campaign_engine.generate_campaign_variants(
+            db,
+            campaign_id,
+            count=payload.count,
+            prompt=payload.prompt,
+            price_rub=PAYMENT_AMOUNT_RUB,
+            replace_existing=payload.replace_existing,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e)) from e
+    except RuntimeError as e:
+        raise HTTPException(status_code=503, detail=str(e)) from e
+    return admin_campaign_detail(campaign_id, req, db)
+
+
+@app.post("/admin/campaigns/{campaign_id}/run-push", response_model=CampaignPushResponse)
+def admin_campaign_run_push(campaign_id: int, req: Request, db: Session = Depends(get_db)) -> CampaignPushResponse:
+    _require_admin(req)
+    if not BOT_TOKEN:
+        raise HTTPException(status_code=503, detail="BOT_TOKEN not configured")
+    try:
+        _, sent = _campaign_engine.run_push_campaign(
+            db,
+            campaign_id,
+            send_tg=_send_tg,
+            miniapp_url_fn=_miniapp_public_url,
+            paid_clause=_real_paid_subscription_clause(),
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    return CampaignPushResponse(ok=True, sent=sent, total_queued=sent)
+
+
+@app.post("/internal/campaign/click", response_model=OkResponse)
+def internal_campaign_click(payload: CampaignClickRequest, req: Request, db: Session = Depends(get_db)) -> OkResponse:
+    _require_internal_token(req)
+    _campaign_engine.record_campaign_event(db, payload.delivery_id, _campaign_engine.EVENT_CLICK)
+    return OkResponse(ok=True)
 
 
 class BroadcastQueuedResponse(BaseModel):

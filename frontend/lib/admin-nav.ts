@@ -3,6 +3,7 @@ import {
   BarChart3,
   LayoutDashboard,
   Leaf,
+  Megaphone,
   ScrollText,
   Send,
   Server,
@@ -53,6 +54,12 @@ export const ADMIN_NAV_GROUPS: AdminNavGroup[] = [
   {
     label: "Действия",
     items: [
+      {
+        href: "/admin/campaigns",
+        label: "Кампании",
+        description: "Push, A/B тесты, автогенерация текстов",
+        icon: Megaphone,
+      },
       {
         href: "/admin/operations",
         label: "Операции",

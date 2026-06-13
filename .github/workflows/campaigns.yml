@@ -1,0 +1,45 @@
+name: Campaigns
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "backend/campaign_engine.py"
+      - "backend/main.py"
+      - "scripts/test_campaign_engine.py"
+      - "scripts/campaign_cycle_test.py"
+      - ".github/workflows/campaigns.yml"
+  workflow_dispatch:
+
+jobs:
+  unit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install backend deps
+        run: pip install -r backend/requirements.txt
+      - name: Campaign engine unit tests
+        run: python3 scripts/campaign_cycle_test.py --ci
+
+  prod-api:
+    runs-on: ubuntu-latest
+    needs: unit
+    if: github.event_name == 'workflow_dispatch' || github.ref == 'refs/heads/main'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Prod API smoke (if secrets set)
+        env:
+          BACKEND_URL: ${{ secrets.BACKEND_URL }}
+          ADMIN_API_KEY: ${{ secrets.ADMIN_API_KEY }}
+        run: |
+          if [ -z "$BACKEND_URL" ] || [ -z "$ADMIN_API_KEY" ]; then
+            echo "SKIP prod API — secrets not configured"
+            exit 0
+          fi
+          python3 scripts/campaign_cycle_test.py --api
