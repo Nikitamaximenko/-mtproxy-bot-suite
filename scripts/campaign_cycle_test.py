@@ -83,6 +83,9 @@ def run_api() -> int:
 
 
 def run_on_vps() -> int:
+    venv_py = os.environ.get("VENV_PYTHON", "/opt/frostyvpn/.venv/bin/python")
+    if not Path(venv_py).exists():
+        venv_py = sys.executable
     sys.path.insert(0, "/opt/frostyvpn/backend")
     os.chdir("/opt/frostyvpn/backend")
     import campaign_engine as ce  # type: ignore

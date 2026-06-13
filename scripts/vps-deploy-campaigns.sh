@@ -30,7 +30,7 @@ echo "==> Restart backend"
 "${SSH[@]}" "$VPS_HOST" "systemctl restart frostyvpn-backend && sleep 4 && systemctl is-active frostyvpn-backend"
 
 echo "==> On-VPS cycle test"
-"${SSH[@]}" "$VPS_HOST" "cd $REMOTE_BACKEND && python3 $REMOTE_SCRIPTS/campaign_cycle_test.py --on-vps"
+"${SSH[@]}" "$VPS_HOST" "/opt/frostyvpn/.venv/bin/python /opt/frostyvpn/scripts/campaign_cycle_test.py --on-vps"
 
 echo "==> API smoke (admin key from VPS .env)"
 "${SSH[@]}" "$VPS_HOST" 'bash -s' <<'REMOTE'
@@ -40,7 +40,7 @@ ADMIN_API_KEY=$(grep -E '^ADMIN_API_KEY=' .env 2>/dev/null | cut -d= -f2- | tr -
 export BACKEND_URL="https://138-124-80-97.sslip.io:9443"
 export ADMIN_API_KEY
 if [[ -n "$ADMIN_API_KEY" ]]; then
-  python3 /opt/frostyvpn/scripts/campaign_cycle_test.py --api
+  /opt/frostyvpn/.venv/bin/python /opt/frostyvpn/scripts/campaign_cycle_test.py --api
 else
   echo "SKIP API test: ADMIN_API_KEY not in .env"
 fi
