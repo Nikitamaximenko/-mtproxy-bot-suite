@@ -1,5 +1,6 @@
 "use client"
 
+import { TelegramClickbaitPreview } from "@/components/admin/TelegramClickbaitPreview"
 import {
   FunnelStats,
   PRODUCTION_TELEGRAM_IDS,
@@ -40,19 +41,31 @@ type SelfTestResponse = {
   results: SelfTestUserResult[]
 }
 
-type BroadcastStatus = {
-  running: boolean
-  done: boolean
-  total: number
-  sent: number
-  failed: number
-  error: string | null
+type ClickbaitTemplate = {
+  key: string
+  title: string
+  message_html: string
 }
 
-type BroadcastStartResponse = {
-  ok?: boolean
-  queued?: boolean
-  total?: number
+type ClickbaitTemplatesResponse = {
+  button_text: string
+  price_rub: number
+  templates: ClickbaitTemplate[]
+}
+
+type DailyRunRow = {
+  id: number
+  run_date: string | null
+  template_key: string
+  status: string
+  total_recipients: number
+  sent: number
+  failed: number
+  clicks: number
+  conversions: number
+  click_rate_pct: number
+  conversion_rate_pct: number
+  finished_at: string | null
 }
 
 type AdminOperationsPanelProps = {
@@ -90,21 +103,24 @@ export function AdminOperationsPanel({
   onError,
 }: AdminOperationsPanelProps) {
   const [webUsers, setWebUsers] = useState(0)
-  const [broadcastText, setBroadcastText] = useState("")
-  const [includeOptedOut, setIncludeOptedOut] = useState(false)
-  const [broadcastBusy, setBroadcastBusy] = useState(false)
-  const [broadcastResult, setBroadcastResult] = useState<{
+  const [clickbaitTemplates, setClickbaitTemplates] = useState<ClickbaitTemplatesResponse | null>(
+    null,
+  )
+  const [templatesLoading, setTemplatesLoading] = useState(false)
+  const [massBusy, setMassBusy] = useState(false)
+  const [testBusyKey, setTestBusyKey] = useState<string | null>(null)
+  const [massProgress, setMassProgress] = useState<{
+    runId: number
     total: number
     sent: number
     failed: number
     done: boolean
-    error: string | null
+    template_key: string
   } | null>(null)
-  const broadcastPollRef = useRef<ReturnType<typeof setInterval> | null>(null)
-  const [buttonEnabled, setButtonEnabled] = useState(false)
-  const [buttonText, setButtonText] = useState("")
-  const [buttonUrl, setButtonUrl] = useState("")
-  const [cleanupBusy, setCleanupBusy] = useState(false)
+  const dailyPollRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const [dailyRuns, setDailyRuns] = useState<DailyRunRow[]>([])
+  const [dailyMeta, setDailyMeta] = useState<{ enabled: boolean; hour_msk: number } | null>(null)
+  const [dailyListBusy, setDailyListBusy] = useState(false)
   const [cleanupResult, setCleanupResult] = useState<{
     deleted_users: number
     deleted_pending_subscriptions: number
@@ -119,70 +135,151 @@ export function AdminOperationsPanel({
   } | null>(null)
   const [selfTestBusy, setSelfTestBusy] = useState(false)
   const [selfTestResult, setSelfTestResult] = useState<SelfTestResponse | null>(null)
-  const [dailyRuns, setDailyRuns] = useState<
-    Array<{
-      id: number
-      run_date: string | null
-      template_key: string
-      status: string
-      sent: number
-      failed: number
-      clicks: number
-      conversions: number
-      click_rate_pct: number
-      conversion_rate_pct: number
-    }>
-  >([])
-  const [dailyMeta, setDailyMeta] = useState<{ enabled: boolean; hour_msk: number } | null>(null)
-  const [dailyBusy, setDailyBusy] = useState(false)
+
+  const broadcastRecipientEstimate =
+    stats == null ? null : Math.max(0, stats.tg_users - stats.marketing_opt_out_users)
+
+  const loadClickbaitTemplates = useCallback(async () => {
+    if (!adminKey) return
+    setTemplatesLoading(true)
+    try {
+      const data = await fetchAdminJson<ClickbaitTemplatesResponse>(
+        "/api/admin/daily-broadcasts/templates",
+        adminKey,
+      )
+      setClickbaitTemplates(data)
+    } catch (e) {
+      onError(e instanceof Error ? e.message : "Не удалось загрузить шаблоны B/C")
+    } finally {
+      setTemplatesLoading(false)
+    }
+  }, [adminKey, onError])
 
   const loadDailyBroadcasts = useCallback(async () => {
     if (!adminKey) return
+    setDailyListBusy(true)
     try {
       const data = await fetchAdminJson<{
-        runs: typeof dailyRuns
+        runs: DailyRunRow[]
         enabled: boolean
         hour_msk: number
       }>("/api/admin/daily-broadcasts", adminKey)
       setDailyRuns(data.runs ?? [])
       setDailyMeta({ enabled: data.enabled, hour_msk: data.hour_msk })
+      return data.runs ?? []
     } catch {
-      /* optional panel */
+      return []
+    } finally {
+      setDailyListBusy(false)
     }
   }, [adminKey])
 
   useEffect(() => {
+    void loadClickbaitTemplates()
     void loadDailyBroadcasts()
-  }, [loadDailyBroadcasts])
+  }, [loadClickbaitTemplates, loadDailyBroadcasts])
 
-  const runDailyNow = useCallback(
-    async (templateKey?: "B" | "C") => {
+  const stopDailyPolling = useCallback(() => {
+    if (dailyPollRef.current) {
+      clearInterval(dailyPollRef.current)
+      dailyPollRef.current = null
+    }
+  }, [])
+
+  useEffect(() => () => stopDailyPolling(), [stopDailyPolling])
+
+  const pollMassRun = useCallback(
+    async (runId: number) => {
+      const runs = await loadDailyBroadcasts()
+      const run = runs.find((r) => r.id === runId)
+      if (!run) return
+      setMassProgress({
+        runId: run.id,
+        total: run.total_recipients,
+        sent: run.sent,
+        failed: run.failed,
+        done: Boolean(run.finished_at) || run.status === "done" || run.status === "failed",
+        template_key: run.template_key,
+      })
+      if (run.finished_at || run.status === "done" || run.status === "failed") {
+        stopDailyPolling()
+        setMassBusy(false)
+      }
+    },
+    [loadDailyBroadcasts, stopDailyPolling],
+  )
+
+  const sendTestTemplate = useCallback(
+    async (templateKey: "B" | "C") => {
       if (!adminKey) return
-      setDailyBusy(true)
+      setTestBusyKey(templateKey)
       onError("")
       try {
-        const q = templateKey ? `?template_key=${templateKey}` : ""
-        await fetchAdminJson<{ ok: boolean; started: boolean; total?: number }>(
-          `/api/admin/daily-broadcasts/run-now${q}`,
+        await fetchAdminJson<{ ok: boolean; started: boolean }>(
+          "/api/admin/daily-broadcasts/test-send",
           adminKey,
-          { method: "POST" },
+          {
+            method: "POST",
+            body: JSON.stringify({
+              template_key: templateKey,
+              telegram_ids: [...PRODUCTION_TELEGRAM_IDS],
+            }),
+          },
         )
-        setTimeout(() => void loadDailyBroadcasts(), 3000)
+        setTimeout(() => void loadDailyBroadcasts(), 2000)
       } catch (e) {
-        onError(e instanceof Error ? e.message : "Не удалось запустить ежедневную рассылку")
+        onError(e instanceof Error ? e.message : `Не удалось отправить тест ${templateKey}`)
       } finally {
-        setDailyBusy(false)
+        setTestBusyKey(null)
       }
     },
     [adminKey, loadDailyBroadcasts, onError],
   )
 
-  const broadcastRecipientEstimate =
-    stats == null
-      ? null
-      : includeOptedOut
-        ? stats.tg_users
-        : Math.max(0, stats.tg_users - stats.marketing_opt_out_users)
+  const sendMassTemplate = useCallback(
+    async (templateKey?: "B" | "C") => {
+      if (!adminKey || broadcastRecipientEstimate === null || broadcastRecipientEstimate === 0) return
+      const label = templateKey ? `шаблон ${templateKey}` : "следующий шаблон по очереди"
+      const ok = window.confirm(
+        `Отправить ${label} всем ${broadcastRecipientEstimate} получателям?\n\n` +
+          "CTA ведёт в оплату в боте. Без отписавшихся (/stop).",
+      )
+      if (!ok) return
+
+      stopDailyPolling()
+      setMassBusy(true)
+      setMassProgress(null)
+      onError("")
+      try {
+        const q = templateKey ? `?template_key=${templateKey}` : ""
+        const data = await fetchAdminJson<{ started: boolean; run_id?: number; total?: number }>(
+          `/api/admin/daily-broadcasts/run-now${q}`,
+          adminKey,
+          { method: "POST" },
+        )
+        if (data.run_id) {
+          setMassProgress({
+            runId: data.run_id,
+            total: data.total ?? broadcastRecipientEstimate,
+            sent: 0,
+            failed: 0,
+            done: false,
+            template_key: templateKey ?? "?",
+          })
+          dailyPollRef.current = setInterval(() => void pollMassRun(data.run_id!), 2000)
+          void pollMassRun(data.run_id)
+        } else {
+          setMassBusy(false)
+        }
+      } catch (e) {
+        onError(e instanceof Error ? e.message : "Не удалось запустить рассылку")
+        setMassBusy(false)
+      }
+    },
+    [adminKey, broadcastRecipientEstimate, onError, pollMassRun, stopDailyPolling],
+  )
+
+  const [cleanupBusy, setCleanupBusy] = useState(false)
 
   const loadFunnel = useCallback(async () => {
     if (!adminKey) return
@@ -197,87 +294,6 @@ export function AdminOperationsPanel({
   useEffect(() => {
     void loadFunnel()
   }, [loadFunnel])
-
-  const stopBroadcastPolling = useCallback(() => {
-    if (broadcastPollRef.current) {
-      clearInterval(broadcastPollRef.current)
-      broadcastPollRef.current = null
-    }
-  }, [])
-
-  useEffect(() => {
-    return () => stopBroadcastPolling()
-  }, [stopBroadcastPolling])
-
-  const pollBroadcastStatus = useCallback(async () => {
-    if (!adminKey) return
-    try {
-      const s = await fetchAdminJson<BroadcastStatus>("/api/admin/broadcast-status", adminKey)
-      setBroadcastResult({
-        total: s.total,
-        sent: s.sent,
-        failed: s.failed,
-        done: s.done,
-        error: s.error,
-      })
-      if (s.done || !s.running) {
-        stopBroadcastPolling()
-        setBroadcastBusy(false)
-      }
-    } catch {
-      /* ignore poll errors */
-    }
-  }, [adminKey, stopBroadcastPolling])
-
-  const sendBroadcast = useCallback(async () => {
-    const text = broadcastText.trim()
-    if (!text || broadcastRecipientEstimate === null || broadcastRecipientEstimate === 0 || !adminKey) {
-      return
-    }
-
-    const ok = window.confirm(
-      `Отправить сообщение ${broadcastRecipientEstimate} получателям в Telegram?\n\n` +
-        (includeOptedOut
-          ? "Включая отписавшихся от маркетинга."
-          : "Без пользователей, отписавшихся от маркетинга (/stop)."),
-    )
-    if (!ok) return
-
-    stopBroadcastPolling()
-    setBroadcastBusy(true)
-    setBroadcastResult(null)
-    onError("")
-    try {
-      const data = await fetchAdminJson<BroadcastStartResponse>("/api/admin/broadcast", adminKey, {
-        method: "POST",
-        body: JSON.stringify({
-          message: text,
-          include_opted_out: includeOptedOut,
-          ...(buttonEnabled && buttonText.trim() && buttonUrl.trim()
-            ? { button_text: buttonText.trim(), button_url: buttonUrl.trim() }
-            : {}),
-        }),
-      })
-      setBroadcastResult({ total: data.total ?? 0, sent: 0, failed: 0, done: false, error: null })
-      setBroadcastText("")
-      broadcastPollRef.current = setInterval(() => void pollBroadcastStatus(), 2000)
-      void pollBroadcastStatus()
-    } catch (e) {
-      onError(e instanceof Error ? e.message : "Не удалось запустить рассылку")
-      setBroadcastBusy(false)
-    }
-  }, [
-    adminKey,
-    broadcastRecipientEstimate,
-    broadcastText,
-    buttonEnabled,
-    buttonText,
-    buttonUrl,
-    includeOptedOut,
-    onError,
-    pollBroadcastStatus,
-    stopBroadcastPolling,
-  ])
 
   const cleanupWebUsers = useCallback(async () => {
     if (!adminKey) return
@@ -377,191 +393,129 @@ export function AdminOperationsPanel({
   return (
     <div className="space-y-8">
       <section className="space-y-4">
-        <h2 className="text-sm font-medium text-muted-foreground">Рассылка в боте</h2>
-        <div className="bg-card border border-border rounded-2xl p-6 space-y-4">
+        <h2 className="text-sm font-medium text-muted-foreground">Кликбейт-рассылки B / C</h2>
+        <div className="bg-card border border-border rounded-2xl p-6 space-y-6">
           <div className="flex flex-wrap items-baseline gap-x-4 gap-y-1 text-sm">
             <span className="text-muted-foreground">
-              Получателей (оценка):{" "}
+              Получателей (массовая):{" "}
               <strong className="text-foreground font-mono">
                 {broadcastRecipientEstimate === null ? "—" : formatNumber(broadcastRecipientEstimate)}
               </strong>
             </span>
-            {stats != null && (
+            {dailyMeta && (
               <>
                 <span className="text-muted-foreground/60">·</span>
                 <span className="text-muted-foreground">
-                  всего в БД: {formatNumber(stats.total_users)}, отписались от рассылок:{" "}
-                  {formatNumber(stats.marketing_opt_out_users)}
+                  авто {dailyMeta.enabled ? "вкл" : "выкл"} · {dailyMeta.hour_msk}:00 МСK · B↔C
+                </span>
+              </>
+            )}
+            {clickbaitTemplates && (
+              <>
+                <span className="text-muted-foreground/60">·</span>
+                <span className="text-muted-foreground">
+                  цена в тексте: <span className="font-mono">{clickbaitTemplates.price_rub} ₽</span>
                 </span>
               </>
             )}
           </div>
-          <label className="flex items-start gap-3 cursor-pointer select-none text-sm text-foreground max-w-xl">
-            <input
-              type="checkbox"
-              checked={includeOptedOut}
-              onChange={(e) => setIncludeOptedOut(e.target.checked)}
-              disabled={broadcastBusy}
-              className="mt-1 w-4 h-4 shrink-0"
-            />
-            <span>
-              Включить пользователей, отписавшихся от маркетинга (
-              <code className="text-muted-foreground">/stop</code>). По умолчанию они{" "}
-              <strong className="text-warning">не</strong> получают рассылку.
-            </span>
-          </label>
-          <div>
-            <textarea
-              value={broadcastText}
-              onChange={(e) => setBroadcastText(e.target.value.slice(0, 4096))}
-              disabled={broadcastBusy}
-              rows={6}
-              placeholder="Текст для всех получателей…"
-              className="w-full px-4 py-3 bg-secondary border border-border rounded-xl text-foreground placeholder:text-muted-foreground outline-none focus:border-primary focus:ring-1 focus:ring-primary font-mono text-sm resize-y min-h-[120px] disabled:opacity-60"
-            />
-            <div className="flex justify-end mt-1 text-xs text-muted-foreground">
-              {broadcastText.length} / 4096
-            </div>
-          </div>
-          <label className="flex items-center gap-2 cursor-pointer select-none">
-            <input
-              type="checkbox"
-              checked={buttonEnabled}
-              onChange={(e) => setButtonEnabled(e.target.checked)}
-              disabled={broadcastBusy}
-              className="w-4 h-4 shrink-0"
-            />
-            <span className="text-sm text-foreground">Добавить кнопку</span>
-          </label>
-          {buttonEnabled && (
-            <div className="flex flex-col gap-2">
-              <input
-                type="text"
-                value={buttonText}
-                onChange={(e) => setButtonText(e.target.value.slice(0, 64))}
-                disabled={broadcastBusy}
-                placeholder='Текст кнопки, напр. "Подключить →"'
-                className="w-full px-4 py-2 bg-secondary border border-border rounded-xl text-foreground placeholder:text-muted-foreground outline-none focus:border-primary focus:ring-1 focus:ring-primary text-sm disabled:opacity-60"
-              />
-              <input
-                type="url"
-                value={buttonUrl}
-                onChange={(e) => setButtonUrl(e.target.value.slice(0, 2048))}
-                disabled={broadcastBusy}
-                placeholder="URL кнопки, напр. https://t.me/frostytg_bot"
-                className="w-full px-4 py-2 bg-secondary border border-border rounded-xl text-foreground placeholder:text-muted-foreground outline-none focus:border-primary focus:ring-1 focus:ring-primary text-sm disabled:opacity-60"
-              />
-            </div>
-          )}
-          <div className="space-y-3">
-            <button
-              type="button"
-              onClick={() => void sendBroadcast()}
-              disabled={
-                broadcastBusy ||
-                !broadcastText.trim() ||
-                broadcastRecipientEstimate === null ||
-                broadcastRecipientEstimate === 0
-              }
-              className="px-5 py-2.5 text-sm font-semibold rounded-xl bg-primary text-primary-foreground hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed transition-opacity"
-            >
-              {broadcastBusy ? "Отправляем…" : "Отправить рассылку"}
-            </button>
 
-            {broadcastResult && (
-              <div className="space-y-2">
-                {broadcastResult.total > 0 && (
-                  <div className="space-y-1">
-                    <div className="flex justify-between text-xs text-muted-foreground">
-                      <span>
-                        {broadcastResult.done ? "Готово" : "Отправляем…"}{" "}
-                        <span className="text-success font-mono">{broadcastResult.sent}</span>
-                        {" / "}
-                        <span className="font-mono text-foreground">{broadcastResult.total}</span>
-                      </span>
-                      {broadcastResult.failed > 0 && (
-                        <span className="text-destructive">ошибок: {broadcastResult.failed}</span>
-                      )}
-                    </div>
-                    <div className="h-2 bg-secondary rounded-full overflow-hidden">
-                      <div
-                        className={`h-full rounded-full transition-all duration-500 ${
-                          broadcastResult.done ? "bg-success" : "bg-primary"
-                        }`}
-                        style={{
-                          width: `${Math.round(
-                            ((broadcastResult.sent + broadcastResult.failed) / broadcastResult.total) * 100,
-                          )}%`,
-                        }}
-                      />
-                    </div>
+          {templatesLoading && !clickbaitTemplates && (
+            <p className="text-sm text-muted-foreground">Загрузка шаблонов…</p>
+          )}
+
+          {clickbaitTemplates && (
+            <div className="grid gap-6 lg:grid-cols-2">
+              {clickbaitTemplates.templates.map((tpl) => (
+                <div key={tpl.key} className="space-y-4">
+                  <TelegramClickbaitPreview
+                    templateKey={tpl.key}
+                    title={tpl.title}
+                    messageHtml={tpl.message_html}
+                    buttonText={clickbaitTemplates.button_text}
+                  />
+                  <div className="flex flex-wrap gap-2">
+                    <button
+                      type="button"
+                      disabled={testBusyKey !== null || massBusy}
+                      onClick={() => void sendTestTemplate(tpl.key as "B" | "C")}
+                      className="px-4 py-2 text-sm font-semibold rounded-xl bg-secondary text-foreground border border-border hover:bg-secondary/80 disabled:opacity-50"
+                    >
+                      {testBusyKey === tpl.key
+                        ? "Отправляем…"
+                        : `Тест себе (${PRODUCTION_TELEGRAM_IDS.length} prod)`}
+                    </button>
+                    <button
+                      type="button"
+                      disabled={massBusy || testBusyKey !== null || broadcastRecipientEstimate === 0}
+                      onClick={() => void sendMassTemplate(tpl.key as "B" | "C")}
+                      className="px-4 py-2 text-sm font-semibold rounded-xl bg-primary text-primary-foreground hover:opacity-90 disabled:opacity-50"
+                    >
+                      {massBusy ? "Рассылка…" : `Всем — шаблон ${tpl.key}`}
+                    </button>
                   </div>
-                )}
-                {broadcastResult.error && (
-                  <p className="text-xs text-destructive">Ошибка: {broadcastResult.error}</p>
-                )}
-                {broadcastResult.done && !broadcastResult.error && (
-                  <p className="text-xs text-success">
-                    Рассылка завершена: {broadcastResult.sent} доставлено
-                    {broadcastResult.failed > 0
-                      ? `, ${broadcastResult.failed} не доставлено (бот заблокирован)`
-                      : ""}
-                  </p>
-                )}
-              </div>
-            )}
-          </div>
-        </div>
-      </section>
-
-      <section className="space-y-4">
-        <h2 className="text-sm font-medium text-muted-foreground">Ежедневная B/C (кликбейт)</h2>
-        <div className="bg-card border border-border rounded-2xl p-6 space-y-4">
-          <p className="text-sm text-muted-foreground leading-relaxed">
-            Автоматически чередует шаблоны <strong className="text-foreground">B</strong> и{" "}
-            <strong className="text-foreground">C</strong> раз в сутки (МСК). CTA:{" "}
-            <code className="text-xs">dbc:…:buy</code> → оплата в боте. Аналитика: доставки, клики, конверсии в БД.
-          </p>
-          {dailyMeta && (
-            <p className="text-xs text-muted-foreground">
-              Статус: {dailyMeta.enabled ? "включено" : "выключено"} · час отправки (МСK):{" "}
-              <span className="font-mono">{dailyMeta.hour_msk}:00</span>
-            </p>
+                </div>
+              ))}
+            </div>
           )}
-          <div className="flex flex-wrap gap-2">
+
+          <div className="flex flex-wrap gap-2 pt-2 border-t border-border">
             <button
               type="button"
-              disabled={dailyBusy}
-              onClick={() => void runDailyNow()}
-              className="px-4 py-2 text-sm font-semibold rounded-xl bg-primary text-primary-foreground hover:opacity-90 disabled:opacity-50"
+              disabled={massBusy || testBusyKey !== null || broadcastRecipientEstimate === 0}
+              onClick={() => void sendMassTemplate()}
+              className="px-4 py-2 text-sm font-medium rounded-xl border border-border hover:bg-secondary disabled:opacity-50"
             >
-              {dailyBusy ? "Запуск…" : "Отправить сейчас (следующий шаблон)"}
+              Следующий по очереди (B↔C)
             </button>
             <button
               type="button"
-              disabled={dailyBusy}
-              onClick={() => void runDailyNow("B")}
-              className="px-3 py-2 text-xs font-medium rounded-lg border border-border hover:bg-secondary disabled:opacity-50"
-            >
-              Тест B
-            </button>
-            <button
-              type="button"
-              disabled={dailyBusy}
-              onClick={() => void runDailyNow("C")}
-              className="px-3 py-2 text-xs font-medium rounded-lg border border-border hover:bg-secondary disabled:opacity-50"
-            >
-              Тест C
-            </button>
-            <button
-              type="button"
-              disabled={dailyBusy}
-              onClick={() => void loadDailyBroadcasts()}
+              disabled={dailyListBusy}
+              onClick={() => {
+                void loadClickbaitTemplates()
+                void loadDailyBroadcasts()
+              }}
               className="px-3 py-2 text-xs font-medium rounded-lg border border-border hover:bg-secondary disabled:opacity-50"
             >
               Обновить
             </button>
           </div>
+
+          {massProgress && (
+            <div className="space-y-2">
+              <div className="flex justify-between text-xs text-muted-foreground">
+                <span>
+                  {massProgress.done ? "Готово" : "Отправляем…"} · шаблон{" "}
+                  <span className="font-mono">{massProgress.template_key}</span>
+                </span>
+                <span>
+                  <span className="text-success font-mono">{massProgress.sent}</span>
+                  {" / "}
+                  <span className="font-mono">{massProgress.total}</span>
+                  {massProgress.failed > 0 && (
+                    <span className="text-destructive ml-2">ошибок: {massProgress.failed}</span>
+                  )}
+                </span>
+              </div>
+              <div className="h-2 bg-secondary rounded-full overflow-hidden">
+                <div
+                  className={`h-full rounded-full transition-all duration-500 ${
+                    massProgress.done ? "bg-success" : "bg-primary"
+                  }`}
+                  style={{
+                    width: `${Math.min(
+                      100,
+                      Math.round(
+                        ((massProgress.sent + massProgress.failed) / Math.max(massProgress.total, 1)) *
+                          100,
+                      ),
+                    )}%`,
+                  }}
+                />
+              </div>
+            </div>
+          )}
+
           {dailyRuns.length > 0 && (
             <div className="overflow-x-auto">
               <table className="w-full text-xs border-collapse">
@@ -569,6 +523,7 @@ export function AdminOperationsPanel({
                   <tr className="text-left text-muted-foreground border-b border-border">
                     <th className="py-2 pr-3">Дата</th>
                     <th className="py-2 pr-3">Шаблон</th>
+                    <th className="py-2 pr-3">Тип</th>
                     <th className="py-2 pr-3">Sent</th>
                     <th className="py-2 pr-3">Fail</th>
                     <th className="py-2 pr-3">Клики</th>
@@ -581,6 +536,13 @@ export function AdminOperationsPanel({
                     <tr key={r.id} className="border-b border-border/60">
                       <td className="py-2 pr-3 font-mono">{r.run_date ?? "—"}</td>
                       <td className="py-2 pr-3">{r.template_key}</td>
+                      <td className="py-2 pr-3">
+                        {r.status === "test" ? (
+                          <span className="text-warning">тест</span>
+                        ) : (
+                          r.status
+                        )}
+                      </td>
                       <td className="py-2 pr-3">{formatNumber(r.sent)}</td>
                       <td className="py-2 pr-3">{formatNumber(r.failed)}</td>
                       <td className="py-2 pr-3">{formatNumber(r.clicks)}</td>

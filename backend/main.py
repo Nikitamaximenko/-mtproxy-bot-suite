@@ -6545,6 +6545,70 @@ class DailyBroadcastTriggerResponse(BaseModel):
     total: int | None = None
     skipped: bool = False
     reason: str | None = None
+    test: bool = False
+
+
+class DailyBroadcastTemplateItem(BaseModel):
+    key: str
+    title: str
+    message_html: str
+
+
+class DailyBroadcastTemplatesResponse(BaseModel):
+    button_text: str
+    price_rub: int
+    templates: list[DailyBroadcastTemplateItem]
+
+
+class DailyBroadcastTestRequest(BaseModel):
+    template_key: str = Field(..., pattern="^[BC]$")
+    telegram_ids: list[int] = Field(default_factory=list, max_length=20)
+
+
+@app.get("/admin/daily-broadcasts/templates", response_model=DailyBroadcastTemplatesResponse)
+def admin_daily_broadcast_templates(req: Request) -> DailyBroadcastTemplatesResponse:
+    _require_admin(req)
+    cat = _daily_broadcast.template_catalog(PAYMENT_AMOUNT_RUB)
+    return DailyBroadcastTemplatesResponse(
+        button_text=str(cat["button_text"]),
+        price_rub=int(cat["price_rub"]),
+        templates=[DailyBroadcastTemplateItem(**t) for t in cat["templates"]],
+    )
+
+
+@app.post("/admin/daily-broadcasts/test-send", response_model=DailyBroadcastTriggerResponse)
+def admin_daily_broadcast_test_send(
+    payload: DailyBroadcastTestRequest,
+    req: Request,
+    db: Session = Depends(get_db),
+) -> DailyBroadcastTriggerResponse:
+    _require_admin(req)
+    if not BOT_TOKEN:
+        raise HTTPException(status_code=503, detail="BOT_TOKEN not configured")
+    with _daily_lock:
+        if _bcast_state.get("running"):
+            raise HTTPException(status_code=409, detail="Manual broadcast is running")
+    ids = [int(x) for x in payload.telegram_ids if int(x) > 0]
+    if not ids:
+        raise HTTPException(status_code=400, detail="telegram_ids required")
+    result = _daily_broadcast.send_template_test(
+        db,
+        send_tg=_send_tg,
+        session_factory=SessionLocal,
+        price_rub=PAYMENT_AMOUNT_RUB,
+        template_key=payload.template_key.strip().upper(),
+        telegram_ids=ids,
+    )
+    return DailyBroadcastTriggerResponse(
+        ok=True,
+        started=bool(result.get("started")),
+        run_id=result.get("run_id"),
+        template_key=result.get("template_key"),
+        total=result.get("total"),
+        skipped=bool(result.get("skipped")),
+        reason=result.get("reason"),
+        test=True,
+    )
 
 
 @app.get("/admin/daily-broadcasts", response_model=DailyBroadcastListResponse)

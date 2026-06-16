@@ -83,8 +83,34 @@ def _next_template_key(db) -> str:
 
 def _run_for_msk_date(db, run_date: date) -> Any | None:
     return db.execute(
-        select(DailyBroadcastRun.id).where(DailyBroadcastRun.run_date == run_date).limit(1)
+        select(DailyBroadcastRun.id)
+        .where(
+            DailyBroadcastRun.run_date == run_date,
+            DailyBroadcastRun.status.in_(("done", "running")),
+        )
+        .limit(1)
     ).scalar_one_or_none()
+
+
+def template_catalog(price_rub: int) -> dict[str, Any]:
+    button_text = _button_text()
+    templates = _templates(price_rub)
+    return {
+        "button_text": button_text,
+        "price_rub": price_rub,
+        "templates": [
+            {
+                "key": TEMPLATE_B,
+                "title": "Instagram / YouTube режут регионы",
+                "message_html": templates[TEMPLATE_B],
+            },
+            {
+                "key": TEMPLATE_C,
+                "title": "Последнее предупреждение на сегодня",
+                "message_html": templates[TEMPLATE_C],
+            },
+        ],
+    }
 
 
 def _recipient_ids(db) -> list[int]:
@@ -144,7 +170,7 @@ def _worker(
         if run:
             run.sent_count = sent
             run.failed_count = failed
-            run.status = "done"
+            run.status = "test" if run.status == "test" else "done"
             run.finished_at = datetime.now(timezone.utc)
             db.commit()
         logger.info("Daily broadcast run_id=%s done sent=%s failed=%s", run_id, sent, failed)
@@ -226,6 +252,67 @@ def start_daily_broadcast(
         "template_key": key,
         "total": len(ids),
         "run_date": rd.isoformat(),
+    }
+
+
+def send_template_test(
+    db,
+    *,
+    send_tg: Callable[[int, str, dict | None], bool],
+    session_factory,
+    price_rub: int,
+    template_key: str,
+    telegram_ids: list[int],
+) -> dict[str, Any]:
+    """Send one B/C template to a small test audience (prod IDs). Logged as status=test."""
+    global _daily_running
+    templates = _templates(price_rub)
+    key = template_key if template_key in templates else TEMPLATE_B
+    ids = [int(x) for x in telegram_ids if int(x) > 0]
+    if not ids:
+        return {"started": False, "skipped": True, "reason": "no_recipients"}
+    if len(ids) > 20:
+        return {"started": False, "skipped": True, "reason": "too_many_recipients"}
+
+    with _daily_lock:
+        if _daily_running:
+            return {"started": False, "skipped": True, "reason": "already_running"}
+
+    message = templates[key]
+    button_text = _button_text()
+    run = DailyBroadcastRun(
+        template_key=key,
+        message_html=message,
+        button_text=button_text,
+        run_date=datetime.now(MSK).date(),
+        total_recipients=len(ids),
+        sent_count=0,
+        failed_count=0,
+        click_count=0,
+        conversion_count=0,
+        status="test",
+        started_at=datetime.now(timezone.utc),
+    )
+    db.add(run)
+    db.commit()
+    db.refresh(run)
+
+    with _daily_lock:
+        _daily_running = True
+
+    t = threading.Thread(
+        target=_worker,
+        args=(run.id, ids, message, button_text),
+        kwargs={"send_tg": send_tg, "session_factory": session_factory},
+        daemon=True,
+    )
+    t.start()
+    return {
+        "started": True,
+        "run_id": run.id,
+        "template_key": key,
+        "total": len(ids),
+        "test": True,
     }
 
 
