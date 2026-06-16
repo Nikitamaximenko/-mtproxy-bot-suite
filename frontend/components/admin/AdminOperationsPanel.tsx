@@ -119,6 +119,63 @@ export function AdminOperationsPanel({
   } | null>(null)
   const [selfTestBusy, setSelfTestBusy] = useState(false)
   const [selfTestResult, setSelfTestResult] = useState<SelfTestResponse | null>(null)
+  const [dailyRuns, setDailyRuns] = useState<
+    Array<{
+      id: number
+      run_date: string | null
+      template_key: string
+      status: string
+      sent: number
+      failed: number
+      clicks: number
+      conversions: number
+      click_rate_pct: number
+      conversion_rate_pct: number
+    }>
+  >([])
+  const [dailyMeta, setDailyMeta] = useState<{ enabled: boolean; hour_msk: number } | null>(null)
+  const [dailyBusy, setDailyBusy] = useState(false)
+
+  const loadDailyBroadcasts = useCallback(async () => {
+    if (!adminKey) return
+    try {
+      const data = await fetchAdminJson<{
+        runs: typeof dailyRuns
+        enabled: boolean
+        hour_msk: number
+      }>("/api/admin/daily-broadcasts", adminKey)
+      setDailyRuns(data.runs ?? [])
+      setDailyMeta({ enabled: data.enabled, hour_msk: data.hour_msk })
+    } catch {
+      /* optional panel */
+    }
+  }, [adminKey])
+
+  useEffect(() => {
+    void loadDailyBroadcasts()
+  }, [loadDailyBroadcasts])
+
+  const runDailyNow = useCallback(
+    async (templateKey?: "B" | "C") => {
+      if (!adminKey) return
+      setDailyBusy(true)
+      onError("")
+      try {
+        const q = templateKey ? `?template_key=${templateKey}` : ""
+        await fetchAdminJson<{ ok: boolean; started: boolean; total?: number }>(
+          `/api/admin/daily-broadcasts/run-now${q}`,
+          adminKey,
+          { method: "POST" },
+        )
+        setTimeout(() => void loadDailyBroadcasts(), 3000)
+      } catch (e) {
+        onError(e instanceof Error ? e.message : "Не удалось запустить ежедневную рассылку")
+      } finally {
+        setDailyBusy(false)
+      }
+    },
+    [adminKey, loadDailyBroadcasts, onError],
+  )
 
   const broadcastRecipientEstimate =
     stats == null
@@ -454,6 +511,87 @@ export function AdminOperationsPanel({
               </div>
             )}
           </div>
+        </div>
+      </section>
+
+      <section className="space-y-4">
+        <h2 className="text-sm font-medium text-muted-foreground">Ежедневная B/C (кликбейт)</h2>
+        <div className="bg-card border border-border rounded-2xl p-6 space-y-4">
+          <p className="text-sm text-muted-foreground leading-relaxed">
+            Автоматически чередует шаблоны <strong className="text-foreground">B</strong> и{" "}
+            <strong className="text-foreground">C</strong> раз в сутки (МСК). CTA:{" "}
+            <code className="text-xs">dbc:…:buy</code> → оплата в боте. Аналитика: доставки, клики, конверсии в БД.
+          </p>
+          {dailyMeta && (
+            <p className="text-xs text-muted-foreground">
+              Статус: {dailyMeta.enabled ? "включено" : "выключено"} · час отправки (МСK):{" "}
+              <span className="font-mono">{dailyMeta.hour_msk}:00</span>
+            </p>
+          )}
+          <div className="flex flex-wrap gap-2">
+            <button
+              type="button"
+              disabled={dailyBusy}
+              onClick={() => void runDailyNow()}
+              className="px-4 py-2 text-sm font-semibold rounded-xl bg-primary text-primary-foreground hover:opacity-90 disabled:opacity-50"
+            >
+              {dailyBusy ? "Запуск…" : "Отправить сейчас (следующий шаблон)"}
+            </button>
+            <button
+              type="button"
+              disabled={dailyBusy}
+              onClick={() => void runDailyNow("B")}
+              className="px-3 py-2 text-xs font-medium rounded-lg border border-border hover:bg-secondary disabled:opacity-50"
+            >
+              Тест B
+            </button>
+            <button
+              type="button"
+              disabled={dailyBusy}
+              onClick={() => void runDailyNow("C")}
+              className="px-3 py-2 text-xs font-medium rounded-lg border border-border hover:bg-secondary disabled:opacity-50"
+            >
+              Тест C
+            </button>
+            <button
+              type="button"
+              disabled={dailyBusy}
+              onClick={() => void loadDailyBroadcasts()}
+              className="px-3 py-2 text-xs font-medium rounded-lg border border-border hover:bg-secondary disabled:opacity-50"
+            >
+              Обновить
+            </button>
+          </div>
+          {dailyRuns.length > 0 && (
+            <div className="overflow-x-auto">
+              <table className="w-full text-xs border-collapse">
+                <thead>
+                  <tr className="text-left text-muted-foreground border-b border-border">
+                    <th className="py-2 pr-3">Дата</th>
+                    <th className="py-2 pr-3">Шаблон</th>
+                    <th className="py-2 pr-3">Sent</th>
+                    <th className="py-2 pr-3">Fail</th>
+                    <th className="py-2 pr-3">Клики</th>
+                    <th className="py-2 pr-3">Оплаты</th>
+                    <th className="py-2 pr-3">CR%</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {dailyRuns.slice(0, 14).map((r) => (
+                    <tr key={r.id} className="border-b border-border/60">
+                      <td className="py-2 pr-3 font-mono">{r.run_date ?? "—"}</td>
+                      <td className="py-2 pr-3">{r.template_key}</td>
+                      <td className="py-2 pr-3">{formatNumber(r.sent)}</td>
+                      <td className="py-2 pr-3">{formatNumber(r.failed)}</td>
+                      <td className="py-2 pr-3">{formatNumber(r.clicks)}</td>
+                      <td className="py-2 pr-3">{formatNumber(r.conversions)}</td>
+                      <td className="py-2 pr-3">{r.conversion_rate_pct}%</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
         </div>
       </section>
 

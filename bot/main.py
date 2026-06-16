@@ -1315,6 +1315,31 @@ async def main() -> None:
         if msg and isinstance(msg, Message):
             await msg.answer("Готово — рассылки отключены. Вернуться можно через /start.")
 
+    @dp.callback_query(lambda c: (c.data or "").startswith("dbc:"))
+    async def _daily_broadcast_cta(query: CallbackQuery, state: FSMContext) -> None:
+        session = _get_session(dp)
+        msg = query.message
+        if not msg or not isinstance(msg, Message):
+            await query.answer()
+            return
+        raw = (query.data or "").split(":")
+        delivery_id = int(raw[1]) if len(raw) > 1 and raw[1].isdigit() else 0
+        if delivery_id > 0:
+            try:
+                await backend_post(session, "/internal/daily-broadcast/click", {"delivery_id": delivery_id})
+            except Exception:
+                _log.exception("daily broadcast click failed delivery_id=%s", delivery_id)
+        await query.answer()
+        tg_uid = query.from_user.id
+        await state.clear()
+        await msg.answer(
+            "💳 <b>Оплата в боте</b>\n\n"
+            "Выберите способ оплаты — затем отправьте <b>email для чека</b> "
+            "(нужен и для Lava, и для ЮKassa).",
+            parse_mode="HTML",
+            reply_markup=checkout_provider_kb(tg_uid),
+        )
+
     @dp.callback_query(lambda c: (c.data or "").startswith("camp:clk:"))
     async def _campaign_click(query: CallbackQuery) -> None:
         raw = (query.data or "").split(":")

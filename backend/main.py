@@ -17,7 +17,7 @@ import urllib.error
 import urllib.request
 from urllib.parse import parse_qsl, quote, urljoin, urlsplit, urlunsplit
 from contextlib import asynccontextmanager
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, AsyncGenerator, Generator, Literal
 from uuid import UUID, uuid4
@@ -29,6 +29,7 @@ from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import (
     BigInteger,
     Boolean,
+    Date,
     DateTime,
     Integer,
     String,
@@ -48,6 +49,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column, sessionmaker
 
 import campaign_engine as _campaign_engine
+import daily_broadcast_engine as _daily_broadcast
 
 
 load_dotenv()
@@ -468,6 +470,39 @@ class CampaignEvent(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, index=True, nullable=False)
 
 
+class DailyBroadcastRun(Base):
+    """One scheduled daily clickbait broadcast (templates B/C alternate)."""
+
+    __tablename__ = "daily_broadcast_runs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    template_key: Mapped[str] = mapped_column(String(8), nullable=False)
+    message_html: Mapped[str] = mapped_column(String(4096), nullable=False)
+    button_text: Mapped[str] = mapped_column(String(64), nullable=False)
+    run_date: Mapped[date] = mapped_column(Date, index=True, nullable=False)
+    total_recipients: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    sent_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    failed_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    click_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    conversion_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    status: Mapped[str] = mapped_column(String(16), default="running", index=True, nullable=False)
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class DailyBroadcastDelivery(Base):
+    __tablename__ = "daily_broadcast_deliveries"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    run_id: Mapped[int] = mapped_column(Integer, index=True, nullable=False)
+    telegram_id: Mapped[int] = mapped_column(BigInteger, index=True, nullable=False)
+    delivered_ok: Mapped[bool] = mapped_column(Boolean, default=False, server_default=sa_false(), nullable=False)
+    error: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    sent_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, index=True, nullable=False)
+    clicked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    converted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
 connect_args = {"check_same_thread": False} if DATABASE_URL.startswith("sqlite:") else {}
 engine = create_engine(DATABASE_URL, future=True, connect_args=connect_args)
 SessionLocal = sessionmaker(bind=engine, class_=Session, autocommit=False, autoflush=False, future=True)
@@ -477,6 +512,12 @@ _campaign_engine.bind_models(
     campaign_variant=CampaignVariant,
     campaign_delivery=CampaignDelivery,
     campaign_event=CampaignEvent,
+    user=User,
+    subscription=Subscription,
+)
+_daily_broadcast.bind_models(
+    daily_broadcast_run=DailyBroadcastRun,
+    daily_broadcast_delivery=DailyBroadcastDelivery,
     user=User,
     subscription=Subscription,
 )
@@ -1927,13 +1968,9 @@ def _apply_yookassa_payment_object(db: Session, payment: dict[str, Any]) -> None
         sub.yookassa_last_applied_payment_id = pay_id
     db.commit()
     try:
-        _campaign_engine.record_conversion_for_user(
-            db,
-            int(sub.telegram_id),
-            paid_clause=_verified_payment_clause(),
-        )
+        _record_marketing_conversions(db, int(sub.telegram_id))
     except Exception:
-        logger.exception("Campaign conversion record failed tg_id=%s", sub.telegram_id)
+        logger.exception("Marketing conversion record failed tg_id=%s", sub.telegram_id)
     if not is_renewal:
         _record_checkout_log(
             source="backend",
@@ -2547,6 +2584,52 @@ def _process_sales_nudges() -> None:
         db.close()
 
 
+def _record_marketing_conversions(db: Session, telegram_id: int) -> None:
+    try:
+        _campaign_engine.record_conversion_for_user(
+            db,
+            int(telegram_id),
+            paid_clause=_verified_payment_clause(),
+        )
+    except Exception:
+        logger.exception("Campaign conversion record failed tg_id=%s", telegram_id)
+    try:
+        _daily_broadcast.record_conversion_for_user(
+            db,
+            int(telegram_id),
+            paid_clause=_verified_payment_clause(),
+        )
+    except Exception:
+        logger.exception("Daily broadcast conversion record failed tg_id=%s", telegram_id)
+
+
+def _process_daily_broadcast_scheduler() -> None:
+    if not BOT_TOKEN:
+        return
+    with _bcast_lock:
+        if _bcast_state.get("running"):
+            return
+    db = SessionLocal()
+    try:
+        result = _daily_broadcast.maybe_run_scheduled_daily_broadcast(
+            db,
+            send_tg=_send_tg,
+            session_factory=SessionLocal,
+            price_rub=PAYMENT_AMOUNT_RUB,
+        )
+        if result.get("started"):
+            logger.info(
+                "Daily broadcast started run_id=%s template=%s total=%s",
+                result.get("run_id"),
+                result.get("template_key"),
+                result.get("total"),
+            )
+    except Exception:
+        logger.exception("Daily broadcast scheduler failed")
+    finally:
+        db.close()
+
+
 def _send_tg(tg_id: int, text: str, keyboard: dict | None = None) -> bool:
     """Send message via Telegram Bot API. Returns True if request completed without error."""
     if not BOT_TOKEN:
@@ -2940,6 +3023,10 @@ async def _expiration_loop() -> None:
         except Exception:
             logger.exception("Sales nudges failed")
         try:
+            await loop.run_in_executor(None, _process_daily_broadcast_scheduler)
+        except Exception:
+            logger.exception("Daily broadcast scheduler failed")
+        try:
             await loop.run_in_executor(None, _reconcile_lava_pending_payments)
         except Exception:
             logger.exception("Lava payment reconcile failed")
@@ -3077,6 +3164,11 @@ async def lava_webhook(req: Request, db: Session = Depends(get_db)) -> OkRespons
         contract_id,
         is_recurring,
     )
+    if not is_recurring:
+        try:
+            _record_marketing_conversions(db, int(sub.telegram_id))
+        except Exception:
+            logger.exception("Marketing conversion record failed tg_id=%s", sub.telegram_id)
 
     _provision_vpn_after_payment(int(sub.telegram_id), db)
 
@@ -6415,6 +6507,99 @@ def admin_campaign_send_test(
 def internal_campaign_click(payload: CampaignClickRequest, req: Request, db: Session = Depends(get_db)) -> OkResponse:
     _require_internal_token(req)
     _campaign_engine.record_campaign_event(db, payload.delivery_id, _campaign_engine.EVENT_CLICK)
+    return OkResponse(ok=True)
+
+
+class DailyBroadcastClickRequest(BaseModel):
+    delivery_id: int = Field(..., ge=1)
+
+
+class DailyBroadcastRunItem(BaseModel):
+    id: int
+    run_date: str | None
+    template_key: str
+    status: str
+    total_recipients: int
+    sent: int
+    failed: int
+    clicks: int
+    conversions: int
+    click_rate_pct: float
+    conversion_rate_pct: float
+    started_at: str | None
+    finished_at: str | None
+    message_preview: str
+
+
+class DailyBroadcastListResponse(BaseModel):
+    runs: list[DailyBroadcastRunItem]
+    enabled: bool
+    hour_msk: int
+
+
+class DailyBroadcastTriggerResponse(BaseModel):
+    ok: bool
+    started: bool
+    run_id: int | None = None
+    template_key: str | None = None
+    total: int | None = None
+    skipped: bool = False
+    reason: str | None = None
+
+
+@app.get("/admin/daily-broadcasts", response_model=DailyBroadcastListResponse)
+def admin_daily_broadcasts_list(req: Request, db: Session = Depends(get_db)) -> DailyBroadcastListResponse:
+    _require_admin(req)
+    runs = _daily_broadcast.list_runs(db, limit=90)
+    return DailyBroadcastListResponse(
+        runs=[DailyBroadcastRunItem(**r) for r in runs],
+        enabled=(os.getenv("DAILY_BROADCAST_ENABLED") or "true").strip().lower() in ("1", "true", "yes", "on"),
+        hour_msk=int((os.getenv("DAILY_BROADCAST_HOUR_MSK") or "17").strip() or "17"),
+    )
+
+
+@app.post("/admin/daily-broadcasts/run-now", response_model=DailyBroadcastTriggerResponse)
+def admin_daily_broadcast_run_now(
+    req: Request,
+    db: Session = Depends(get_db),
+    template_key: str | None = Query(None, description="B or C; auto-alternate if omitted"),
+) -> DailyBroadcastTriggerResponse:
+    _require_admin(req)
+    if not BOT_TOKEN:
+        raise HTTPException(status_code=503, detail="BOT_TOKEN not configured")
+    with _bcast_lock:
+        if _bcast_state.get("running"):
+            raise HTTPException(status_code=409, detail="Manual broadcast is running")
+    tk = template_key.strip().upper() if template_key else None
+    if tk and tk not in ("B", "C"):
+        raise HTTPException(status_code=400, detail="template_key must be B or C")
+    result = _daily_broadcast.start_daily_broadcast(
+        db,
+        send_tg=_send_tg,
+        session_factory=SessionLocal,
+        price_rub=PAYMENT_AMOUNT_RUB,
+        template_key=tk,
+        force=True,
+    )
+    return DailyBroadcastTriggerResponse(
+        ok=True,
+        started=bool(result.get("started")),
+        run_id=result.get("run_id"),
+        template_key=result.get("template_key"),
+        total=result.get("total"),
+        skipped=bool(result.get("skipped")),
+        reason=result.get("reason"),
+    )
+
+
+@app.post("/internal/daily-broadcast/click", response_model=OkResponse)
+def internal_daily_broadcast_click(
+    payload: DailyBroadcastClickRequest,
+    req: Request,
+    db: Session = Depends(get_db),
+) -> OkResponse:
+    _require_internal_token(req)
+    _daily_broadcast.record_click(db, int(payload.delivery_id))
     return OkResponse(ok=True)
 
 
