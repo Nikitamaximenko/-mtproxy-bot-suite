@@ -6561,8 +6561,20 @@ class DailyBroadcastTemplatesResponse(BaseModel):
 
 
 class DailyBroadcastTestRequest(BaseModel):
-    template_key: str = Field(..., pattern="^[BC]$")
+    template_key: str = Field(..., min_length=1, max_length=1)
     telegram_ids: list[int] = Field(default_factory=list, max_length=20)
+
+
+def _validate_daily_template_key(template_key: str | None) -> str | None:
+    if template_key is None:
+        return None
+    key = template_key.strip().upper()
+    if key not in _daily_broadcast.template_keys():
+        raise HTTPException(
+            status_code=400,
+            detail=f"template_key must be one of: {', '.join(_daily_broadcast.template_keys())}",
+        )
+    return key
 
 
 @app.get("/admin/daily-broadcasts/templates", response_model=DailyBroadcastTemplatesResponse)
@@ -6596,7 +6608,7 @@ def admin_daily_broadcast_test_send(
         send_tg=_send_tg,
         session_factory=SessionLocal,
         price_rub=PAYMENT_AMOUNT_RUB,
-        template_key=payload.template_key.strip().upper(),
+        template_key=_validate_daily_template_key(payload.template_key) or "B",
         telegram_ids=ids,
     )
     return DailyBroadcastTriggerResponse(
@@ -6626,7 +6638,7 @@ def admin_daily_broadcasts_list(req: Request, db: Session = Depends(get_db)) -> 
 def admin_daily_broadcast_run_now(
     req: Request,
     db: Session = Depends(get_db),
-    template_key: str | None = Query(None, description="B or C; auto-alternate if omitted"),
+    template_key: str | None = Query(None, description="B–H; auto-rotate if omitted"),
 ) -> DailyBroadcastTriggerResponse:
     _require_admin(req)
     if not BOT_TOKEN:
@@ -6634,9 +6646,7 @@ def admin_daily_broadcast_run_now(
     with _bcast_lock:
         if _bcast_state.get("running"):
             raise HTTPException(status_code=409, detail="Manual broadcast is running")
-    tk = template_key.strip().upper() if template_key else None
-    if tk and tk not in ("B", "C"):
-        raise HTTPException(status_code=400, detail="template_key must be B or C")
+    tk = _validate_daily_template_key(template_key)
     result = _daily_broadcast.start_daily_broadcast(
         db,
         send_tg=_send_tg,

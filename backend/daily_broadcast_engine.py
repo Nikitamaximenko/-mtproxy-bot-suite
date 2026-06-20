@@ -1,13 +1,14 @@
-"""Daily alternating clickbait broadcasts (templates B/C) with DB analytics."""
+"""Daily rotating clickbait broadcasts (templates B–H) with DB analytics."""
 from __future__ import annotations
 
-import json
+import fcntl
 import logging
 import os
 import threading
 import time
 from datetime import date, datetime, timedelta, timezone
-from typing import Any, Callable
+from pathlib import Path
+from typing import Any, Callable, TextIO
 from zoneinfo import ZoneInfo
 
 from sqlalchemy import func, select
@@ -26,6 +27,25 @@ _daily_running = False
 
 TEMPLATE_B = "B"
 TEMPLATE_C = "C"
+TEMPLATE_D = "D"
+TEMPLATE_E = "E"
+TEMPLATE_F = "F"
+TEMPLATE_G = "G"
+TEMPLATE_H = "H"
+
+TEMPLATE_KEYS: tuple[str, ...] = (
+    TEMPLATE_B,
+    TEMPLATE_C,
+    TEMPLATE_D,
+    TEMPLATE_E,
+    TEMPLATE_F,
+    TEMPLATE_G,
+    TEMPLATE_H,
+)
+
+_SCHEDULER_LOCK_PATH = Path(
+    os.getenv("DAILY_BROADCAST_LOCK_FILE", "/tmp/frosty-daily-broadcast.lock")
+)
 
 
 def bind_models(*, daily_broadcast_run, daily_broadcast_delivery, user, subscription) -> None:
@@ -36,13 +56,18 @@ def bind_models(*, daily_broadcast_run, daily_broadcast_delivery, user, subscrip
     Subscription = subscription
 
 
+def template_keys() -> tuple[str, ...]:
+    return TEMPLATE_KEYS
+
+
 def _enabled() -> bool:
     return (os.getenv("DAILY_BROADCAST_ENABLED") or "true").strip().lower() in ("1", "true", "yes", "on")
 
 
 def _hour_msk() -> int:
     try:
-        return int((os.getenv("DAILY_BROADCAST_HOUR_MSK") or "17").strip())
+        hour = int((os.getenv("DAILY_BROADCAST_HOUR_MSK") or "17").strip())
+        return max(0, min(23, hour))
     except ValueError:
         return 17
 
@@ -52,17 +77,45 @@ def _button_text() -> str:
 
 
 def _templates(price_rub: int) -> dict[str, str]:
+    p = int(price_rub)
     return {
         TEMPLATE_B: (
             "⚠️ <b>Instagram и YouTube уже режут по регионам</b>\n\n"
             "Завтра может стать хуже. Frosty работает с обходом глушилок — "
-            f"<b>{price_rub} ₽/мес</b>, пока не подняли цену.\n\n"
+            f"<b>{p} ₽/мес</b>, пока не подняли цену.\n\n"
             "👇 Успейте до полного отключения"
         ),
         TEMPLATE_C: (
             "🇷🇺 <b>Последнее предупреждение на сегодня</b>\n\n"
             "Обычный VPN скоро не поможет. <b>Frosty</b> уже готов — умное шифрование и обход глушилок.\n\n"
-            f"<b>3 места по старой цене</b> ({price_rub} ₽/мес) — жми кнопку 👇"
+            f"<b>3 места по старой цене</b> ({p} ₽/мес) — жми кнопку 👇"
+        ),
+        TEMPLATE_D: (
+            "🔥 <b>Только что 3 пользователя купили Frosty</b>\n\n"
+            "Пока ты читаешь — кто-то уже подключился. Старую цену "
+            f"<b>{p} ₽/мес</b> могут закрыть в любой момент.\n\n"
+            "👇 Зафиксируй доступ"
+        ),
+        TEMPLATE_E: (
+            "🚨 <b>В России режут доступ к зарубежным сервисам</b>\n\n"
+            "Instagram, YouTube, WhatsApp — всё под ударом. <b>Frosty</b> уже обходит глушилки.\n\n"
+            f"<b>{p} ₽/мес</b> — пока не подняли. Жми 👇"
+        ),
+        TEMPLATE_F: (
+            "⏳ <b>Осталось мало времени по старой цене</b>\n\n"
+            "Frosty — умный VPN с обходом блокировок. Тариф "
+            f"<b>{p} ₽/мес</b> скоро могут поднять.\n\n"
+            "👇 Успей сегодня"
+        ),
+        TEMPLATE_G: (
+            "👀 <b>Сотни людей уже перешли на Frosty</b>\n\n"
+            "Обычный VPN в РФ уже не тянет. У нас — шифрование и обход глушилок.\n\n"
+            f"<b>3 места</b> по <b>{p} ₽/мес</b> — жми кнопку 👇"
+        ),
+        TEMPLATE_H: (
+            "⚡ <b>Сегодня без Frosty — завтра без Instagram</b>\n\n"
+            "Блокировки усиливаются каждый день. Подключи умный VPN за "
+            f"<b>{p} ₽/мес</b> — одна кнопка 👇"
         ),
     }
 
@@ -74,11 +127,10 @@ def _next_template_key(db) -> str:
         .order_by(DailyBroadcastRun.id.desc())
         .limit(1)
     ).scalar_one_or_none()
-    if last == TEMPLATE_B:
-        return TEMPLATE_C
-    if last == TEMPLATE_C:
+    if last not in TEMPLATE_KEYS:
         return TEMPLATE_B
-    return TEMPLATE_B
+    idx = TEMPLATE_KEYS.index(last)
+    return TEMPLATE_KEYS[(idx + 1) % len(TEMPLATE_KEYS)]
 
 
 def _run_for_msk_date(db, run_date: date) -> Any | None:
@@ -92,23 +144,33 @@ def _run_for_msk_date(db, run_date: date) -> Any | None:
     ).scalar_one_or_none()
 
 
+def _template_titles() -> dict[str, str]:
+    return {
+        TEMPLATE_B: "Instagram / YouTube режут регионы",
+        TEMPLATE_C: "Последнее предупреждение на сегодня",
+        TEMPLATE_D: "3 пользователя только что купили",
+        TEMPLATE_E: "Режут зарубежные сервисы",
+        TEMPLATE_F: "Мало времени по старой цене",
+        TEMPLATE_G: "Сотни уже перешли на Frosty",
+        TEMPLATE_H: "Завтра без Instagram",
+    }
+
+
 def template_catalog(price_rub: int) -> dict[str, Any]:
     button_text = _button_text()
     templates = _templates(price_rub)
+    titles = _template_titles()
     return {
         "button_text": button_text,
         "price_rub": price_rub,
+        "template_keys": list(TEMPLATE_KEYS),
         "templates": [
             {
-                "key": TEMPLATE_B,
-                "title": "Instagram / YouTube режут регионы",
-                "message_html": templates[TEMPLATE_B],
-            },
-            {
-                "key": TEMPLATE_C,
-                "title": "Последнее предупреждение на сегодня",
-                "message_html": templates[TEMPLATE_C],
-            },
+                "key": key,
+                "title": titles[key],
+                "message_html": templates[key],
+            }
+            for key in TEMPLATE_KEYS
         ],
     }
 
@@ -129,6 +191,23 @@ def _keyboard(delivery_id: int, button_text: str) -> dict:
     return {
         "inline_keyboard": [[{"text": button_text, "callback_data": f"dbc:{delivery_id}:buy"}]],
     }
+
+
+def _acquire_scheduler_lock() -> TextIO | None:
+    """Cross-process lock so only one uvicorn worker runs the daily scheduler."""
+    try:
+        handle = _SCHEDULER_LOCK_PATH.open("a+")
+        fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        handle.seek(0)
+        handle.write(str(os.getpid()))
+        handle.truncate()
+        handle.flush()
+        return handle
+    except BlockingIOError:
+        return None
+    except OSError:
+        logger.exception("Daily broadcast scheduler lock failed")
+        return None
 
 
 def _worker(
@@ -264,7 +343,7 @@ def send_template_test(
     template_key: str,
     telegram_ids: list[int],
 ) -> dict[str, Any]:
-    """Send one B/C template to a small test audience (prod IDs). Logged as status=test."""
+    """Send one template to a small test audience (prod IDs). Logged as status=test."""
     global _daily_running
     templates = _templates(price_rub)
     key = template_key if template_key in templates else TEMPLATE_B
@@ -325,16 +404,42 @@ def maybe_run_scheduled_daily_broadcast(
 ) -> dict[str, Any]:
     if not _enabled():
         return {"skipped": True, "reason": "disabled"}
+
     now_msk = datetime.now(MSK)
-    if now_msk.hour != _hour_msk():
-        return {"skipped": True, "reason": "wrong_hour", "hour_msk": now_msk.hour}
-    return start_daily_broadcast(
-        db,
-        send_tg=send_tg,
-        session_factory=session_factory,
-        price_rub=price_rub,
-        run_date=now_msk.date(),
-    )
+    target_hour = _hour_msk()
+    if now_msk.hour < target_hour:
+        return {"skipped": True, "reason": "before_hour", "hour_msk": now_msk.hour}
+
+    lock = _acquire_scheduler_lock()
+    if lock is None:
+        return {"skipped": True, "reason": "scheduler_lock_held"}
+
+    try:
+        if _run_for_msk_date(db, now_msk.date()) is not None:
+            return {"skipped": True, "reason": "already_sent_today", "run_date": now_msk.date().isoformat()}
+
+        result = start_daily_broadcast(
+            db,
+            send_tg=send_tg,
+            session_factory=session_factory,
+            price_rub=price_rub,
+            run_date=now_msk.date(),
+        )
+        if result.get("started"):
+            logger.info(
+                "Daily broadcast scheduled run_id=%s template=%s total=%s date=%s",
+                result.get("run_id"),
+                result.get("template_key"),
+                result.get("total"),
+                now_msk.date().isoformat(),
+            )
+        return result
+    finally:
+        try:
+            fcntl.flock(lock.fileno(), fcntl.LOCK_UN)
+            lock.close()
+        except OSError:
+            pass
 
 
 def record_click(db, delivery_id: int) -> bool:

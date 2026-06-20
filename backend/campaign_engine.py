@@ -393,13 +393,21 @@ def _paid_tg_ids(db: Session, paid_clause: Any) -> set[int]:
     return {int(x) for x in rows}
 
 
+def _as_utc(dt: datetime | None) -> datetime | None:
+    if dt is None:
+        return None
+    if dt.tzinfo is None:
+        return dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(timezone.utc)
+
+
 def _trial_end_at(user: Any, trial_by_user: dict[int, Any], now: datetime, trial_days: int) -> datetime | None:
     if user.trial_consumed_at is None:
         return None
     sub = trial_by_user.get(int(user.telegram_id))
     if sub and sub.expires_at:
-        return sub.expires_at
-    return user.trial_consumed_at + timedelta(days=trial_days)
+        return _as_utc(sub.expires_at)
+    return _as_utc(user.trial_consumed_at + timedelta(days=trial_days))
 
 
 def _trigger_due(
@@ -413,7 +421,7 @@ def _trigger_due(
     offset = timedelta(minutes=int(campaign.trigger_offset_minutes or 0))
     anchor = (campaign.trigger_anchor or ANCHOR_USER_CREATED).strip()
     if anchor == ANCHOR_USER_CREATED:
-        return user.created_at + offset <= now
+        return _as_utc(user.created_at) + offset <= now
     if anchor == ANCHOR_TRIAL_ENDS:
         end = _trial_end_at(user, trial_by_user, now, trial_days)
         return bool(end and end + offset <= now)

@@ -210,7 +210,7 @@ export function AdminOperationsPanel({
   )
 
   const sendTestTemplate = useCallback(
-    async (templateKey: "B" | "C") => {
+    async (templateKey: string) => {
       if (!adminKey) return
       setTestBusyKey(templateKey)
       onError("")
@@ -237,7 +237,7 @@ export function AdminOperationsPanel({
   )
 
   const sendMassTemplate = useCallback(
-    async (templateKey?: "B" | "C") => {
+    async (templateKey?: string) => {
       if (!adminKey || broadcastRecipientEstimate === null || broadcastRecipientEstimate === 0) return
       const label = templateKey ? `шаблон ${templateKey}` : "следующий шаблон по очереди"
       const ok = window.confirm(
@@ -393,7 +393,7 @@ export function AdminOperationsPanel({
   return (
     <div className="space-y-8">
       <section className="space-y-4">
-        <h2 className="text-sm font-medium text-muted-foreground">Кликбейт-рассылки B / C</h2>
+        <h2 className="text-sm font-medium text-muted-foreground">Кликбейт-рассылки B – H</h2>
         <div className="bg-card border border-border rounded-2xl p-6 space-y-6">
           <div className="flex flex-wrap items-baseline gap-x-4 gap-y-1 text-sm">
             <span className="text-muted-foreground">
@@ -406,7 +406,7 @@ export function AdminOperationsPanel({
               <>
                 <span className="text-muted-foreground/60">·</span>
                 <span className="text-muted-foreground">
-                  авто {dailyMeta.enabled ? "вкл" : "выкл"} · {dailyMeta.hour_msk}:00 МСK · B↔C
+                  авто {dailyMeta.enabled ? "вкл" : "выкл"} · {dailyMeta.hour_msk}:00 МСK · ротация B→H
                 </span>
               </>
             )}
@@ -425,7 +425,7 @@ export function AdminOperationsPanel({
           )}
 
           {clickbaitTemplates && (
-            <div className="grid gap-6 lg:grid-cols-2">
+            <div className="grid gap-6 md:grid-cols-2 xl:grid-cols-3">
               {clickbaitTemplates.templates.map((tpl) => (
                 <div key={tpl.key} className="space-y-4">
                   <TelegramClickbaitPreview
@@ -438,7 +438,7 @@ export function AdminOperationsPanel({
                     <button
                       type="button"
                       disabled={testBusyKey !== null || massBusy}
-                      onClick={() => void sendTestTemplate(tpl.key as "B" | "C")}
+                      onClick={() => void sendTestTemplate(tpl.key)}
                       className="px-4 py-2 text-sm font-semibold rounded-xl bg-secondary text-foreground border border-border hover:bg-secondary/80 disabled:opacity-50"
                     >
                       {testBusyKey === tpl.key
@@ -448,10 +448,10 @@ export function AdminOperationsPanel({
                     <button
                       type="button"
                       disabled={massBusy || testBusyKey !== null || broadcastRecipientEstimate === 0}
-                      onClick={() => void sendMassTemplate(tpl.key as "B" | "C")}
+                      onClick={() => void sendMassTemplate(tpl.key)}
                       className="px-4 py-2 text-sm font-semibold rounded-xl bg-primary text-primary-foreground hover:opacity-90 disabled:opacity-50"
                     >
-                      {massBusy ? "Рассылка…" : `Всем — шаблон ${tpl.key}`}
+                      {massBusy ? "Рассылка…" : `Всем — ${tpl.key}`}
                     </button>
                   </div>
                 </div>
@@ -466,7 +466,7 @@ export function AdminOperationsPanel({
               onClick={() => void sendMassTemplate()}
               className="px-4 py-2 text-sm font-medium rounded-xl border border-border hover:bg-secondary disabled:opacity-50"
             >
-              Следующий по очереди (B↔C)
+              Следующий по очереди (B→…→H)
             </button>
             <button
               type="button"
