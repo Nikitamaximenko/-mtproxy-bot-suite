@@ -121,6 +121,14 @@ export function AdminOperationsPanel({
   const [dailyRuns, setDailyRuns] = useState<DailyRunRow[]>([])
   const [dailyMeta, setDailyMeta] = useState<{ enabled: boolean; hour_msk: number } | null>(null)
   const [dailyListBusy, setDailyListBusy] = useState(false)
+  const [migrationBusy, setMigrationBusy] = useState(false)
+  const [migrationResult, setMigrationResult] = useState<{
+    total: number
+    sent: number
+    failed: number
+    done: boolean
+  } | null>(null)
+  const migrationPollRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const [cleanupResult, setCleanupResult] = useState<{
     deleted_users: number
     deleted_pending_subscriptions: number
@@ -186,7 +194,69 @@ export function AdminOperationsPanel({
     }
   }, [])
 
-  useEffect(() => () => stopDailyPolling(), [stopDailyPolling])
+  useEffect(
+    () => () => {
+      stopDailyPolling()
+      if (migrationPollRef.current) {
+        clearInterval(migrationPollRef.current)
+        migrationPollRef.current = null
+      }
+    },
+    [stopDailyPolling],
+  )
+
+  const pollMigrationStatus = useCallback(async () => {
+    if (!adminKey) return
+    try {
+      const s = await fetchAdminJson<{
+        total: number
+        sent: number
+        failed: number
+        done: boolean
+        running: boolean
+      }>("/api/admin/broadcast-status", adminKey)
+      setMigrationResult({
+        total: s.total,
+        sent: s.sent,
+        failed: s.failed,
+        done: s.done,
+      })
+      if (s.done || !s.running) {
+        if (migrationPollRef.current) {
+          clearInterval(migrationPollRef.current)
+          migrationPollRef.current = null
+        }
+        setMigrationBusy(false)
+      }
+    } catch {
+      /* ignore */
+    }
+  }, [adminKey])
+
+  const sendMigrationBroadcast = useCallback(async () => {
+    if (!adminKey || broadcastRecipientEstimate === null) return
+    const ok = window.confirm(
+      `Разослать всем ${broadcastRecipientEstimate} пользователям сообщение «VPN снова работает, переезд завершён»?\n\n` +
+        "Кнопка: Подключить VPN → новый ключ в Happ.",
+    )
+    if (!ok) return
+    setMigrationBusy(true)
+    setMigrationResult(null)
+    onError("")
+    try {
+      const data = await fetchAdminJson<{ total?: number }>(
+        "/api/admin/broadcast-vpn-migration",
+        adminKey,
+        { method: "POST" },
+      )
+      setMigrationResult({ total: data.total ?? 0, sent: 0, failed: 0, done: false })
+      migrationPollRef.current = setInterval(() => void pollMigrationStatus(), 2000)
+      void pollMigrationStatus()
+    } catch (e) {
+      onError(e instanceof Error ? e.message : "Не удалось запустить рассылку переезда")
+      setMigrationBusy(false)
+    }
+  }, [adminKey, broadcastRecipientEstimate, onError, pollMigrationStatus])
 
   const pollMassRun = useCallback(
     async (runId: number) => {
@@ -553,6 +623,35 @@ export function AdminOperationsPanel({
                 </tbody>
               </table>
             </div>
+          )}
+        </div>
+      </section>
+
+      <section className="space-y-4">
+        <h2 className="text-sm font-medium text-muted-foreground">Рассылка «VPN снова работает»</h2>
+        <div className="bg-card border border-border rounded-2xl p-6 space-y-4">
+          <p className="text-sm text-muted-foreground leading-relaxed">
+            После починки сервера: сообщение о переезде, инструкция Happ и кнопка{" "}
+            <strong className="text-foreground">«Подключить VPN»</strong> → новый ключ.
+          </p>
+          <button
+            type="button"
+            disabled={migrationBusy || massBusy}
+            onClick={() => void sendMigrationBroadcast()}
+            className="px-5 py-2.5 text-sm font-semibold rounded-xl bg-success text-white hover:opacity-90 disabled:opacity-50"
+          >
+            {migrationBusy ? "Отправляем…" : "Разослать всем — переезд завершён"}
+          </button>
+          {migrationResult && (
+            <p className="text-xs text-muted-foreground">
+              {migrationResult.done ? "Готово" : "Отправка…"}:{" "}
+              <span className="font-mono text-success">{migrationResult.sent}</span>
+              {" / "}
+              <span className="font-mono">{migrationResult.total}</span>
+              {migrationResult.failed > 0 && (
+                <span className="text-destructive ml-2">ошибок: {migrationResult.failed}</span>
+              )}
+            </p>
           )}
         </div>
       </section>
