@@ -3,6 +3,7 @@ import { Onest, Unbounded } from 'next/font/google'
 import Script from 'next/script'
 import { Analytics } from '@vercel/analytics/next'
 import { BackendKeepAlive } from '@/components/BackendKeepAlive'
+import { VpsStatusBanner } from '@/components/VpsStatusBanner'
 import { SITE_URL } from '@/lib/site'
 import './globals.css'
 
@@ -138,6 +139,7 @@ export default function RootLayout({
         />
       </head>
       <body className="font-sans antialiased selection:bg-blush-soft">
+        <VpsStatusBanner />
         <BackendKeepAlive />
         {children}
         <Analytics />

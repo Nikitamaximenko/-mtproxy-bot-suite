@@ -1,0 +1,33 @@
+name: VPS health check
+
+on:
+  schedule:
+    - cron: "*/30 * * * *"
+  workflow_dispatch:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check VPS SSH and HTTPS
+        run: |
+          set -e
+          ok=0
+          for port in 22 443 9443; do
+            if timeout 8 bash -c "echo >/dev/tcp/138.124.80.97/$port" 2>/dev/null; then
+              echo "port $port: OPEN"
+              ok=1
+            else
+              echo "port $port: closed/timeout"
+            fi
+          done
+          if curl -fsS -m 10 -k https://138-124-80-97.sslip.io:9443/health; then
+            echo "HTTPS health: OK"
+            ok=1
+          else
+            echo "HTTPS health: FAIL"
+          fi
+          if [[ "$ok" == "0" ]]; then
+            echo "::error::VPS 138.124.80.97 unreachable — reboot in ptr.tech panel or run vps-console-recovery.sh via VNC"
+            exit 1
+          fi
