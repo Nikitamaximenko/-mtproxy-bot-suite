@@ -11,10 +11,27 @@ ENV_FILE="$REPO/backend/.env"
 
 echo "==> Frosty emergency recovery $(date -Is)"
 
-echo "==> Network"
-ip addr show | head -20 || true
+echo "==> Network recovery"
+ip addr show || true
+ip route || true
 systemctl restart systemd-networkd 2>/dev/null || true
 systemctl restart networking 2>/dev/null || true
+systemctl restart NetworkManager 2>/dev/null || true
+dhclient -4 -v 2>/dev/null || true
+netplan apply 2>/dev/null || true
+
+echo "==> SSH + firewall recovery"
+systemctl enable ssh 2>/dev/null || systemctl enable sshd 2>/dev/null || true
+systemctl restart ssh 2>/dev/null || systemctl restart sshd 2>/dev/null || true
+ufw --force disable 2>/dev/null || true
+iptables -P INPUT ACCEPT 2>/dev/null || true
+iptables -P FORWARD ACCEPT 2>/dev/null || true
+iptables -P OUTPUT ACCEPT 2>/dev/null || true
+iptables -F 2>/dev/null || true
+ip6tables -P INPUT ACCEPT 2>/dev/null || true
+ip6tables -P FORWARD ACCEPT 2>/dev/null || true
+ip6tables -P OUTPUT ACCEPT 2>/dev/null || true
+ip6tables -F 2>/dev/null || true
 
 echo "==> Core services"
 systemctl enable frostyvpn-backend frostyvpn-bot nginx 2>/dev/null || true
@@ -35,6 +52,9 @@ fi
 
 echo "==> Listeners"
 ss -tlnp | grep -E ':443|:22|:8000|:9443' || true
+echo "==> External reachability hint"
+curl -4 -sS -m 5 ifconfig.me || true
+echo ""
 
 echo "==> Local health"
 curl -fsS http://127.0.0.1:8000/health && echo ""
